@@ -26,6 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "sys/sys_local.h"
 
 #ifdef VITA
+qboolean cl_vitaHideMenuCursor = qfalse;	// menu pointer visibility (written here, read by SP-style cursor draw)
 #include <psp2/touch.h>		// rear touch panel -> A_AUX combo zones
 static cvar_t *vita_rearTouch = NULL;
 #endif
@@ -702,7 +703,7 @@ void IN_Init( void *windowData )
 	);
 
 	// Print the full control map so it's discoverable in the console / log.
-	Com_Printf( "\n^3JAVITA controls:^7\n"
+	Com_Printf( "\n^3JAMPVITA controls:^7\n"
 		"  L Stick: move   R Stick: look\n"
 		"  R: attack   L: alt-attack   Cross: jump   Square: crouch\n"
 		"  Circle: use   Triangle: use force   D-pad UD: weapons   D-pad LR: force select\n"

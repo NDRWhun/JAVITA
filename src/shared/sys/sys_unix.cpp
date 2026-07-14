@@ -455,7 +455,7 @@ char *Sys_Cwd( void )
 #ifdef JK2_MODE
 	Q_strncpyz( cwd, "ux0:data/JK2VITA", sizeof( cwd ) );
 #else
-	Q_strncpyz( cwd, "ux0:data/JAVITA", sizeof( cwd ) );
+	Q_strncpyz( cwd, "ux0:data/JAMPVITA", sizeof( cwd ) );
 #endif
 	return cwd;
 #else
@@ -502,7 +502,7 @@ char *Sys_DefaultHomePath(void)
 #ifdef JK2_MODE
 	Q_strncpyz( homePath, "ux0:data/JK2VITA", sizeof( homePath ) );
 #else
-	Q_strncpyz( homePath, "ux0:data/JAVITA", sizeof( homePath ) );
+	Q_strncpyz( homePath, "ux0:data/JAMPVITA", sizeof( homePath ) );
 #endif
 	return homePath;
 }

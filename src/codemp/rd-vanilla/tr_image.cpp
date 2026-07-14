@@ -24,7 +24,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // tr_image.c
 #include "tr_local.h"
 #include "../rd-common/tr_common.h"
+#ifndef VITA
 #include "glext.h"
+#endif
 
 #include <map>
 

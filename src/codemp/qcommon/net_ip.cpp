@@ -54,7 +54,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#ifndef VITA
 #include <sys/ioctl.h>
+#endif
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -75,7 +77,19 @@ typedef int SOCKET;
 #define INVALID_SOCKET                -1
 #define SOCKET_ERROR                        -1
 #define closesocket                                close
+#ifdef VITA
+// no ioctl on the Vita; FIONBIO maps to the sceNet non-blocking sockopt
+static int vita_ioctlsocket( int s, unsigned long cmd, unsigned long *argp ) {
+	int v = ( argp && *argp ) ? 1 : 0;
+	return setsockopt( s, SOL_SOCKET, SO_NONBLOCK, &v, sizeof( v ) );
+}
+#define ioctlsocket                                vita_ioctlsocket
+#ifndef FIONBIO
+#define FIONBIO 0
+#endif
+#else
 #define ioctlsocket                                ioctl
+#endif
 #define socketError                                errno
 
 #endif

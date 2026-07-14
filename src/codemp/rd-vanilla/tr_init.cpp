@@ -211,13 +211,14 @@ cvar_t	*broadsword_dircap=0;
 Ghoul2 Insert End
 */
 
-cvar_t *se_language;
+extern cvar_t *se_language;
 
 cvar_t *r_aviMotionJpegQuality;
 cvar_t *r_screenshotJpegQuality;
 
 cvar_t	*r_patchStitching;
 
+#ifndef VITA
 #if !defined(__APPLE__)
 PFNGLSTENCILOPSEPARATEPROC qglStencilOpSeparate;
 #endif
@@ -229,7 +230,9 @@ PFNGLMULTITEXCOORD2FARBPROC qglMultiTexCoord2fARB;
 PFNGLTEXIMAGE3DPROC qglTexImage3D;
 PFNGLTEXSUBIMAGE3DPROC qglTexSubImage3D;
 #endif
+#endif // !VITA
 
+#ifndef VITA
 PFNGLCOMBINERPARAMETERFVNVPROC qglCombinerParameterfvNV;
 PFNGLCOMBINERPARAMETERIVNVPROC qglCombinerParameterivNV;
 PFNGLCOMBINERPARAMETERFNVPROC qglCombinerParameterfNV;
@@ -267,6 +270,7 @@ PFNGLISPROGRAMARBPROC qglIsProgramARB;
 
 PFNGLLOCKARRAYSEXTPROC qglLockArraysEXT;
 PFNGLUNLOCKARRAYSEXTPROC qglUnlockArraysEXT;
+#endif // !VITA
 
 bool g_bTextureRectangleHack = false;
 
@@ -504,6 +508,10 @@ static void GLimp_InitExtensions( void )
 	Com_Printf ("...using GL_EXT_texture_edge_clamp\n" );
 
 	// GL_ARB_multitexture
+#ifdef VITA
+	qglGetIntegerv( GL_MAX_TEXTURE_UNITS_ARB, &glConfig.maxActiveTextures );
+	Com_Printf ("...using GL_ARB_multitexture\n" );
+#else
 	qglMultiTexCoord2fARB = NULL;
 	qglActiveTextureARB = NULL;
 	qglClientActiveTextureARB = NULL;
@@ -541,6 +549,7 @@ static void GLimp_InitExtensions( void )
 	{
 		Com_Printf ("...GL_ARB_multitexture not found\n" );
 	}
+#endif
 
 	// GL_EXT_compiled_vertex_array
 	qglLockArraysEXT = NULL;
@@ -732,7 +741,7 @@ static void GLimp_InitExtensions( void )
 		ri.Cvar_Set( "r_DynamicGlow","0" );
 	}
 
-#if !defined(__APPLE__)
+#if !defined(__APPLE__) && !defined(VITA)
 	qglStencilOpSeparate = (PFNGLSTENCILOPSEPARATEPROC)ri.GL_GetProcAddress("glStencilOpSeparate");
 	if ( qglStencilOpSeparate )
 	{

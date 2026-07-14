@@ -39,7 +39,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "Ratl/vector_vs.h"
 #include "Ratl/bits_vs.h"
 
+#ifndef VITA
 #include "glext.h"
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // Defines

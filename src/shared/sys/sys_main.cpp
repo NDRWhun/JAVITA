@@ -307,6 +307,10 @@ void Sys_UnloadDll( void *dllHandle )
 		return;
 	}
 
+#ifdef VITA
+	if ( dllHandle == (void *)1 )
+		return;	// static-module pseudo handle (Sys_LoadGameDll)
+#endif
 	Sys_UnloadLibrary(dllHandle);
 }
 
@@ -620,6 +624,12 @@ void *Sys_LoadSPGameDll( const char *name, GetGameAPIProc **GetGameAPI )
 
 void *Sys_LoadGameDll( const char *name, GetModuleAPIProc **moduleAPI )
 {
+#ifdef VITA
+	// no dlopen: modules are partially linked in with per-module GetModuleAPI aliases
+	extern GetModuleAPIProc *Sys_VitaStaticModuleAPI( const char *name );
+	*moduleAPI = Sys_VitaStaticModuleAPI( name );
+	return *moduleAPI ? (void *)1 : NULL;
+#endif
 	void	*libHandle = NULL;
 	char	filename[MAX_OSPATH];
 

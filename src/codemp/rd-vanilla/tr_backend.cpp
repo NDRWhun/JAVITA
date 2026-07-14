@@ -22,7 +22,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "tr_local.h"
+#ifndef VITA
 #include "glext.h"
+#endif
 #include "tr_WorldEffects.h"
 
 backEndData_t	*backEndData;
