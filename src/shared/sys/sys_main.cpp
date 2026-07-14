@@ -34,6 +34,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #ifdef VITA
 #include <psp2/apputil.h>
+#include <psp2/ctrl.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/appmgr.h>
 #include <psp2/kernel/processmgr.h>
@@ -811,6 +812,7 @@ int main ( int argc, char* argv[] )
 	char	commandLine[ MAX_STRING_CHARS ] = { 0 };
 
 #ifdef VITA
+	Sys_BootMark( "main" );
 	Sys_Vita_CheckConfigGate();
 #endif
 
@@ -843,6 +845,20 @@ int main ( int argc, char* argv[] )
 
 		Q_strcat( commandLine, sizeof( commandLine ), " " );
 	}
+
+#ifdef VITA
+	// safe mode: L held at launch -> single-threaded renderer, sync sound loads
+	{
+		SceCtrlData pad;
+		memset( &pad, 0, sizeof( pad ) );
+		sceCtrlPeekBufferPositive( 0, &pad, 1 );
+		if ( pad.buttons & SCE_CTRL_LTRIGGER ) {
+			Sys_BootMark( "safe mode" );
+			Q_strcat( commandLine, sizeof( commandLine ),
+				"+set r_renderThread 0 +set s_asyncLoad 0 " );
+		}
+	}
+#endif
 
 	Com_Init (commandLine);
 

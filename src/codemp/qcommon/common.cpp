@@ -1208,8 +1208,14 @@ void Com_Init( char *commandLine ) {
 
 		// Init network before filesystem
 		NET_Init();
+#ifdef VITA
+		Sys_BootMark( "net" );
+#endif
 
 		FS_InitFilesystem ();
+#ifdef VITA
+		Sys_BootMark( "fs" );
+#endif
 
 		Com_InitJournaling();
 
@@ -1338,6 +1344,9 @@ void Com_Init( char *commandLine ) {
 		Cvar_Set("ui_singlePlayerActive", "0");
 
 		com_fullyInitialized = qtrue;
+#ifdef VITA
+		Sys_BootMark( "com_init done" );
+#endif
 		Com_Printf ("--- Common Initialization Complete ---\n");
 	}
 	catch ( int code )

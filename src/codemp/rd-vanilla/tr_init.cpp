@@ -821,16 +821,25 @@ static void InitOpenGL( void )
 #ifdef VITA
 		if ( r_renderThread && r_renderThread->integer )
 		{
+			extern void Sys_BootMark( const char *s );
 			// bring the vitaGL/GXM context up on the render thread, which owns it
 			// from here on; see the semaphore protocol in tr_cmds.cpp
 			ri.WIN_InitSDLVideo();
+			Sys_BootMark( "gl: sdlvideo" );
 			R_StartRenderThread();
-			sceKernelWaitSema( rend_init_done, 1, NULL );	// vglInit ran on the render thread
+			SceUInt tmo = 8 * 1000 * 1000;
+			if ( sceKernelWaitSema( rend_init_done, 1, &tmo ) < 0 )	// vglInit ran on the render thread
+				Com_Error( ERR_FATAL, "render thread vglInit timeout" );
+			Sys_BootMark( "gl: vglinit done" );
 			window = ri.WIN_CreateWindow( &windowDesc, &glConfig );
+			Sys_BootMark( "gl: window" );
 			// hand off for the one-shot context init (clear-only first scene), wait it out
 			pendingCtxInit = qtrue;
 			sceKernelSignalSema( rend_mutex_in, 1 );
-			sceKernelWaitSema( rend_init_done, 1, NULL );
+			tmo = 8 * 1000 * 1000;
+			if ( sceKernelWaitSema( rend_init_done, 1, &tmo ) < 0 )
+				Com_Error( ERR_FATAL, "render thread ctx-init timeout" );
+			Sys_BootMark( "gl: ctx done" );
 
 			// GL query calls are read-only and safe from the main thread
 			glConfig.vendor_string = (const char *)qglGetString (GL_VENDOR);
@@ -874,7 +883,13 @@ static void InitOpenGL( void )
 
 		// set default state
 		GL_SetDefaultState();
+#ifdef VITA
+		{ extern void Sys_BootMark( const char *s ); Sys_BootMark( "gl: window(st)" ); }
+#endif
 		R_Splash();	//get something on screen asap
+#ifdef VITA
+		{ extern void Sys_BootMark( const char *s ); Sys_BootMark( "gl: splash done" ); }
+#endif
 		}
 	}
 	else

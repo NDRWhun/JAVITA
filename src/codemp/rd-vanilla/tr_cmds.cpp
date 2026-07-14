@@ -112,8 +112,11 @@ Render-thread semaphore protocol (all created at 0; R = render thread, M = main)
 extern "C" int sceGxmTransferFinish( void );	// GXM transfer-queue sync (SDK)
 
 // Render backend thread: owns the vitaGL/GXM context (vglInit fires here).
+extern void Sys_BootMark( const char *s );
 static int renderThread( SceSize argc, void *argv ) {
+	Sys_BootMark( "rt: vglinit" );
 	ri.WIN_LoadGL();
+	Sys_BootMark( "rt: vglinit done" );
 	sceKernelSignalSema( rend_init_done, 1 );
 
 	for ( ;; ) {
@@ -124,6 +127,7 @@ static int renderThread( SceSize argc, void *argv ) {
 		if ( pendingCtxInit ) {
 			// One-shot context init on this thread. SDL's current-window TLS was set on
 			// main; without MakeCurrent here every present from this thread no-ops.
+			Sys_BootMark( "rt: ctx start" );
 			ri.WIN_MakeCurrent();
 			GL_SetDefaultState();
 			// clear-only first scene: a draw before any completed scene GPU-faults
@@ -132,6 +136,7 @@ static int renderThread( SceSize argc, void *argv ) {
 			ri.WIN_Present( &window );
 			sceGxmTransferFinish();
 			qglFinish();
+			Sys_BootMark( "rt: ctx done" );
 			pendingCtxInit = qfalse;
 			sceKernelSignalSema( rend_init_done, 1 );	// release main from step-5 wait
 			sceKernelSignalSema( rend_mutex_out, 1 );	// the single frame-1 prime
@@ -604,6 +609,10 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	}
 	cmd->commandId = RC_SWAP_BUFFERS;
 
+#ifdef VITA
+	static qboolean s_frame1 = qfalse;
+	if ( !s_frame1 ) { s_frame1 = qtrue; Sys_BootMark( "frame1" ); }
+#endif
 	R_IssueRenderCommands( qtrue );
 
 	// use the other buffers next frame, because another CPU

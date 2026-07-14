@@ -26,6 +26,25 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <string.h>
 #include "sys/sys_public.h"
 
+#include <psp2/io/fcntl.h>
+#include <psp2/io/stat.h>
+
+// unbuffered boot-milestone trail; survives a hang + forced power-off
+void Sys_BootMark( const char *s )
+{
+	static int first = 1;
+	if ( first ) {
+		sceIoMkdir( "ux0:data/JAVITA", 0777 );
+	}
+	SceUID fd = sceIoOpen( "ux0:data/JAVITA/mpboot.log",
+		SCE_O_WRONLY | SCE_O_CREAT | ( first ? SCE_O_TRUNC : SCE_O_APPEND ), 0666 );
+	first = 0;
+	if ( fd < 0 ) return;
+	sceIoWrite( fd, s, strlen( s ) );
+	sceIoWrite( fd, "\n", 1 );
+	sceIoClose( fd );
+}
+
 extern "C" {
 GetModuleAPIProc GetModuleAPI_game;
 GetModuleAPIProc GetModuleAPI_cgame;
@@ -34,6 +53,7 @@ GetModuleAPIProc GetModuleAPI_ui;
 
 GetModuleAPIProc *Sys_VitaStaticModuleAPI( const char *name )
 {
+	Sys_BootMark( name );
 	if ( strstr( name, "cgame" ) )	return GetModuleAPI_cgame;
 	if ( strstr( name, "ui" ) )		return GetModuleAPI_ui;
 	if ( strstr( name, "game" ) )	return GetModuleAPI_game;	// jampgame

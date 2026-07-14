@@ -2432,6 +2432,7 @@ void CL_InitRef( void ) {
 	// renderer is statically linked; call its entry directly (decl above CL_InitRef)
 	GetRefAPI = GetRefAPI_static;
 	memset( &ri, 0, sizeof( ri ) );
+	Sys_BootMark( "ref" );
 #else
 	Com_sprintf( dllName, sizeof( dllName ), "%s_" ARCH_STRING DLL_EXT, cl_renderer->string );
 
