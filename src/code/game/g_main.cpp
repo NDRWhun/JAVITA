@@ -747,6 +747,9 @@ void InitGame(  const char *mapname, const char *spawntarget, int checkSum, cons
 
 	G_InitMemory();
 
+	// roff cache holds pool pointers G_InitMemory just freed; G_FreeRoffs had no callers
+	G_FreeRoffs();
+
 	// set some level globals
 	memset( &level, 0, sizeof( level ) );
 	level.time = levelTime;
@@ -2145,9 +2148,20 @@ void G_LoadSave_ReadMiscData()
 	ojk::SavedGameHelper saved_game(
 		::gi.saved_game);
 
+	int32_t locked = 0;
 	saved_game.read_chunk<int32_t>(
 		INT_ID('L', 'C', 'K', 'D'),
-		::player_locked);
+		locked);
+
+	// autosaves can fire mid-cutscene with the lock set; nothing clears it after load
+	if ( g_eSavedGameJustLoaded == eAUTO )
+	{
+		::player_locked = qfalse;
+	}
+	else
+	{
+		::player_locked = locked ? qtrue : qfalse;
+	}
 }
 
 
