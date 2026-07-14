@@ -1478,15 +1478,16 @@ void G2_RagGetAnimMatrix(CGhoul2Info &ghoul2, const int boneNum, mdxaBone_t &mat
 void G2_TransformBone (int child,CBoneCache &BC)
 {
 	SBoneCalc &TB=BC.mBones[child];
-	static mdxaBone_t		tbone[6];
+	// locals, not the original statics: bone eval runs on two cores (per-character jobs)
+	mdxaBone_t		tbone[6];
 // 	mdxaFrame_t		*aFrame=0;
 //	mdxaFrame_t		*bFrame=0;
 //	mdxaFrame_t		*aoldFrame=0;
 //	mdxaFrame_t		*boldFrame=0;
-	static mdxaSkel_t		*skel;
-	static mdxaSkelOffsets_t *offsets;
+	mdxaSkel_t		*skel;
+	mdxaSkelOffsets_t *offsets;
 	boneInfo_v		&boneList = *BC.rootBoneList;
-	static int				j, boneListIndex;
+	int				j, boneListIndex;
 	int				angleOverride = 0;
 
 #if DEBUG_G2_TIMING
@@ -1734,7 +1735,7 @@ void G2_TransformBone (int child,CBoneCache &BC)
 			// this is crazy, we are gonna drive the animation to ID while we are doing post mults to compensate.
 			Multiply_3x4Matrix(&temp,&firstPass, &skel->BasePoseMat);
 			float	matrixScale = VectorLength((float*)&temp);
-			static mdxaBone_t		toMatrix =
+			mdxaBone_t		toMatrix =
 			{
 				{
 					{ 1.0f, 0.0f, 0.0f, 0.0f },
@@ -3489,6 +3490,7 @@ struct g2SkinGroup_t {
 	CBoneCache         *cache;
 	CRenderableSurface *surfs[G2MT_MAX_SURFS_PER_CHAR];
 	int                 n;
+	mdxaBone_t         *snap;	// this character's snapshot slice; job fills it
 };
 
 // One arena per frontend buffer: backend skins frame X while frontend fills X+1.
@@ -3586,25 +3588,49 @@ static void G2_PreSkinSurface( const mdxmSurface_t *surface, const mdxaBone_t *s
 #undef PS_BONE
 }
 
-// --- pre-skin worker: splits the per-vertex math with the main thread (core 1) ---
-#define G2MT_MAX_JOBS 256
-typedef struct {
-	const mdxmSurface_t *surface;
-	const mdxaBone_t    *snap;
-	float               *out;
-} g2SkinJob_t;
-static g2SkinJob_t   s_g2Jobs[G2MT_MAX_JOBS];
-static int           s_g2JobCount = 0;
-static volatile int  s_g2JobNext = 0;		// shared take-index, atomic
+// --- anim worker (core 1): drains whole characters (bone eval + pre-skin) with core 0.
+// Safe per character: each job owns its CBoneCache; G2_TransformBone is statics-free now.
+static volatile int  s_g2JobNext = 0;		// shared take-index over s_g2Groups, atomic
 static SceUID        s_g2WorkSema = -1, s_g2DoneSema = -1;
 static SceUID        s_g2WorkerThid = -1;
+
+static void G2_RunCharJob( g2SkinGroup_t *g )
+{
+	if ( !g->snap ) return;	// snapshot arena overflow: surfaces drop this frame
+	CBoneCache *cache = g->cache;
+	const int numBones = (int)cache->mBones.size();
+	uint32_t seen[G2MT_MAX_BONES / 32] = { 0 };
+
+	// snapshot every referenced bone once (indexed by the global bone numbers the weights use)
+	for ( int s = 0; s < g->n; s++ )
+	{
+		mdxmSurface_t *surface = g->surfs[s]->surfaceData;
+		const int *refs = (const int *)( (byte *)surface + surface->ofsBoneReferences );
+		for ( int r = 0; r < surface->numBoneReferences; r++ )
+		{
+			const int b = refs[r];
+			if ( b < 0 || b >= numBones ) continue;
+			if ( seen[b >> 5] & ( 1u << ( b & 31 ) ) ) continue;
+			seen[b >> 5] |= 1u << ( b & 31 );
+			g->snap[b] = cache->EvalRender( b );
+		}
+	}
+
+	for ( int s = 0; s < g->n; s++ )
+	{
+		CRenderableSurface *rs = g->surfs[s];
+		if ( rs->preSkinned ) {
+			G2_PreSkinSurface( rs->surfaceData, g->snap, (float *)rs->preSkinned );
+		}
+	}
+}
 
 static void G2_DrainSkinJobs( void )
 {
 	for ( ;; ) {
 		const int i = __atomic_fetch_add( &s_g2JobNext, 1, __ATOMIC_SEQ_CST );
-		if ( i >= s_g2JobCount ) break;
-		G2_PreSkinSurface( s_g2Jobs[i].surface, s_g2Jobs[i].snap, s_g2Jobs[i].out );
+		if ( i >= s_g2NumGroups ) break;
+		G2_RunCharJob( &s_g2Groups[i] );
 	}
 }
 
@@ -3656,7 +3682,6 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		s_g2SkinArena[buf] = (byte*)malloc( G2_SKIN_ARENA_SIZE );	// best-effort; NULL -> pre-skin skipped
 	}
 	s_g2NumGroups = 0;
-	s_g2JobCount = 0;
 
 	// group SF_MDX surfaces by boneCache
 	for ( int i = 0; i < numDrawSurfs; i++ )
@@ -3686,65 +3711,35 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		g->surfs[ g->n++ ] = surf;
 	}
 
-	// snapshot each cache's referenced bones once, then stamp every surface of that
-	// character with the snapshot (indexed by the same global bone numbers the weights use)
+	// allocation pass: snapshot + pre-skin slices per character; the math runs in jobs
 	for ( int i = 0; i < s_g2NumGroups; i++ )
 	{
 		g2SkinGroup_t *g = &s_g2Groups[i];
-		CBoneCache *cache = g->cache;
-		const int numBones = (int)cache->mBones.size();
+		const int numBones = (int)g->cache->mBones.size();
 		const size_t need = (size_t)numBones * sizeof(mdxaBone_t);
 		if ( numBones > G2MT_MAX_BONES || s_g2SnapUsed[buf] + need > G2_SNAP_ARENA_SIZE ) {
-			continue;	// no snapshot -> this character's surfaces drop for one frame
+			g->snap = NULL;	// no snapshot -> this character's surfaces drop for one frame
+			continue;
 		}
-		mdxaBone_t *snap = (mdxaBone_t *)( s_g2SnapArena[buf] + s_g2SnapUsed[buf] );
+		g->snap = (mdxaBone_t *)( s_g2SnapArena[buf] + s_g2SnapUsed[buf] );
 		s_g2SnapUsed[buf] += need;
 
-		uint32_t seen[G2MT_MAX_BONES / 32] = { 0 };
-		for ( int s = 0; s < g->n; s++ )
-		{
-			mdxmSurface_t *surface = g->surfs[s]->surfaceData;
-			const int *refs = (const int *)( (byte *)surface + surface->ofsBoneReferences );
-			for ( int r = 0; r < surface->numBoneReferences; r++ )
-			{
-				const int b = refs[r];
-				if ( b < 0 || b >= numBones ) continue;
-				if ( seen[b >> 5] & ( 1u << ( b & 31 ) ) ) continue;
-				seen[b >> 5] |= 1u << ( b & 31 );
-				snap[b] = cache->EvalRender( b );
-			}
-		}
-		for ( int s = 0; s < g->n; s++ ) {
-			g->surfs[s]->boneMats = snap;
-		}
-
-		// queue each surface's pre-skin from the snapshot; arena overflow leaves
-		// preSkinned NULL -> that surface skins on the backend
 		for ( int s = 0; s < g->n; s++ )
 		{
 			CRenderableSurface *rs = g->surfs[s];
-			const mdxmSurface_t *surface = rs->surfaceData;
-			const size_t vneed = (size_t)surface->numVerts * 6 * sizeof(float);
+			rs->boneMats = g->snap;
+			const size_t vneed = (size_t)rs->surfaceData->numVerts * 6 * sizeof(float);
 			if ( !s_g2SkinArena[buf] || s_g2SkinUsed[buf] + vneed > G2_SKIN_ARENA_SIZE ) {
-				continue;
+				continue;	// preSkinned stays NULL -> backend skins from the snapshot
 			}
-			float *out = (float *)( s_g2SkinArena[buf] + s_g2SkinUsed[buf] );
+			rs->preSkinned = (float *)( s_g2SkinArena[buf] + s_g2SkinUsed[buf] );
 			s_g2SkinUsed[buf] += vneed;
-			rs->preSkinned = out;	// safe pre-math: joined below, before the frame hand-off
-			if ( s_g2JobCount < G2MT_MAX_JOBS ) {
-				s_g2Jobs[s_g2JobCount].surface = surface;
-				s_g2Jobs[s_g2JobCount].snap = snap;
-				s_g2Jobs[s_g2JobCount].out = out;
-				s_g2JobCount++;
-			} else {
-				G2_PreSkinSurface( surface, snap, out );
-			}
 		}
 	}
 
-	// drain the job queue on both cores; the join keeps the hand-off ordering intact
+	// drain whole characters on cores 0+1; the join keeps the hand-off ordering intact
 	s_g2JobNext = 0;
-	if ( s_g2JobCount >= 8 && G2_EnsureSkinWorker() ) {
+	if ( s_g2NumGroups >= 2 && G2_EnsureSkinWorker() ) {
 		sceKernelSignalSema( s_g2WorkSema, 1 );
 		G2_DrainSkinJobs();
 		sceKernelWaitSema( s_g2DoneSema, 1, NULL );
