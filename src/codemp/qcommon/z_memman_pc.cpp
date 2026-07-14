@@ -95,6 +95,123 @@ cvar_t	*com_validateZone;
 
 zone_t	TheZone = {};
 
+#ifdef VITA
+// Boot-reserved contiguous arena for the multi-MB transient decode workspaces;
+// the fragmented load-time heap can't provide those holes.
+#define ARENA_MAGIC			0x41524E41u		// 'ARNA' — in use
+#define ARENA_FREE_MAGIC	0x46524545u		// 'FREE'
+#define ARENA_RESERVE		(22 * 1024 * 1024)	// load peak: 16 MB decode + 4 MB mip scratch
+#define ARENA_THRESHOLD		(256 * 1024)		// only the genuinely large transient buffers divert
+#define ARENA_ALIGN			16
+#define ARENA_ROUND(n)		(((n) + (ARENA_ALIGN-1)) & ~(size_t)(ARENA_ALIGN-1))
+
+typedef struct arenaBlk_s
+{
+	unsigned int		magic;
+	unsigned int		size;		// rounded payload capacity, bytes
+	struct arenaBlk_s	*next;		// address-ordered list
+	struct arenaBlk_s	*prev;
+} arenaBlk_t;						// 16 bytes on ILP32
+
+static byte			*s_arenaBase = NULL;
+static byte			*s_arenaEnd  = NULL;
+static volatile unsigned char s_arenaLock = 0;	// free-list spinlock
+
+static inline void Arena_Lock(void)   { while (__atomic_test_and_set(&s_arenaLock, __ATOMIC_ACQUIRE)) {} }
+static inline void Arena_Unlock(void) { __atomic_clear(&s_arenaLock, __ATOMIC_RELEASE); }
+
+static void Arena_Init(void)
+{
+	byte *raw = (byte *) malloc( ARENA_RESERVE + ARENA_ALIGN );	// heap pristine at boot -> contiguous
+	if (!raw)
+	{
+		s_arenaBase = s_arenaEnd = NULL;	// graceful: every Arena_Owns()==false, engine behaves as before
+		return;
+	}
+	s_arenaBase = (byte *)(((size_t)raw + (ARENA_ALIGN-1)) & ~(size_t)(ARENA_ALIGN-1));
+	s_arenaEnd  = s_arenaBase + ARENA_RESERVE;
+
+	arenaBlk_t *head = (arenaBlk_t *) s_arenaBase;
+	head->magic = ARENA_FREE_MAGIC;
+	head->size  = ARENA_RESERVE - sizeof(arenaBlk_t);
+	head->next  = head->prev = NULL;
+}
+
+static inline qboolean Arena_Owns(const void *p)
+{
+	return (qboolean)( s_arenaBase && (const byte *)p >= s_arenaBase && (const byte *)p < s_arenaEnd );
+}
+
+// tags that may divert here must never be swept with Z_TagFree (arena blocks aren't in the zone list)
+static inline qboolean Arena_TempTag(memtag_t t)
+{
+	return (qboolean)( t == TAG_TEMP_WORKSPACE || t == TAG_TEMP_PNG || t == TAG_TEMP_IMAGE );
+}
+
+static void *Arena_Alloc(int iSize)
+{
+	if (!s_arenaBase) return NULL;
+	size_t need = ARENA_ROUND((size_t)iSize);
+
+	Arena_Lock();
+	for (arenaBlk_t *b = (arenaBlk_t *) s_arenaBase; b; b = b->next)
+	{
+		if (b->magic == ARENA_FREE_MAGIC && b->size >= need)
+		{
+			size_t leftover = b->size - need;
+			if (leftover >= sizeof(arenaBlk_t) + ARENA_ALIGN)	// split off a trailing free block
+			{
+				arenaBlk_t *n = (arenaBlk_t *)((byte *)b + sizeof(arenaBlk_t) + need);
+				n->magic = ARENA_FREE_MAGIC;
+				n->size  = (unsigned int)(leftover - sizeof(arenaBlk_t));
+				n->next  = b->next;
+				n->prev  = b;
+				if (b->next) b->next->prev = n;
+				b->next  = n;
+				b->size  = (unsigned int)need;
+			}
+			b->magic = ARENA_MAGIC;
+			Arena_Unlock();
+			return (void *)(b + 1);
+		}
+	}
+	Arena_Unlock();
+	return NULL;		// no fit -> caller falls through to the general heap
+}
+
+static void Arena_FreeBlock(void *p)
+{
+	arenaBlk_t *b = (arenaBlk_t *)p - 1;
+
+	Arena_Lock();
+	if (b->magic != ARENA_MAGIC)
+	{
+		Arena_Unlock();
+		Com_Error(ERR_FATAL, "Arena_FreeBlock(): bad or double-freed arena block");
+		return;
+	}
+	b->magic = ARENA_FREE_MAGIC;
+
+	if (b->next && b->next->magic == ARENA_FREE_MAGIC)		// coalesce forward
+	{
+		arenaBlk_t *n = b->next;
+		b->size += (unsigned int)(sizeof(arenaBlk_t) + n->size);
+		b->next  = n->next;
+		if (n->next) n->next->prev = b;
+	}
+	if (b->prev && b->prev->magic == ARENA_FREE_MAGIC)		// coalesce backward
+	{
+		arenaBlk_t *pb = b->prev;
+		pb->size += (unsigned int)(sizeof(arenaBlk_t) + b->size);
+		pb->next  = b->next;
+		if (b->next) b->next->prev = pb;
+	}
+	Arena_Unlock();
+}
+
+static inline int Arena_BlockSize(void *p) { return (int)(((arenaBlk_t *)p - 1)->size); }
+#endif	// VITA
+
 
 // Scans through the linked list of mallocs and makes sure no data has been overwritten
 
@@ -180,6 +297,21 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 		zoneHeader_t *pMemory = (zoneHeader_t *) &gZeroMalloc;
 		return &pMemory[1];
 	}
+
+#ifdef VITA
+	// large transient workspaces divert to the arena; falls through if full or oversized
+	if (Arena_TempTag(eTag) && iSize >= ARENA_THRESHOLD)
+	{
+		void *pvArena = Arena_Alloc(iSize);
+		if (pvArena)
+		{
+			if (bZeroit) {
+				memset(pvArena, 0, iSize);
+			}
+			return pvArena;
+		}
+	}
+#endif
 
 	// Add in tracking info
 	//
@@ -341,6 +473,13 @@ void openjk_minizip_free(void *to_free)
 //
 void Z_MorphMallocTag( void *pvAddress, memtag_t eDesiredTag )
 {
+#ifdef VITA
+	if (Arena_Owns(pvAddress))
+	{
+		return;		// arena blocks carry no tag and aren't in the tag stats
+	}
+#endif
+
 	zoneHeader_t *pMemory = ((zoneHeader_t *)pvAddress) - 1;
 
 	if (pMemory->iMagic != ZONE_MAGIC)
@@ -411,6 +550,13 @@ static void Zone_FreeBlock(zoneHeader_t *pMemory)
 //
 int Z_Size(void *pvAddress)
 {
+#ifdef VITA
+	if (Arena_Owns(pvAddress))
+	{
+		return Arena_BlockSize(pvAddress);
+	}
+#endif
+
 	zoneHeader_t *pMemory = ((zoneHeader_t *)pvAddress) - 1;
 
 	if (pMemory->eTag == TAG_STATIC)
@@ -437,6 +583,14 @@ void Z_Free(void *pvAddress)
 		//Com_Error(ERR_FATAL, "Z_Free(): NULL arg");
 		return;
 	}
+
+#ifdef VITA
+	if (Arena_Owns(pvAddress))
+	{
+		Arena_FreeBlock(pvAddress);	// before the header checks: arena blocks have no zone header
+		return;
+	}
+#endif
 
 	zoneHeader_t *pMemory = ((zoneHeader_t *)pvAddress) - 1;
 
@@ -607,6 +761,10 @@ void Com_InitZoneMemory( void )
 {
 	memset(&TheZone, 0, sizeof(TheZone));
 	TheZone.Header.iMagic = ZONE_MAGIC;
+
+#ifdef VITA
+	Arena_Init();	// grab the transient workspace block now, while the heap is pristine and contiguous
+#endif
 }
 
 void Com_InitZoneMemoryVars( void ) {

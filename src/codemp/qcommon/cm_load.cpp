@@ -762,10 +762,15 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	{
 		Z_Free(newBuff);
 	}
+#ifdef VITA
+	// never hold the BSP disk image through the renderer's load peak; tr_bsp re-reads from disk
+	else if (gpvCachedMapDiskImage)
+#else
 	else if (Sys_LowPhysicalMemory()
 		|| com_dedicated->integer
 //		|| we're on a big-endian machine
 		)
+#endif
 	{
 		Z_Free(	gpvCachedMapDiskImage );
 				gpvCachedMapDiskImage = NULL;

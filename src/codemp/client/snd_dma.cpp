@@ -451,7 +451,12 @@ void S_Init( void ) {
 	s_debugdynamic      = Cvar_Get( "s_debugdynamic",      "0",       CVAR_CHEAT );
 	s_doppler           = Cvar_Get( "s_doppler",           "1",       CVAR_ARCHIVE_ND );
 	s_initsound         = Cvar_Get( "s_initsound",         "1",       CVAR_ARCHIVE );
+#ifdef VITA
+	// source audio is 22 kHz: 1:1 copy instead of 2x upsample, half the PCM footprint
+	s_khz               = Cvar_Get( "s_khz",               "22",      CVAR_ARCHIVE | CVAR_LATCH );
+#else
 	s_khz               = Cvar_Get( "s_khz",               "44",      CVAR_ARCHIVE | CVAR_LATCH );
+#endif
 	s_language          = Cvar_Get( "s_language",          "english", CVAR_ARCHIVE | CVAR_NORESTART, "Sound language" );
 	s_lip_threshold_1   = Cvar_Get( "s_threshold1",        "0.5",     0 );
 	s_lip_threshold_2   = Cvar_Get( "s_threshold2",        "4.0",     0 );
@@ -5062,7 +5067,12 @@ byte *SND_malloc(int iSize, sfx_t *sfx)
 //
 void SND_setup()
 {
+#ifdef VITA
+	// keeps a match's sounds resident; an evicted sound re-decodes on the main thread mid-game
+	s_soundpoolmegs = Cvar_Get("s_soundpoolmegs", "32", CVAR_ARCHIVE);
+#else
 	s_soundpoolmegs = Cvar_Get("s_soundpoolmegs", "25", CVAR_ARCHIVE);
+#endif
 	if (Sys_LowPhysicalMemory() )
 	{
 		Cvar_Set("s_soundpoolmegs", "0");

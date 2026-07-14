@@ -194,7 +194,12 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 				time( &aclock );
 				newtime = localtime( &aclock );
 
-				logfile = FS_FOpenFileWrite( "qconsole.log" );
+	#ifdef VITA
+			// SP shares this homepath; a distinct name keeps the debug trails apart
+			logfile = FS_FOpenFileWrite( "qconsole_mp.log" );
+#else
+			logfile = FS_FOpenFileWrite( "qconsole.log" );
+#endif
 
 				if ( logfile ) {
 					Com_Printf( "logfile opened on %s\n", asctime( newtime ) );
@@ -283,6 +288,13 @@ void NORETURN QDECL Com_Error( int code, const char *fmt, ... ) {
 		Sys_Error( "recursive error after: %s", com_errorMessage );
 	}
 	com_errorEntered = qtrue;
+
+#ifdef VITA
+	// logfile is buffered; get what we have onto the card before teardown
+	if ( logfile ) {
+		FS_ForceFlush( logfile );
+	}
+#endif
 
 	// when we are running automated scripts, make sure we
 	// know if anything failed
@@ -1244,6 +1256,9 @@ void Com_Init( char *commandLine ) {
 		// init commands and vars
 		//
 		com_logfile = Cvar_Get ("logfile", "0", CVAR_TEMP );
+#ifdef VITA
+		Cvar_Set( "logfile", "1" );	// buffered log; Com_Error flushes it
+#endif
 
 		com_timescale = Cvar_Get ("timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO );
 		com_fixedtime = Cvar_Get ("fixedtime", "0", CVAR_CHEAT);

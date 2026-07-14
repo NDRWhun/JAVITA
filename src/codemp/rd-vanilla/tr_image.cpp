@@ -385,7 +385,12 @@ static void R_MipMap2( unsigned *in, int inWidth, int inHeight ) {
 
 	outWidth = inWidth >> 1;
 	outHeight = inHeight >> 1;
+#ifdef VITA
+	// workspace tag so the multi-MB scratch is served from the contiguous arena
+	temp = (unsigned int *)Z_Malloc( outWidth * outHeight * 4, TAG_TEMP_WORKSPACE, qfalse );
+#else
 	temp = (unsigned int *)Hunk_AllocateTempMemory( outWidth * outHeight * 4 );
+#endif
 
 	inWidthMask = inWidth - 1;
 	inHeightMask = inHeight - 1;
@@ -420,7 +425,11 @@ static void R_MipMap2( unsigned *in, int inWidth, int inHeight ) {
 	}
 
 	memcpy( in, temp, outWidth * outHeight * 4 );
+#ifdef VITA
+	Z_Free( temp );
+#else
 	Hunk_FreeTempMemory( temp );
+#endif
 }
 
 /*
