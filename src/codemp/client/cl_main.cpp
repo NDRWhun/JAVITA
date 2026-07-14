@@ -2384,6 +2384,12 @@ void CL_StartHunkUsers( void ) {
 		cls.uiStarted = qtrue;
 		CL_InitUI();
 	}
+#ifdef VITA
+	{
+		static qboolean once = qfalse;
+		if ( !once ) { once = qtrue; Sys_BootMark( "hunkusers done" ); }
+	}
+#endif
 }
 
 /*

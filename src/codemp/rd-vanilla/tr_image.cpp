@@ -1402,6 +1402,16 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 	}
 
 #ifdef VITA
+	// liveness tick for the boot trail: first-run DXT bakes look like a hang otherwise
+	{
+		extern void Sys_BootMark( const char *s );
+		static int s_imgCount = 0;
+		if ( !( ++s_imgCount & 31 ) ) {
+			char tick[32];
+			Com_sprintf( tick, sizeof(tick), "img %d", s_imgCount );
+			Sys_BootMark( tick );
+		}
+	}
 	// DXT cache hit: build straight from the cached mip chain, no decode/encode/picmip
 	if ( r_texCacheCompressed && r_texCacheCompressed->integer && allowTC && name[0] != '$' && name[0] != '*' ) {
 		image = R_CreateImageFromDxtCache( name, mipmap, allowPicmip, allowTC, glWrapClampMode );
