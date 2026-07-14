@@ -2414,6 +2414,10 @@ static IHeapAllocator *GetG2VertSpaceServer( void ) {
 
 #define DEFAULT_RENDER_LIBRARY "rd-vanilla"
 
+#ifdef VITA
+extern "C" refexport_t* QDECL GetRefAPI_static( int apiVersion, refimport_t *rimp );
+#endif
+
 void CL_InitRef( void ) {
 	static refimport_t ri;
 	refexport_t	*ret;
@@ -2424,6 +2428,11 @@ void CL_InitRef( void ) {
 
 	cl_renderer = Cvar_Get( "cl_renderer", DEFAULT_RENDER_LIBRARY, CVAR_ARCHIVE|CVAR_LATCH, "Which renderer library to use" );
 
+#ifdef VITA
+	// renderer is statically linked; call its entry directly (decl above CL_InitRef)
+	GetRefAPI = GetRefAPI_static;
+	memset( &ri, 0, sizeof( ri ) );
+#else
 	Com_sprintf( dllName, sizeof( dllName ), "%s_" ARCH_STRING DLL_EXT, cl_renderer->string );
 
 	if( !(rendererLib = Sys_LoadDll( dllName, qfalse )) && strcmp( cl_renderer->string, cl_renderer->resetString ) )
@@ -2444,6 +2453,7 @@ void CL_InitRef( void ) {
 	GetRefAPI = (GetRefAPI_t)Sys_LoadFunction( rendererLib, "GetRefAPI" );
 	if ( !GetRefAPI )
 		Com_Error( ERR_FATAL, "Can't load symbol GetRefAPI: '%s'", Sys_LibraryError() );
+#endif
 
 	//set up the import table
 	ri.Printf = CL_RefPrintf;

@@ -1977,6 +1977,14 @@ GetRefAPI
 @@@@@@@@@@@@@@@@@@@@@
 */
 extern "C" {
+#ifdef VITA
+// static-link alias: CL_InitRef has a local named GetRefAPI shadowing the function
+Q_EXPORT refexport_t* QDECL GetRefAPI( int apiVersion, refimport_t *rimp );
+refexport_t* QDECL GetRefAPI_static( int apiVersion, refimport_t *rimp ) {
+	return GetRefAPI( apiVersion, rimp );
+}
+#endif
+
 Q_EXPORT refexport_t* QDECL GetRefAPI( int apiVersion, refimport_t *rimp ) {
 	static refexport_t re;
 
