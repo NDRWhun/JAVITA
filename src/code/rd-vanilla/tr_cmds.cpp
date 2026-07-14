@@ -222,11 +222,6 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 		sceKernelSignalSema( rend_mutex_in, 1 );
 		activeBackEnd = !activeBackEnd;
 		tr.smpFrame = activeBackEnd;
-		if ( r_mtLockstep->integer == 1 ) {
-			// full lockstep: wait out the frame we just handed off
-			sceKernelWaitSema( rend_mutex_out, 1, NULL );
-			sceKernelSignalSema( rend_mutex_out, 1 );
-		}
 		backEndData = backEndDataPtr[activeBackEnd];
 		set_tessPtr( &tessArray[activeBackEnd] );
 		return;
@@ -529,13 +524,6 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	if ( !tr.registered ) {
 		return;
 	}
-#ifdef VITA
-	if ( r_renderThread && r_renderThread->integer && r_mtLockstep && r_mtLockstep->integer == 2 ) {
-		// serialize scene build against the backend; game/cgame still overlap
-		sceKernelWaitSema( rend_mutex_out, 1, NULL );
-		sceKernelSignalSema( rend_mutex_out, 1 );
-	}
-#endif
 	glState.finishCalled = qfalse;
 
 	tr.frameCount++;

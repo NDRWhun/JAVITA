@@ -114,7 +114,6 @@ cvar_t	*r_logFile;
 cvar_t	*r_primitives;
 #ifdef VITA
 cvar_t	*r_renderThread;
-cvar_t	*r_mtLockstep;
 cvar_t	*r_worldVBO;
 cvar_t	*r_dropTexturesOnLoad;
 #endif
@@ -274,9 +273,8 @@ void RE_SetLightStyle(int style, int color);
 void R_Splash()
 {
 #ifdef VITA
-	// rt1-startup triage: r_splash 0 skips the textured splash (clear only), isolating
-	// the first texture upload+draw from the rest of the render-thread context init.
-	if ( !ri.Cvar_Get( "r_splash", "1", 0 )->integer )
+	// rt1: clear-only first scene; a draw before any completed scene GPU-faults
+	if ( r_renderThread && r_renderThread->integer )
 	{
 		qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 		qglClear( GL_COLOR_BUFFER_BIT );
@@ -292,32 +290,6 @@ void R_Splash()
 		qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 		qglClear( GL_COLOR_BUFFER_BIT );
 	}
-#ifdef VITA
-	else if ( r_renderThread && r_renderThread->integer )
-	{
-		// runs on the render thread during context init; the immediate-mode path
-		// below faults here, so draw through vertex arrays and sync the async
-		// texture upload before the first-ever scene samples it
-		sceGxmTransferFinish();
-		qglFinish();
-
-		extern void	RB_SetGL2D (void);
-		RB_SetGL2D();
-		GL_Bind( pImage );
-		GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
-		static const float splashXYZ[4][4] = { { 0, 0, 0, 1 }, { 640, 0, 0, 1 }, { 640, 480, 0, 1 }, { 0, 480, 0, 1 } };
-		static const float splashST[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
-		static const unsigned int splashCol[4] = { 0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu };
-		static const glIndex_t splashIdx[6] = { 0, 1, 2, 0, 2, 3 };
-		qglEnableClientState( GL_VERTEX_ARRAY );
-		qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
-		qglEnableClientState( GL_COLOR_ARRAY );
-		qglVertexPointer( 3, GL_FLOAT, 16, splashXYZ );
-		qglTexCoordPointer( 2, GL_FLOAT, 0, splashST );
-		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, splashCol );
-		qglDrawElements( GL_TRIANGLES, 6, GL_INDEX_TYPE, splashIdx );
-	}
-#endif
 	else
 	{
 		extern void	RB_SetGL2D (void);
@@ -1788,8 +1760,6 @@ void R_Register( void )
 #ifdef VITA
 	// 1 = backend on a dedicated render thread (default), 0 = inline on main. CVAR_LATCH.
 	r_renderThread = ri.Cvar_Get( "r_renderThread", "1", CVAR_ARCHIVE | CVAR_LATCH );
-	// 0 = free-run (default), 1 = full lockstep, 2 = serialize scene build; free-run races only stat counters.
-	r_mtLockstep   = ri.Cvar_Get( "r_mtLockstep", "0", CVAR_ARCHIVE_ND );
 	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ARCHIVE );	// takes effect on next map load
 	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
 	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.

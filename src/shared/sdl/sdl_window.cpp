@@ -323,8 +323,7 @@ extern "C" void vglSetParamBufferSize( uint32_t size );
 extern "C" void vglSetCircularPoolSize( uint32_t size );
 extern "C" void vglUseExtraMem( uint8_t usage );
 
-// pre-vglInit config; the 224 MB heap leaves ~93 MB for the GPU pools, so the
-// heap-spill fallback stays ON until the heap is rebalanced (JK2 disables it)
+// pre-vglInit config; the 224 MB heap leaves ~93 MB for the GPU pools
 static void WIN_SetupVglMem( const char *where )
 {
 	SceKernelFreeMemorySizeInfo fmi;
@@ -337,6 +336,7 @@ static void WIN_SetupVglMem( const char *where )
 	vglSetParamBufferSize( 16 * 1024 * 1024 );
 	// default 32 MB circular pool spills into slow fallback allocations
 	vglSetCircularPoolSize( 48 * 1024 * 1024 );
+	vglUseExtraMem( 0 );	// no heap spill: GXM blocks in the newlib arena corrupt it (JK2 config)
 }
 #endif
 
