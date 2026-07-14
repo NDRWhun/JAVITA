@@ -227,33 +227,25 @@ void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampl
 
 	samp = &paintbuffer[ bufferOffset ];
 
-
-	while ( count & 3 ) {
-		data = *sfx;
-		samp->left += (data * leftvol)>>8;
-		samp->right += (data * rightvol)>>8;
-
-		sfx++;
-		samp++;
-		count--;
+	i = 0;
+#if defined(__ARM_NEON)
+	// 4 samples/iter, mono src -> stereo paintbuffer; identical to S_PaintChannelFrom16
+	for ( ; i+4 <= count; i += 4 )
+	{
+		int32x4_t d   = vmovl_s16( vld1_s16( sfx + i ) );
+		int32x4_t l   = vshrq_n_s32( vmulq_n_s32( d, leftvol ),  8 );
+		int32x4_t r   = vshrq_n_s32( vmulq_n_s32( d, rightvol ), 8 );
+		int32x4x2_t cur = vld2q_s32( (int32_t*)&samp[i] );
+		cur.val[0] = vaddq_s32( cur.val[0], l );
+		cur.val[1] = vaddq_s32( cur.val[1], r );
+		vst2q_s32( (int32_t*)&samp[i], cur );
 	}
-
-	for ( i=0 ; i<count ; i += 4 ) {
+#endif
+	for ( ; i<count ; i++ )
+	{
 		data = sfx[i];
-		samp[i].left += (data * leftvol)>>8;
+		samp[i].left  += (data * leftvol )>>8;
 		samp[i].right += (data * rightvol)>>8;
-
-		data = sfx[i+1];
-		samp[i+1].left += (data * leftvol)>>8;
-		samp[i+1].right += (data * rightvol)>>8;
-
-		data = sfx[i+2];
-		samp[i+2].left += (data * leftvol)>>8;
-		samp[i+2].right += (data * rightvol)>>8;
-
-		data = sfx[i+3];
-		samp[i+3].left += (data * leftvol)>>8;
-		samp[i+3].right += (data * rightvol)>>8;
 	}
 }
 

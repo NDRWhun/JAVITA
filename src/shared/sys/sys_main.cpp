@@ -34,6 +34,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #ifdef VITA
 #include <psp2/apputil.h>
+#include <psp2/kernel/clib.h>
 #include <psp2/appmgr.h>
 #include <psp2/kernel/processmgr.h>
 #include <cstring>
@@ -137,6 +138,9 @@ char *Sys_ConsoleInput(void)
 	return CON_Input( );
 }
 
+#ifdef VITA
+#endif
+
 void Sys_Print( const char *msg ) {
 	// TTimo - prefix for text that shows up in console but not in notify
 	// backported from RTCW
@@ -148,6 +152,10 @@ void Sys_Print( const char *msg ) {
 	}
 	ConsoleLogAppend( msg );
 	CON_Print( msg );
+#ifdef VITA
+	// mirrored to the kernel debug printf so catlog can stream it over the network
+	sceClibPrintf( "%s", msg );
+#endif
 }
 
 /*

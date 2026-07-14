@@ -763,7 +763,8 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 
 		if ( header.version != BSP_VERSION )
 		{
-			Z_Free(	gpvCachedMapDiskImage);
+			if (gpvCachedMapDiskImage)
+				Z_Free(	gpvCachedMapDiskImage);
 					gpvCachedMapDiskImage = NULL;
 
 			Com_Error (ERR_DROP, "CM_LoadMap: %s has wrong version number (%i should be %i)"
@@ -793,9 +794,15 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 		// actually we DON'T now <g>, if we've got enough ram to keep it for the renderer's disk-load...
 		//
 		extern qboolean Sys_LowPhysicalMemory();
-		if (Sys_LowPhysicalMemory() //|| com_dedicated->integer	// no need to check for dedicated in single-player codebase
-			)
-		{
+		qboolean bDropCachedDiskImage = Sys_LowPhysicalMemory();	//|| com_dedicated->integer	// no need to check for dedicated in single-player codebase
+#ifdef VITA
+		// Don't hold the server's BSP disk-image copy through the renderer's world load.
+		// On the ~120 MB heap that ~10 MB overlaps the load peak; RE_LoadWorldMap re-reads
+		// the file from disk when the cache is NULL (tr_bsp.cpp), so this only costs a fread.
+		bDropCachedDiskImage = qtrue;
+#endif
+		if ( bDropCachedDiskImage && &cm == &cmg )
+		{	// main map only: sub-BSPs never own the disk image
 			Z_Free(	gpvCachedMapDiskImage );
 					gpvCachedMapDiskImage = NULL;
 		}
