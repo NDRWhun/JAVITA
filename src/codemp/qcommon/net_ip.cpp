@@ -216,7 +216,9 @@ Sys_StringToSockaddr
 */
 static qboolean Sys_StringToSockaddr( const char *s, struct sockaddr_in *sadr )
 {
+#ifndef VITA
 	struct hostent	*h;
+#endif
 
 	memset( sadr, 0, sizeof( *sadr ) );
 
@@ -229,9 +231,33 @@ static qboolean Sys_StringToSockaddr( const char *s, struct sockaddr_in *sadr )
 	}
 	else
 	{
+#ifdef VITA
+		// newlib's resolver blocks the main thread indefinitely; fail fast with no
+		// connection, otherwise resolve via sceNetResolver with a bounded timeout
+		extern void Sys_BootMark( const char *s );
+		Sys_BootMark( va( "dns: %s", s ) );
+		int state = 0;
+		if ( sceNetCtlInetGetState( &state ) < 0 || state != SCE_NETCTL_STATE_CONNECTED ) {
+			Sys_BootMark( "dns: no connection" );
+			return qfalse;
+		}
+		static int s_rid = -1;
+		if ( s_rid < 0 )
+			s_rid = sceNetResolverCreate( "jamp_dns", NULL, 0 );
+		if ( s_rid < 0 )
+			return qfalse;
+		SceNetInAddr ia;
+		if ( sceNetResolverStartNtoa( s_rid, s, &ia, 2 * 1000 * 1000, 1, 0 ) < 0 ) {
+			Sys_BootMark( "dns: failed" );
+			return qfalse;
+		}
+		Sys_BootMark( "dns: ok" );
+		sadr->sin_addr.s_addr = ia.s_addr;
+#else
 		if( ( h = gethostbyname( s ) ) == 0 )
 			return qfalse;
 		sadr->sin_addr.s_addr = *(uint32_t *)h->h_addr_list[0];
+#endif
 	}
 
 	return qtrue;
