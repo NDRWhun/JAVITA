@@ -2096,6 +2096,13 @@ void RE_LoadWorldMap_Actual( const char *name, world_t &worldData, int index )
 
 		// only set tr.world now that we know the entire level has loaded properly
 		tr.world = &worldData;
+
+#ifdef VITA
+		// (re)build the static world VBO; park the render thread first since
+		// the GL upload runs here on the main thread
+		R_IssuePendingRenderCommands();
+		R_BuildWorldVBO( &worldData );
+#endif
 	}
 
 	if (ri.CM_GetCachedMapDiskImage())

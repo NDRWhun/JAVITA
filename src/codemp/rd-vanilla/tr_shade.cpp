@@ -33,7 +33,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
   This file deals with applying shaders to surface data in the tess struct.
 */
 
+#ifdef VITA
+shaderCommands_t	tessArray[BACKEND_DATA_NUM];
+#else
 shaderCommands_t	tess;
+#endif
 static qboolean	setArraysOnce;
 
 color4ub_t	styleColors[MAX_LIGHT_STYLES];

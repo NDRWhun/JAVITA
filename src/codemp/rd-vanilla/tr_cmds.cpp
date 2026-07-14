@@ -81,6 +81,104 @@ void R_PerformanceCounters( void ) {
 	memset( &backEnd.pc, 0, sizeof( backEnd.pc ) );
 }
 
+#ifdef VITA
+extern window_t window;	// tr_init.cpp
+int activeBackEnd = 0;
+int rendBackEnd = 0;
+SceUID rend_mutex_in = -1;
+SceUID rend_mutex_out = -1;
+// init handshakes only; reusing rend_mutex_out would eat the frame-1 prime token
+SceUID rend_init_done = -1;
+// One-shot: set by main after WIN_CreateWindow (ordered by the handshake); the render
+// thread's first wake runs the context init instead of a frame.
+volatile qboolean pendingCtxInit = qfalse;
+static SceUID rend_thid = -1;
+static volatile qboolean rend_should_exit = qfalse;
+static volatile int rend_handedBuffer = 0;	// index of the frame being handed off; written before Signal(in), read after Wait(in)
+
+/*
+Render-thread semaphore protocol (all created at 0; R = render thread, M = main):
+
+  init:  M starts R -> R: WIN_LoadGL (vglInit on R), Signal(init) -> M: create window,
+         pendingCtxInit=true, Signal(in) -> R: ctx init + clear-only first scene,
+         Signal(init), Signal(out) <- this one unconsumed token is the frame-1 credit.
+  frame: M: Wait(out), Signal(in), flip activeBackEnd/tessPtr -> R: Wait(in),
+         RB_ExecuteRenderCommands, Signal(out), flip rendBackEnd.
+
+  Every frame ends [in=0 out=1] with R parked on Wait(in), same as post-init, so
+  no wakeup is ever lost. The drain (R_IssuePendingRenderCommands) does
+  Wait(out)+Signal(out): blocks until R parks, leaves the token balance intact.
+*/
+extern "C" int sceGxmTransferFinish( void );	// GXM transfer-queue sync (SDK)
+
+// Render backend thread: owns the vitaGL/GXM context (vglInit fires here).
+static int renderThread( SceSize argc, void *argv ) {
+	ri.WIN_LoadGL();
+	sceKernelSignalSema( rend_init_done, 1 );
+
+	for ( ;; ) {
+		sceKernelWaitSema( rend_mutex_in, 1, NULL );
+		if ( rend_should_exit ) {
+			break;
+		}
+		if ( pendingCtxInit ) {
+			// One-shot context init on this thread. SDL's current-window TLS was set on
+			// main; without MakeCurrent here every present from this thread no-ops.
+			ri.WIN_MakeCurrent();
+			GL_SetDefaultState();
+			// clear-only first scene: a draw before any completed scene GPU-faults
+			qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+			qglClear( GL_COLOR_BUFFER_BIT );
+			ri.WIN_Present( &window );
+			sceGxmTransferFinish();
+			qglFinish();
+			pendingCtxInit = qfalse;
+			sceKernelSignalSema( rend_init_done, 1 );	// release main from step-5 wait
+			sceKernelSignalSema( rend_mutex_out, 1 );	// the single frame-1 prime
+			continue;
+		}
+		rendBackEnd = rend_handedBuffer;	// adopt the handed index; mispairing is structurally impossible
+		set_tessPtr( &tessArray[rendBackEnd] );
+		RB_ExecuteRenderCommands( backEndDataPtr[rendBackEnd]->commands.cmds );
+		sceKernelSignalSema( rend_mutex_out, 1 );
+	}
+	return sceKernelExitDeleteThread( 0 );
+}
+
+void R_StartRenderThread( void ) {
+	if ( rend_thid >= 0 || !r_renderThread || !r_renderThread->integer ) {
+		return;
+	}
+	rend_should_exit = qfalse;
+	pendingCtxInit   = qfalse;
+	rend_init_done = sceKernelCreateSema( "rend_init", 0, 0, 2, NULL );
+	rend_mutex_in  = sceKernelCreateSema( "rend_in",   0, 0, 1, NULL );
+	rend_mutex_out = sceKernelCreateSema( "rend_out",  0, 0, 1, NULL );
+	// main/frontend on core 0, backend owns core 2 (core 3 is system-reserved)
+	rend_thid = sceKernelCreateThread( "Renderer Thread", renderThread, 0x10000100, 0x40000, 0, SCE_KERNEL_CPU_MASK_USER_2, NULL );
+	sceKernelStartThread( rend_thid, 0, NULL );
+}
+
+qboolean R_OnRenderThread( void ) {
+	return (qboolean)( rend_thid >= 0 && sceKernelGetThreadId() == rend_thid );
+}
+
+// vid_restart teardown: wake the render thread out of its Wait(in) with the exit
+// flag set, join it, delete the semaphores so a later R_Init re-creates the thread.
+void R_StopRenderThread( void ) {
+	if ( rend_thid < 0 ) {
+		return;
+	}
+	rend_should_exit = qtrue;
+	sceKernelSignalSema( rend_mutex_in, 1 );
+	sceKernelWaitThreadEnd( rend_thid, NULL, NULL );
+	if ( rend_init_done >= 0 ) { sceKernelDeleteSema( rend_init_done ); rend_init_done = -1; }
+	if ( rend_mutex_in  >= 0 ) { sceKernelDeleteSema( rend_mutex_in );  rend_mutex_in  = -1; }
+	if ( rend_mutex_out >= 0 ) { sceKernelDeleteSema( rend_mutex_out ); rend_mutex_out = -1; }
+	rend_thid = -1;
+}
+#endif
+
 /*
 ====================
 R_IssueRenderCommands
@@ -97,6 +195,23 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 
 	// clear it out, in case this is a sync and not a buffer flip
 	cmdList->used = 0;
+
+#ifdef VITA
+	if ( r_renderThread && r_renderThread->integer ) {
+		// hand the frame to the render thread, flip the frontend to the other buffer
+		sceKernelWaitSema( rend_mutex_out, 1, NULL );
+		// backend parked between Wait(out) and Signal(in): its counters are stable here
+		if ( runPerformanceCounters ) {
+			R_PerformanceCounters();
+		}
+		rend_handedBuffer = activeBackEnd;
+		sceKernelSignalSema( rend_mutex_in, 1 );
+		activeBackEnd = !activeBackEnd;
+		backEndData = backEndDataPtr[activeBackEnd];
+		set_tessPtr( &tessArray[activeBackEnd] );
+		return;
+	}
+#endif
 
 	// at this point, the back end thread is idle, so it is ok
 	// to look at it's performance counters
@@ -124,6 +239,16 @@ void R_IssuePendingRenderCommands( void ) {
 		return;
 	}
 	R_IssueRenderCommands( qfalse );
+
+#ifdef VITA
+	// The hand-off above is asynchronous; wait until the backend is parked so
+	// main-thread GL can't race the GXM context. Wait(out)+Signal(out) blocks
+	// until "done" and leaves the token balance unchanged.
+	if ( r_renderThread && r_renderThread->integer ) {
+		sceKernelWaitSema( rend_mutex_out, 1, NULL );
+		sceKernelSignalSema( rend_mutex_out, 1 );
+	}
+#endif
 }
 
 /*
@@ -160,7 +285,7 @@ R_GetCommandBuffer
 make sure there is enough command space
 ============
 */
-static void *R_GetCommandBuffer( int bytes ) {
+void *R_GetCommandBuffer( int bytes ) {
 	return R_GetCommandBufferReserved( bytes, PAD( sizeof( swapBuffersCommand_t ), sizeof(void *) ) );
 }
 
@@ -185,6 +310,14 @@ void	R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	cmd->refdef = tr.refdef;
 	cmd->viewParms = tr.viewParms;
+
+#ifdef VITA
+	// Render-thread mode: snapshot this view's Ghoul2 bone matrices NOW, on the
+	// frontend, while the bone caches still hold this frame's skeletons.
+	if ( r_renderThread && r_renderThread->integer ) {
+		RB_PrepGhoulSkinMT( drawSurfs, numDrawSurfs );
+	}
+#endif
 }
 
 

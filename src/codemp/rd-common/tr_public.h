@@ -325,6 +325,13 @@ typedef struct refimport_s {
 
 	// window handling
 	window_t		(*WIN_Init)                         ( const windowDesc_t *desc, glconfig_t *glConfig );
+#ifdef VITA
+	// WIN_Init split for the render thread: vglInit must run on the thread that owns the GXM context
+	void			(*WIN_InitSDLVideo)					( void );
+	void			(*WIN_LoadGL)						( void );
+	window_t		(*WIN_CreateWindow)					( const windowDesc_t *desc, glconfig_t *glConfig );
+	void			(*WIN_MakeCurrent)					( void );
+#endif
 	void			(*WIN_SetGamma)						( glconfig_t *glConfig, byte red[256], byte green[256], byte blue[256] );
 	void			(*WIN_Present)						( window_t *window );
 	void            (*WIN_Shutdown)                     ( void );

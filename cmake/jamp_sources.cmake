@@ -131,6 +131,7 @@ set(JAMP_ENGINE_SOURCES
     src/codemp/rd-vanilla/tr_curve.cpp
     src/codemp/rd-vanilla/tr_decals.cpp
     src/codemp/rd-vanilla/tr_ghoul2.cpp
+    src/codemp/rd-vanilla/tr_worldvbo.cpp
     src/codemp/rd-vanilla/tr_image.cpp
     src/codemp/rd-vanilla/tr_init.cpp
     src/codemp/rd-vanilla/tr_light.cpp

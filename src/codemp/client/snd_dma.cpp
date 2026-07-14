@@ -437,6 +437,164 @@ void S_SoundInfo_f(void) {
 	Com_Printf("----------------------\n" );
 }
 
+#ifdef VITA
+// ===========================================================================
+// async sound loading: a worker reads the file bytes off the main thread (the
+// SD I/O is the hitch); the main thread decodes+finalizes in S_AsyncLoad_Poll.
+// Behind s_asyncLoad; on any failure it falls back to the synchronous path.
+// ===========================================================================
+#include <psp2/kernel/threadmgr.h>
+
+#define ASYNC_SND_QUEUE	64	// ring size
+#define ASYNC_SND_CAP	56	// max outstanding so neither ring can overflow
+
+typedef struct {
+	sfx_t		*sfx;
+	char		 sLoadName[MAX_QPATH];
+	byte		*data;
+	int			 size;
+	qboolean	 ok;
+} asyncSndJob_t;
+
+static cvar_t		*s_asyncLoad;
+static SceUID		 s_asyncThread   = -1;
+static SceUID		 s_asyncMutex    = -1;	// guards both rings
+static SceUID		 s_asyncWakeSema = -1;	// counts queued requests
+static volatile int	 s_asyncQuit     = 0;
+static int			 s_asyncOutstanding = 0;	// main-thread only
+
+static sfx_t		*s_asyncReq[ASYNC_SND_QUEUE];	// requests: sfx only
+static int			 s_asyncReqHead = 0, s_asyncReqTail = 0;
+static asyncSndJob_t s_asyncDone[ASYNC_SND_QUEUE];	// completions: read bytes
+static int			 s_asyncDoneHead = 0, s_asyncDoneTail = 0;
+
+static qboolean AsyncQ_Full( int head, int tail )  { return (((head + 1) % ASYNC_SND_QUEUE) == tail) ? qtrue : qfalse; }
+static qboolean AsyncQ_Empty( int head, int tail ) { return (head == tail) ? qtrue : qfalse; }
+
+// worker: pop a request, read its bytes into malloc, push the completion.
+static int S_AsyncLoad_Worker( SceSize argSize, void *argp )
+{
+	(void)argSize; (void)argp;
+	while ( 1 ) {
+		sceKernelWaitSema( s_asyncWakeSema, 1, NULL );
+		if ( s_asyncQuit ) break;
+
+		sfx_t *sfx = NULL;
+		sceKernelLockMutex( s_asyncMutex, 1, NULL );
+		if ( !AsyncQ_Empty( s_asyncReqHead, s_asyncReqTail ) ) {
+			sfx = s_asyncReq[s_asyncReqTail];
+			s_asyncReqTail = (s_asyncReqTail + 1) % ASYNC_SND_QUEUE;
+		}
+		sceKernelUnlockMutex( s_asyncMutex, 1 );
+		if ( !sfx ) continue;
+
+		asyncSndJob_t job;
+		job.sfx  = sfx;
+		job.data = NULL;
+		job.size = 0;
+		job.ok   = S_LoadSound_ReadFile( sfx, job.sLoadName, sizeof(job.sLoadName), &job.data, &job.size, qtrue );
+
+		sceKernelLockMutex( s_asyncMutex, 1, NULL );
+		s_asyncDone[s_asyncDoneHead] = job;	// CAP guarantees room
+		s_asyncDoneHead = (s_asyncDoneHead + 1) % ASYNC_SND_QUEUE;
+		sceKernelUnlockMutex( s_asyncMutex, 1 );
+	}
+	return sceKernelExitDeleteThread( 0 );
+}
+
+static void S_AsyncLoad_Shutdown( void )
+{
+	if ( s_asyncThread >= 0 ) {
+		s_asyncQuit = 1;
+		if ( s_asyncWakeSema >= 0 ) sceKernelSignalSema( s_asyncWakeSema, 1 );
+		sceKernelWaitThreadEnd( s_asyncThread, NULL, NULL );
+		s_asyncThread = -1;
+	}
+	// free reads that never got finalized
+	for ( int i = s_asyncDoneTail; i != s_asyncDoneHead; i = (i + 1) % ASYNC_SND_QUEUE ) {
+		if ( s_asyncDone[i].ok && s_asyncDone[i].data ) free( s_asyncDone[i].data );
+	}
+	// clear the in-flight flag on every sfx so it can be re-requested after a restart
+	for ( int i = 0; i < s_numSfx; i++ ) s_knownSfx[i].bAsyncLoading = qfalse;
+
+	s_asyncReqHead = s_asyncReqTail = 0;
+	s_asyncDoneHead = s_asyncDoneTail = 0;
+	s_asyncOutstanding = 0;
+	if ( s_asyncWakeSema >= 0 ) { sceKernelDeleteSema( s_asyncWakeSema ); s_asyncWakeSema = -1; }
+	if ( s_asyncMutex    >= 0 ) { sceKernelDeleteMutex( s_asyncMutex );   s_asyncMutex    = -1; }
+	s_asyncQuit = 0;
+}
+
+static void S_AsyncLoad_Init( void )
+{
+	if ( s_asyncThread >= 0 ) return;
+	s_asyncReqHead = s_asyncReqTail = 0;
+	s_asyncDoneHead = s_asyncDoneTail = 0;
+	s_asyncOutstanding = 0;
+	s_asyncQuit = 0;
+	s_asyncMutex    = sceKernelCreateMutex( "snd_async_mtx", 0, 0, NULL );
+	s_asyncWakeSema = sceKernelCreateSema( "snd_async_sema", 0, 0, ASYNC_SND_QUEUE, NULL );
+	s_asyncThread   = sceKernelCreateThread( "snd_async", S_AsyncLoad_Worker, 0x10000110, 0x10000, 0, 0, NULL );
+	if ( s_asyncMutex < 0 || s_asyncWakeSema < 0 || s_asyncThread < 0 ) {
+		S_AsyncLoad_Shutdown();	// partial init -> sync fallback
+		return;
+	}
+	sceKernelStartThread( s_asyncThread, 0, NULL );
+}
+
+// enqueue sfx for the worker. qtrue = handled (skip playing this instance);
+// qfalse = caller should load synchronously (async off / full / unavailable).
+static qboolean S_AsyncLoad_Enqueue( sfx_t *sfx )
+{
+	if ( !s_asyncLoad || !s_asyncLoad->integer || s_asyncThread < 0 )
+		return qfalse;
+	if ( sfx->bAsyncLoading )
+		return qtrue;	// already in flight
+	if ( s_asyncOutstanding >= ASYNC_SND_CAP )
+		return qfalse;
+
+	qboolean queued = qfalse;
+	sceKernelLockMutex( s_asyncMutex, 1, NULL );
+	if ( !AsyncQ_Full( s_asyncReqHead, s_asyncReqTail ) ) {
+		s_asyncReq[s_asyncReqHead] = sfx;
+		s_asyncReqHead = (s_asyncReqHead + 1) % ASYNC_SND_QUEUE;
+		sfx->bAsyncLoading = qtrue;
+		queued = qtrue;
+	}
+	sceKernelUnlockMutex( s_asyncMutex, 1 );
+
+	if ( !queued )
+		return qfalse;
+	s_asyncOutstanding++;
+	sceKernelSignalSema( s_asyncWakeSema, 1 );
+	return qtrue;
+}
+
+// main thread: finalize a few completed reads per frame (spreads residual decode).
+static void S_AsyncLoad_Poll( void )
+{
+	if ( s_asyncMutex < 0 ) return;
+	int budget = 2;
+	while ( budget-- > 0 ) {
+		asyncSndJob_t job;
+		sceKernelLockMutex( s_asyncMutex, 1, NULL );
+		if ( AsyncQ_Empty( s_asyncDoneHead, s_asyncDoneTail ) ) {
+			sceKernelUnlockMutex( s_asyncMutex, 1 );
+			break;
+		}
+		job = s_asyncDone[s_asyncDoneTail];
+		s_asyncDoneTail = (s_asyncDoneTail + 1) % ASYNC_SND_QUEUE;
+		sceKernelUnlockMutex( s_asyncMutex, 1 );
+
+		if ( !job.ok || !S_LoadSound_Finish( job.sfx, job.sLoadName, job.data, job.size, qtrue ) )
+			job.sfx->bDefaultSound = qtrue;
+		job.sfx->bInMemory     = qtrue;
+		job.sfx->bAsyncLoading = qfalse;
+		s_asyncOutstanding--;
+	}
+}
+#endif // VITA
+
 /*
 ================
 S_Init
@@ -458,6 +616,9 @@ void S_Init( void ) {
 	s_khz               = Cvar_Get( "s_khz",               "44",      CVAR_ARCHIVE | CVAR_LATCH );
 #endif
 	s_language          = Cvar_Get( "s_language",          "english", CVAR_ARCHIVE | CVAR_NORESTART, "Sound language" );
+#ifdef VITA
+	s_asyncLoad         = Cvar_Get( "s_asyncLoad",          "1",       CVAR_ARCHIVE_ND );
+#endif
 	s_lip_threshold_1   = Cvar_Get( "s_threshold1",        "0.5",     0 );
 	s_lip_threshold_2   = Cvar_Get( "s_threshold2",        "4.0",     0 );
 	s_lip_threshold_3   = Cvar_Get( "s_threshold3",        "7.0",     0 );
@@ -641,6 +802,10 @@ void S_Init( void ) {
 	Com_Printf("\n--- ambient sound initialization ---\n");
 
 	AS_Init();
+
+#ifdef VITA
+	if ( s_soundStarted ) S_AsyncLoad_Init();
+#endif
 }
 
 // only called from snd_restart. QA request...
@@ -671,6 +836,10 @@ void S_Shutdown( void )
 	if ( !s_soundStarted ) {
 		return;
 	}
+
+#ifdef VITA
+	S_AsyncLoad_Shutdown();	// stop the worker before the sfx structs are freed
+#endif
 
 	S_FreeAllSFXMem();
 	S_UnCacheDynamicMusic();
@@ -1455,6 +1624,9 @@ void S_StartAmbientSound( const vec3_t origin, int entityNum, unsigned char volu
 
 	sfx = &s_knownSfx[ sfxHandle ];
 	if (sfx->bInMemory == qfalse){
+#ifdef VITA
+		if ( S_AsyncLoad_Enqueue(sfx) ) return;	// loading off-thread; re-requested next use
+#endif
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
@@ -1563,6 +1735,9 @@ void S_StartSound(const vec3_t origin, int entityNum, int entchannel, sfxHandle_
 
 	sfx = &s_knownSfx[ sfxHandle ];
 	if (sfx->bInMemory == qfalse){
+#ifdef VITA
+		if ( S_AsyncLoad_Enqueue(sfx) ) return;	// loading off-thread; re-requested next use
+#endif
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
@@ -1942,6 +2117,9 @@ void S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocit
 
 	sfx = &s_knownSfx[ sfxHandle ];
 	if (sfx->bInMemory == qfalse) {
+#ifdef VITA
+		if ( S_AsyncLoad_Enqueue(sfx) ) return;	// loading off-thread; re-requested next use
+#endif
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
@@ -2009,6 +2187,9 @@ void S_AddAmbientLoopingSound( const vec3_t origin, unsigned char volume, sfxHan
 
 	sfx = &s_knownSfx[ sfxHandle ];
 	if (sfx->bInMemory == qfalse){
+#ifdef VITA
+		if ( S_AsyncLoad_Enqueue(sfx) ) return;	// loading off-thread; re-requested next use
+#endif
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
@@ -2752,6 +2933,10 @@ void S_Update( void ) {
 	if ( !s_soundStarted || s_soundMuted ) {
 		return;
 	}
+
+#ifdef VITA
+	S_AsyncLoad_Poll();	// finalize completed off-thread reads
+#endif
 
 	//
 	// debugging output

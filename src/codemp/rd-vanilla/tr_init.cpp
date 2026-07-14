@@ -116,6 +116,16 @@ cvar_t	*r_ignoreGLErrors;
 cvar_t	*r_logFile;
 
 cvar_t	*r_primitives;
+#ifdef VITA
+cvar_t	*r_renderThread;
+cvar_t	*r_worldVBO;
+cvar_t	*r_dropTexturesOnLoad;
+cvar_t	*r_texCacheCompressed;
+cvar_t	*r_dxtFast;
+cvar_t	*r_distanceCull;
+cvar_t	*r_forceFog;
+cvar_t	*r_forceFogColor;
+#endif
 cvar_t	*r_texturebits;
 cvar_t	*r_texturebitslm;
 
@@ -808,6 +818,38 @@ static void InitOpenGL( void )
 		memset(&glConfig, 0, sizeof(glConfig));
 		memset(&glConfigExt, 0, sizeof(glConfigExt));
 
+#ifdef VITA
+		if ( r_renderThread && r_renderThread->integer )
+		{
+			// bring the vitaGL/GXM context up on the render thread, which owns it
+			// from here on; see the semaphore protocol in tr_cmds.cpp
+			ri.WIN_InitSDLVideo();
+			R_StartRenderThread();
+			sceKernelWaitSema( rend_init_done, 1, NULL );	// vglInit ran on the render thread
+			window = ri.WIN_CreateWindow( &windowDesc, &glConfig );
+			// hand off for the one-shot context init (clear-only first scene), wait it out
+			pendingCtxInit = qtrue;
+			sceKernelSignalSema( rend_mutex_in, 1 );
+			sceKernelWaitSema( rend_init_done, 1, NULL );
+
+			// GL query calls are read-only and safe from the main thread
+			glConfig.vendor_string = (const char *)qglGetString (GL_VENDOR);
+			glConfig.renderer_string = (const char *)qglGetString (GL_RENDERER);
+			glConfig.version_string = (const char *)qglGetString (GL_VERSION);
+			glConfig.extensions_string = (const char *)qglGetString (GL_EXTENSIONS);
+
+			glConfigExt.originalExtensionString = glConfig.extensions_string;
+			glConfig.extensions_string = TruncateGLExtensionsString(glConfigExt.originalExtensionString, 128);
+
+			qglGetIntegerv( GL_MAX_TEXTURE_SIZE, &glConfig.maxTextureSize );
+			glConfig.maxTextureSize = Q_max(0, glConfig.maxTextureSize);
+
+			GLimp_InitExtensions( );
+			// GL_SetDefaultState ran on the render thread in the one-shot init above
+		}
+		else
+#endif
+		{
 		window = ri.WIN_Init(&windowDesc, &glConfig);
 
 		Com_Printf( "GL_RENDERER: %s\n", (char *)qglGetString (GL_RENDERER) );
@@ -833,6 +875,7 @@ static void InitOpenGL( void )
 		// set default state
 		GL_SetDefaultState();
 		R_Splash();	//get something on screen asap
+		}
 	}
 	else
 	{
@@ -916,6 +959,22 @@ byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, int *pa
 	byte *buffer, *bufstart;
 	int padwidth, linelen;
 	GLint packAlign;
+
+#ifdef VITA
+	// glReadPixels must run on the GXM-owning thread: marshal and drain
+	if ( r_renderThread && r_renderThread->integer && !R_OnRenderThread() ) {
+		byte *result = NULL;
+		screenshotMTReq_t req = { x, y, width, height, offset, padlen, &result };
+		screenshotMTCommand_t *cmd = (screenshotMTCommand_t *)R_GetCommandBuffer( sizeof( *cmd ) );
+		if ( !cmd ) {
+			return (byte *)Hunk_AllocateTempMemory( 1 );	// dropped command; caller frees
+		}
+		cmd->commandId = RC_SCREENSHOT_MT;
+		cmd->req = &req;
+		R_IssuePendingRenderCommands();
+		return result;
+	}
+#endif
 
 	qglGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
 
@@ -1643,6 +1702,20 @@ void R_Register( void )
 	ri.Cvar_CheckRange( r_primitives, MIN_PRIMITIVES, MAX_PRIMITIVES, qtrue );
 #ifdef VITA
 	ri.Cvar_Set( "r_primitives", "2" );	// no compiled vertex arrays; auto would pick the per-vertex glArrayElement path
+	// 1 = backend on a dedicated render thread (default), 0 = inline on main
+	r_renderThread       = ri.Cvar_Get( "r_renderThread",       "1", CVAR_ARCHIVE | CVAR_LATCH, "" );
+	r_worldVBO           = ri.Cvar_Get( "r_worldVBO",           "0", CVAR_ARCHIVE, "" );	// takes effect on next map load
+	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
+	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
+	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE, "" );
+	// DXT compression + the ux0 mip-chain cache; drives r_ext_compress_textures
+	r_texCacheCompressed = ri.Cvar_Get( "r_texCacheCompressed", "1", CVAR_ARCHIVE_ND | CVAR_LATCH, "" );
+	r_dxtFast            = ri.Cvar_Get( "r_dxtFast",            "1", CVAR_ARCHIVE_ND, "" );
+	if ( r_texCacheCompressed->integer )
+		ri.Cvar_Set( "r_ext_compress_textures", "1" );
+	r_distanceCull       = ri.Cvar_Get( "r_distanceCull",       "5000", CVAR_ARCHIVE_ND, "" );	// render-distance cap, 0 = off
+	r_forceFog           = ri.Cvar_Get( "r_forceFog",           "0", CVAR_ARCHIVE_ND, "" );	// fog end distance hiding the cull pop
+	r_forceFogColor      = ri.Cvar_Get( "r_forceFogColor", "0.55 0.6 0.7", CVAR_ARCHIVE_ND, "" );
 #endif
 	r_ambientScale						= ri.Cvar_Get( "r_ambientScale",					"0.6",						CVAR_CHEAT, "" );
 	r_directedScale						= ri.Cvar_Get( "r_directedScale",					"1",						CVAR_CHEAT, "" );
@@ -1756,7 +1829,13 @@ void R_Init( void ) {
 	// clear all our internal state
 	memset( &tr, 0, sizeof( tr ) );
 	memset( &backEnd, 0, sizeof( backEnd ) );
+#ifdef VITA
+	memset( &tessArray[0], 0, sizeof( tessArray[0] ) );
+	memset( &tessArray[1], 0, sizeof( tessArray[1] ) );
+	set_tessPtr( &tessArray[0] );
+#else
 	memset( &tess, 0, sizeof( tess ) );
+#endif
 
 //	Swap_Init();
 
@@ -1800,10 +1879,29 @@ void R_Init( void ) {
 	max_polys = Q_min( r_maxpolys->integer, DEFAULT_MAX_POLYS );
 	max_polyverts = Q_min( r_maxpolyverts->integer, DEFAULT_MAX_POLYVERTS );
 
+#ifdef VITA
+	// second command buffer only when the render thread is on; when off, both
+	// slots share one buffer so the default path costs no extra memory
+	{
+		const int slots = ( r_renderThread && r_renderThread->integer ) ? 2 : 1;
+		for ( int slot = 0; slot < slots; slot++ ) {
+			ptr = (byte *)Hunk_Alloc( sizeof( *backEndData ) + sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts, h_low);
+			backEndDataPtr[slot] = (backEndData_t *) ptr;
+			backEndDataPtr[slot]->polys = (srfPoly_t *) ((char *) ptr + sizeof( *backEndData ));
+			backEndDataPtr[slot]->polyVerts = (polyVert_t *) ((char *) ptr + sizeof( *backEndData ) + sizeof(srfPoly_t) * max_polys);
+		}
+		if ( slots == 1 ) {
+			backEndDataPtr[1] = backEndDataPtr[0];
+		}
+		activeBackEnd = 0;
+		backEndData = backEndDataPtr[0];
+	}
+#else
 	ptr = (byte *)Hunk_Alloc( sizeof( *backEndData ) + sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts, h_low);
 	backEndData = (backEndData_t *) ptr;
 	backEndData->polys = (srfPoly_t *) ((char *) ptr + sizeof( *backEndData ));
 	backEndData->polyVerts = (polyVert_t *) ((char *) ptr + sizeof( *backEndData ) + sizeof(srfPoly_t) * max_polys);
+#endif
 
 	R_InitNextFrame();
 
@@ -1849,6 +1947,18 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 
 	for ( size_t i = 0; i < numCommands; i++ )
 		ri.Cmd_RemoveCommand( commands[i].cmd );
+
+#ifdef VITA
+	// park the render thread before any teardown GL below
+	if ( tr.registered && r_renderThread && r_renderThread->integer ) {
+		R_IssuePendingRenderCommands();
+		R_FreeGhoulSkinArena();	// released during load; re-malloc'd next frame
+	}
+	// every shutdown (map change too): the hunk the VBO keys point into is about to clear
+	if ( tr.registered ) {
+		R_FreeWorldVBO();
+	}
+#endif
 
 	if ( r_DynamicGlow && r_DynamicGlow->integer )
 	{
@@ -1899,8 +2009,22 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 	R_ShutdownFonts();
 	if ( tr.registered ) {
 		R_IssuePendingRenderCommands();
+#ifdef VITA
+		// map change: drop old-map textures now, not at the new map's first frame
+		if ( !destroyWindow && r_dropTexturesOnLoad && r_dropTexturesOnLoad->integer )
+		{
+			R_DeleteTextures();
+		}
+#endif
 		if (destroyWindow)
 		{
+#ifdef VITA
+			// vid_restart: stop + join the GXM-owning thread so the remaining
+			// teardown GL runs single-threaded
+			if ( r_renderThread && r_renderThread->integer ) {
+				R_StopRenderThread();
+			}
+#endif
 			R_DeleteTextures();		// only do this for vid_restart now, not during things like map load
 
 			if ( restarting )

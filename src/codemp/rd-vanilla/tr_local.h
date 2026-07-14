@@ -29,6 +29,32 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "ghoul2/ghoul2_shared.h" //rwwRMG - added
 #include "qgl.h"
 
+#ifdef VITA
+#include <psp2/kernel/threadmgr.h>
+#define BACKEND_DATA_NUM 2
+extern int activeBackEnd;		// frontend's double-buffer slot
+extern int rendBackEnd;			// render thread's double-buffer slot
+extern SceUID rend_mutex_in;
+extern SceUID rend_mutex_out;
+extern SceUID rend_init_done;	// init-only handshake (vglInit-done, ctx-init-done)
+extern volatile qboolean pendingCtxInit;	// one-shot: run ctx init on render thread's first wake
+extern cvar_t *r_renderThread;
+extern cvar_t *r_worldVBO;		// bake eligible static world surfaces into one VBO
+extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not first frame
+void R_StartRenderThread( void );
+void R_StopRenderThread( void );
+// tess is thread-local: frontend and render backend each pick their own
+// tessArray slot via the ARM user-RW TLS register
+static inline unsigned int vita_get_tls_reg( void ) {
+	unsigned int v;
+	__asm__ __volatile__( "mrc p15, 0, %0, c13, c0, 3" : "=r" (v) );
+	return v;
+}
+#define get_tls_addr() ( vita_get_tls_reg() - 1980 )
+#define set_tessPtr(x) ( *(uintptr_t *)get_tls_addr() = (uintptr_t)(x) )
+#define tessPtr ( (shaderCommands_t *)( *(uintptr_t *)get_tls_addr() ) )
+#endif
+
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
 typedef unsigned int glIndex_t;
 
@@ -945,6 +971,11 @@ typedef struct backEndCounters_s {
 	int		c_flareTests;
 	int		c_flareRenders;
 
+#ifdef VITA
+	int		c_wvboSurfaces;	// world surfaces drawn from the static VBO
+	int		c_wvboDraws;	// draw calls those merged into
+#endif
+
 	int		msec;			// total msec for backend run
 } backEndCounters_t;
 
@@ -1134,6 +1165,14 @@ extern cvar_t	*r_texturebits;			// number of desired texture bits
 										// 32 = use 32-bit textures
 										// all else = error
 extern cvar_t	*r_texturebitslm;		// number of desired lightmap texture bits
+
+#ifdef VITA
+extern cvar_t	*r_texCacheCompressed;	// DXT compression + ux0 mip-chain cache
+extern cvar_t	*r_dxtFast;				// DXT encode quality (1 = fast/STB_DXT_NORMAL, 0 = high)
+extern cvar_t	*r_distanceCull;		// render-distance cap, clamps the map's distanceCull (0 = off)
+extern cvar_t	*r_forceFog;			// forced global fog END distance in units (0 = off)
+extern cvar_t	*r_forceFogColor;		// forced fog colour "r g b"
+#endif
 
 extern cvar_t	*r_measureOverdraw;		// enables stencil buffer overdraw measurement
 
@@ -1508,7 +1547,12 @@ struct shaderCommands_s
 #else
 	typedef struct shaderCommands_s  shaderCommands_t;
 #endif
+#ifdef VITA
+extern shaderCommands_t tessArray[BACKEND_DATA_NUM];
+#define tess (*tessPtr)
+#else
 extern	shaderCommands_t	tess;
+#endif
 
 extern	color4ub_t	styleColors[MAX_LIGHT_STYLES];
 
@@ -1663,6 +1707,10 @@ public:
 #endif
 	CBoneCache 		*boneCache;
 	mdxmSurface_t	*surfaceData;	// pointer to surface data loaded into file - only used by client renderer DO NOT USE IN GAME SIDE - if there is a vid restart this will be out of wack on the game
+#ifdef VITA
+	const mdxaBone_t *boneMats;		// frontend bone snapshot (render-thread mode); NULL single-threaded
+	const float		*preSkinned;	// frontend pre-skinned xyz+normal (6 floats/vert); NULL -> backend skins
+#endif
 #ifdef _G2_GORE
 	float			*alternateTex;		// alternate texture coordinates.
 	void			*goreChain;
@@ -1695,7 +1743,12 @@ CRenderableSurface():
 #else
 	surfaceData(0)
 #endif
-	{}
+	{
+#ifdef VITA
+		boneMats = 0;
+		preSkinned = 0;
+#endif
+	}
 
 #ifdef _G2_GORE
 	void Init()
@@ -1705,12 +1758,29 @@ CRenderableSurface():
 		surfaceData=0;
 		alternateTex=0;
 		goreChain=0;
+#ifdef VITA
+		boneMats=0;
+		preSkinned=0;
+#endif
 	}
 #endif
 };
 
 void R_AddGhoulSurfaces( trRefEntity_t *ent );
 void RB_SurfaceGhoul( CRenderableSurface *surface );
+#ifdef VITA
+// frontend bone-matrix snapshot + optional pre-skin (render-thread mode; tr_ghoul2.cpp)
+void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs );
+void R_ResetGhoulSkinArena( void );
+void R_FreeGhoulSkinArena( void );
+// static world VBO (tr_worldvbo.cpp)
+void R_BuildWorldVBO( world_t *world );
+void R_FreeWorldVBO( void );
+qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlighted, int entityNum );
+void RB_EndWorldVBO( void );
+qboolean R_OnRenderThread( void );
+void *R_GetCommandBuffer( int bytes );
+#endif
 /*
 Ghoul2 Insert End
 */
@@ -1847,7 +1917,34 @@ typedef enum {
 	RC_WORLD_EFFECTS,
 	RC_AUTO_MAP,
 	RC_VIDEOFRAME
+#ifdef VITA
+	,RC_CINEMATIC			// staged RE_StretchRaw frame (render-thread mode)
+	,RC_SCREENSHOT_MT		// glReadPixels must run on the render thread
+#endif
 } renderCommand_t;
+
+#ifdef VITA
+typedef struct {
+	int			commandId;
+	const byte	*pixels;	// renderer-owned staging, valid until this buffer's next frame
+	int			x, y, w, h;	// w == 0: upload only, no draw
+	int			cols, rows;
+	int			client;
+	qboolean	dirty;
+} cinematicCommand_t;
+
+typedef struct {
+	int		commandId;
+	void	*req;			// screenshotMTReq_t*, emitter-owned; the emitter drains immediately
+} screenshotMTCommand_t;
+
+typedef struct {
+	int		x, y, width, height;
+	size_t	*offset;
+	int		*padlen;
+	byte	**out;
+} screenshotMTReq_t;
+#endif
 
 
 // all of the information needed by the back end must be
@@ -1866,6 +1963,9 @@ extern	int		max_polys;
 extern	int		max_polyverts;
 
 extern	backEndData_t	*backEndData;
+#ifdef VITA
+extern	backEndData_t	*backEndDataPtr[BACKEND_DATA_NUM];
+#endif
 
 
 void RB_ExecuteRenderCommands( const void *data );

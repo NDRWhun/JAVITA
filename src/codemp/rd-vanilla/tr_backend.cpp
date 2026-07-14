@@ -28,6 +28,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "tr_WorldEffects.h"
 
 backEndData_t	*backEndData;
+#ifdef VITA
+backEndData_t	*backEndDataPtr[BACKEND_DATA_NUM];
+#endif
 backEndState_t	backEnd;
 
 bool tr_stencilled = false;
@@ -467,6 +470,21 @@ void RB_BeginDrawingView (void) {
 	// ensures that depth writes are enabled for the depth clear
 	GL_State( GLS_DEFAULT );
 
+#ifdef VITA
+	// global fog fade toward the r_distanceCull pop; RB_SetGL2D turns it back off for the HUD
+	if ( r_forceFog && r_forceFog->value > 0.0f )
+	{
+		vec4_t fogClr = { 0.55f, 0.6f, 0.7f, 1.0f };
+		if ( r_forceFogColor && r_forceFogColor->string[0] )
+			sscanf( r_forceFogColor->string, "%f %f %f", &fogClr[0], &fogClr[1], &fogClr[2] );
+		qglFogi( GL_FOG_MODE, GL_LINEAR );
+		qglFogfv( GL_FOG_COLOR, fogClr );
+		qglFogf( GL_FOG_START, r_forceFog->value * 0.5f );
+		qglFogf( GL_FOG_END,   r_forceFog->value );
+		qglEnable( GL_FOG );
+	}
+#endif
+
 	// clear relevant buffers
 	if ( r_measureOverdraw->integer || r_shadows->integer == 2 || tr_stencilled )
 	{
@@ -714,6 +732,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		if ( drawSurf->sort == oldSort )
 		{
 			// fast path, same as previous sort
+#ifdef VITA
+			if ( !RB_TryWorldVBO( drawSurf->surface, oldShader, oldFogNum, oldDlighted, oldEntityNum ) )
+#endif
 			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 			continue;
 		}
@@ -838,6 +859,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			|| ( entityNum != oldEntityNum && !shader->entityMergable ) )
 		{
 			if (oldShader != NULL) {
+#ifdef VITA
+				RB_EndWorldVBO();
+#endif
 				RB_EndSurface();
 
 				if (!didShadowPass && shader && shader->sort > SS_BANNER)
@@ -892,6 +916,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 				R_TransformDlights( backEnd.refdef.num_dlights, backEnd.refdef.dlights, &backEnd.ori );
 			}
 
+#ifdef VITA
+			RB_EndWorldVBO();	// leaving world surfaces -> flush VBO batch before entity/world matrix swap
+#endif
 			qglLoadMatrixf( backEnd.ori.modelMatrix );
 
 			//
@@ -920,6 +947,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		}
 
 		// add the triangles for this surface
+#ifdef VITA
+		if ( !RB_TryWorldVBO( drawSurf->surface, shader, fogNum, dlighted, entityNum ) )
+#endif
 		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 	}
 
@@ -929,6 +959,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	//assert(entityNum < MAX_GENTITIES);
 
 	if (oldShader != NULL) {
+#ifdef VITA
+		RB_EndWorldVBO();
+#endif
 		RB_EndSurface();
 	}
 
@@ -1203,6 +1236,9 @@ void	RB_SetGL2D (void) {
 
 	qglDisable( GL_CULL_FACE );
 	qglDisable( GL_CLIP_PLANE0 );
+#ifdef VITA
+	qglDisable( GL_FOG );	// no fog on HUD/menus
+#endif
 
 	// set time for 2D shaders
 	backEnd.refdef.time = ri.Milliseconds()*ri.Cvar_VariableValue( "timescale" );
@@ -1226,6 +1262,39 @@ void RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *
 	if ( !tr.registered ) {
 		return;
 	}
+
+#ifdef VITA
+	// Render-thread mode: all GL runs on the render thread, so record a command
+	// with a staged copy of the frame instead of drawing from here.
+	if ( r_renderThread && r_renderThread->integer ) {
+		if ( (cols&(cols-1)) || (rows&(rows-1)) ) {
+			Com_Error (ERR_DROP, "Draw_StretchRaw: size not a power of 2: %i by %i", cols, rows);
+		}
+		static byte *stage[2][NUM_SCRATCH_IMAGES];
+		static int   stageSize[2][NUM_SCRATCH_IMAGES];
+		const int bytes = cols * rows * 4;
+		if ( stageSize[activeBackEnd][client] < bytes ) {
+			if ( stage[activeBackEnd][client] ) {
+				Z_Free( stage[activeBackEnd][client] );
+			}
+			stage[activeBackEnd][client] = (byte *)Z_Malloc( bytes, TAG_TEMP_WORKSPACE, qfalse );
+			stageSize[activeBackEnd][client] = bytes;
+		}
+		memcpy( stage[activeBackEnd][client], data, bytes );
+
+		cinematicCommand_t *cmd = (cinematicCommand_t *)R_GetCommandBuffer( sizeof( *cmd ) );
+		if ( !cmd ) {
+			return;
+		}
+		cmd->commandId = RC_CINEMATIC;
+		cmd->pixels = stage[activeBackEnd][client];
+		cmd->x = x; cmd->y = y; cmd->w = w; cmd->h = h;
+		cmd->cols = cols; cmd->rows = rows;
+		cmd->client = client;
+		cmd->dirty = dirty;
+		return;
+	}
+#endif
 	R_IssuePendingRenderCommands();
 
 	if ( tess.numIndexes ) {
@@ -1288,6 +1357,13 @@ void RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *
 
 void RE_UploadCinematic (int cols, int rows, const byte *data, int client, qboolean dirty) {
 
+#ifdef VITA
+	// render-thread mode: upload-only staged command (w == 0)
+	if ( r_renderThread && r_renderThread->integer ) {
+		RE_StretchRaw( 0, 0, 0, 0, cols, rows, data, client, dirty );
+		return;
+	}
+#endif
 	GL_Bind( tr.scratchImage[client] );
 
 	// if the scratchImage isn't in the format we want, specify it as a new texture
@@ -1609,6 +1685,174 @@ const void *RB_RotatePic2 ( const void *data )
 }
 
 
+#ifdef VITA
+// Render-scale / dynamic resolution: draw the 3D world into an offscreen FBO at a
+// fraction of 960x544, upscale before the HUD. DRS nudges the scale to hold a target
+// frame time. One offscreen pass + one blit (each FBO bind is a tile flush on TBDR).
+static float    rs_activeScale = 1.0f;
+static GLuint   rs_fbo = 0, rs_colorTex = 0, rs_depthRb = 0;
+static qboolean rs_fboFailed = qfalse;
+static int      rs_scaledW = 0, rs_scaledH = 0;
+
+static cvar_t *rs_renderScale = NULL;
+static cvar_t *rs_dynamicRes  = NULL;
+static cvar_t *rs_targetFt     = NULL;
+static cvar_t *rs_scaleMin     = NULL;
+static cvar_t *rs_flip         = NULL;
+
+static void RB_RenderScaleInitCvars( void ) {
+	if ( rs_renderScale )
+		return;
+	rs_renderScale = ri.Cvar_Get( "r_renderScale",       "1.0", CVAR_ARCHIVE, "" );	// fixed scale [0.4..1] when DRS off
+	rs_dynamicRes  = ri.Cvar_Get( "r_dynamicResolution", "0",   CVAR_ARCHIVE, "" );	// auto-scale to hold the target frame time
+	rs_targetFt    = ri.Cvar_Get( "r_targetFrameTime",   "30",  CVAR_ARCHIVE, "" );	// ms
+	rs_scaleMin    = ri.Cvar_Get( "r_renderScaleMin",    "0.6", CVAR_ARCHIVE, "" );	// DRS downscale floor
+	rs_flip        = ri.Cvar_Get( "r_renderScaleFlip",   "0",   CVAR_ARCHIVE, "" );	// flip upscale vertically if needed
+}
+
+static qboolean RB_EnsureSceneFBO( void ) {
+	if ( rs_fbo )
+		return qtrue;
+	if ( rs_fboFailed )
+		return qfalse;
+
+	const int w = glConfig.vidWidth, h = glConfig.vidHeight;	// full size; sub-scales just shrink the viewport
+
+	glGenTextures( 1, &rs_colorTex );
+	glBindTexture( GL_TEXTURE_2D, rs_colorTex );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+
+	glGenRenderbuffers( 1, &rs_depthRb );
+	glBindRenderbuffer( GL_RENDERBUFFER, rs_depthRb );
+	glRenderbufferStorage( GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h );
+
+	glGenFramebuffers( 1, &rs_fbo );
+	glBindFramebuffer( GL_FRAMEBUFFER, rs_fbo );
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rs_colorTex, 0 );
+	glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rs_depthRb );
+	const GLenum st = glCheckFramebufferStatus( GL_FRAMEBUFFER );
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+
+	if ( st != GL_FRAMEBUFFER_COMPLETE ) {
+		ri.Printf( PRINT_WARNING, "Vita render-scale: scene FBO incomplete (0x%x); disabling.\n", st );
+		rs_fboFailed = qtrue;
+		return qfalse;
+	}
+	return qtrue;
+}
+
+// Recompute rs_activeScale once per frame (main view only).
+static void RB_DRSUpdate( void ) {
+	if ( !rs_dynamicRes->integer ) {
+		const float s = rs_renderScale->value;
+		rs_activeScale = ( s >= 0.4f && s <= 1.0f ) ? s : 1.0f;
+		return;
+	}
+
+	const int now = ri.Milliseconds();
+	static int last = 0;
+	const int dt = now - last;
+	last = now;
+	if ( dt <= 0 || dt > 200 )
+		return;								// ignore startup / load-spike deltas
+
+	static float avg = 16.7f;
+	avg += ( (float)dt - avg ) * 0.15f;		// EWMA smooth
+
+	static int cooldown = 0;
+	if ( cooldown > 0 ) { cooldown--; return; }	// at most one step per ~10 frames
+
+	const float target = rs_targetFt->value;
+	float floorS = rs_scaleMin->value;
+	if ( floorS < 0.4f ) floorS = 0.4f;
+
+	if ( avg > target * 1.10f && rs_activeScale > floorS ) { rs_activeScale -= 0.10f; cooldown = 10; }
+	else if ( avg < target * 0.85f && rs_activeScale < 1.0f ) { rs_activeScale += 0.10f; cooldown = 10; }
+
+	if ( rs_activeScale < floorS ) rs_activeScale = floorS;
+	if ( rs_activeScale > 1.0f )   rs_activeScale = 1.0f;
+}
+
+// Bind the scene FBO and shrink the viewport for the main world view. Returns true
+// if scaling is active -- caller MUST then call RB_RenderScaleEnd after the surf list.
+static qboolean RB_RenderScaleBegin( void ) {
+	RB_RenderScaleInitCvars();
+
+	// main full-screen world view only -- not portals/mirrors or NOWORLDMODEL views
+	if ( backEnd.viewParms.isPortal || ( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
+		return qfalse;
+
+	RB_DRSUpdate();
+
+	if ( rs_activeScale >= 0.999f )
+		return qfalse;						// 1.0 -> straight to the backbuffer, no FBO
+	if ( !RB_EnsureSceneFBO() )
+		return qfalse;
+
+	rs_scaledW = (int)( glConfig.vidWidth  * rs_activeScale );
+	rs_scaledH = (int)( glConfig.vidHeight * rs_activeScale );
+	if ( rs_scaledW < 4 || rs_scaledH < 4 )
+		return qfalse;
+
+	glBindFramebuffer( GL_FRAMEBUFFER, rs_fbo );
+
+	// render into the lower-left corner of the full-size FBO; uniform scale keeps aspect
+	backEnd.viewParms.viewportX      = 0;
+	backEnd.viewParms.viewportY      = 0;
+	backEnd.viewParms.viewportWidth  = rs_scaledW;
+	backEnd.viewParms.viewportHeight = rs_scaledH;
+	return qtrue;
+}
+
+// Linear-upscale the rendered FBO region to the full native backbuffer.
+static void RB_RenderScaleEnd( void ) {
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+
+	// vitaGL's glBlitFramebuffer can't reliably stretch to the default framebuffer,
+	// so upscale with a plain full-screen textured quad instead.
+	const int   w = glConfig.vidWidth, h = glConfig.vidHeight;
+	const float u = (float)rs_scaledW / (float)w;
+	float v0 = 0.0f, v1 = (float)rs_scaledH / (float)h;
+	if ( rs_flip && rs_flip->integer ) { v0 = v1; v1 = 0.0f; }
+
+	GL_SelectTexture( 0 );
+	qglViewport( 0, 0, w, h );
+	qglScissor( 0, 0, w, h );
+
+	qglMatrixMode( GL_PROJECTION );
+	qglPushMatrix();
+	qglLoadIdentity();
+	qglOrtho( 0, w, h, 0, -1, 1 );
+	qglMatrixMode( GL_MODELVIEW );
+	qglPushMatrix();
+	qglLoadIdentity();
+
+	GL_State( GLS_DEPTHTEST_DISABLE );
+	qglDisable( GL_CULL_FACE );
+	qglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
+	qglEnable( GL_TEXTURE_2D );
+	qglBindTexture( GL_TEXTURE_2D, rs_colorTex );
+
+	qglBegin( GL_QUADS );
+		qglTexCoord2f( 0.0f, v1 ); qglVertex2f( 0.0f, 0.0f );
+		qglTexCoord2f( u,    v1 ); qglVertex2f( (float)w, 0.0f );
+		qglTexCoord2f( u,    v0 ); qglVertex2f( (float)w, (float)h );
+		qglTexCoord2f( 0.0f, v0 ); qglVertex2f( 0.0f, (float)h );
+	qglEnd();
+
+	// restore matrices + cull, and force the next GL_Bind to re-bind (raw bind above)
+	qglMatrixMode( GL_PROJECTION );
+	qglPopMatrix();
+	qglMatrixMode( GL_MODELVIEW );
+	qglPopMatrix();
+	qglEnable( GL_CULL_FACE );
+	glState.currenttextures[ glState.currenttmu ] = 0;
+}
+#endif // VITA
+
 /*
 =============
 RB_DrawSurfs
@@ -1628,7 +1872,16 @@ const void	*RB_DrawSurfs( const void *data ) {
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
 
+#ifdef VITA
+	const qboolean rs_scaled = RB_RenderScaleBegin();
+#endif
+
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+
+#ifdef VITA
+	if ( rs_scaled )
+		RB_RenderScaleEnd();	// upscale offscreen scene to native backbuffer
+#endif
 
 	// Dynamic Glow/Flares:
 	/*
@@ -1949,6 +2202,61 @@ const void	*RB_WorldEffects( const void *data )
 	return (const void *)(cmd + 1);
 }
 
+#ifdef VITA
+// Cinematic frame (recorded by RE_StretchRaw in render-thread mode): upload the
+// staged pixels into the scratch image and draw the stretched quad.
+static const void *RB_Cinematic( const void *data ) {
+	const cinematicCommand_t *cmd = (const cinematicCommand_t *)data;
+	image_t *img = tr.scratchImage[cmd->client];
+
+	GL_Bind( img );
+	if ( cmd->cols != img->width || cmd->rows != img->height ) {
+		img->width = (word)cmd->cols;
+		img->height = (word)cmd->rows;
+		qglTexImage2D( GL_TEXTURE_2D, 0, GL_RGB8, cmd->cols, cmd->rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, cmd->pixels );
+		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glConfig.clampToEdgeAvailable ? GL_CLAMP_TO_EDGE : GL_CLAMP );
+		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, glConfig.clampToEdgeAvailable ? GL_CLAMP_TO_EDGE : GL_CLAMP );
+	} else if ( cmd->dirty ) {
+		qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cmd->cols, cmd->rows, GL_RGBA, GL_UNSIGNED_BYTE, cmd->pixels );
+	}
+
+	if ( cmd->w ) {
+		if ( !backEnd.projection2D ) {
+			RB_SetGL2D();
+		}
+		const float x = (float)cmd->x, y = (float)cmd->y, w = (float)cmd->w, h = (float)cmd->h;
+		const float s0 = 0.5f / cmd->cols, s1 = ( cmd->cols - 0.5f ) / cmd->cols;
+		const float t0 = 0.5f / cmd->rows, t1 = ( cmd->rows - 0.5f ) / cmd->rows;
+		const float xyz[4][4] = { { x, y, 0, 1 }, { x+w, y, 0, 1 }, { x+w, y+h, 0, 1 }, { x, y+h, 0, 1 } };
+		const float st[4][2] = { { s0, t0 }, { s1, t0 }, { s1, t1 }, { s0, t1 } };
+		const byte l = (byte)( tr.identityLight * 255.0f );
+		const unsigned int c = 0xFF000000u | ( l << 16 ) | ( l << 8 ) | l;
+		const unsigned int col[4] = { c, c, c, c };
+		static const glIndex_t idx[6] = { 0, 1, 2, 0, 2, 3 };
+		qglEnableClientState( GL_VERTEX_ARRAY );
+		qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+		qglEnableClientState( GL_COLOR_ARRAY );
+		qglVertexPointer( 3, GL_FLOAT, 16, xyz );
+		qglTexCoordPointer( 2, GL_FLOAT, 0, st );
+		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, col );
+		qglDrawElements( GL_TRIANGLES, 6, GL_INDEX_TYPE, idx );
+	}
+
+	return (const void *)(cmd + 1);
+}
+
+// glReadPixels runs here so the GXM-owning thread does the readback
+extern byte *RB_ReadPixels( int x, int y, int width, int height, size_t *offset, int *padlen );
+static const void *RB_ScreenshotMT( const void *data ) {
+	const screenshotMTCommand_t *cmd = (const screenshotMTCommand_t *)data;
+	screenshotMTReq_t *req = (screenshotMTReq_t *)cmd->req;
+	*req->out = RB_ReadPixels( req->x, req->y, req->width, req->height, req->offset, req->padlen );
+	return (const void *)(cmd + 1);
+}
+#endif
+
 /*
 ====================
 RB_ExecuteRenderCommands
@@ -1959,6 +2267,33 @@ void RB_ExecuteRenderCommands( const void *data ) {
 	int		t1, t2;
 
 	t1 = ri.Milliseconds()*ri.Cvar_VariableValue( "timescale" );
+
+#ifdef VITA
+	if ( r_renderThread && r_renderThread->integer ) {
+		// Until one FFP glDrawElements draw has gone through on this thread, subsequent
+		// FFP draws silently produce no fragments. This off-screen (fully clipped ->
+		// invisible) one-shot provides the prime right after context init.
+		static qboolean s_ffpPrimed = qfalse;
+		if ( !s_ffpPrimed && tr.whiteImage ) {
+			s_ffpPrimed = qtrue;
+			RB_SetGL2D();
+			GL_Bind( tr.whiteImage );
+			GL_State( GLS_DEPTHTEST_DISABLE );
+			qglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
+			static const float primeXYZ[4][4] = { { -16, -16, 0, 1 }, { -8, -16, 0, 1 }, { -8, -8, 0, 1 }, { -16, -8, 0, 1 } };
+			static const float primeST[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+			static const unsigned int primeCol[4] = { 0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu };
+			static const glIndex_t primeIdx[6] = { 0, 1, 2, 0, 2, 3 };
+			qglEnableClientState( GL_VERTEX_ARRAY );
+			qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+			qglEnableClientState( GL_COLOR_ARRAY );
+			qglVertexPointer( 3, GL_FLOAT, 16, primeXYZ );
+			qglTexCoordPointer( 2, GL_FLOAT, 0, primeST );
+			qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, primeCol );
+			qglDrawElements( GL_TRIANGLES, 6, GL_INDEX_TYPE, primeIdx );
+		}
+	}
+#endif
 
 	while ( 1 ) {
 		data = PADP(data, sizeof(void *));
@@ -1994,6 +2329,14 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_AUTO_MAP:
 			data = R_DrawWireframeAutomap(data);
 			break;
+#ifdef VITA
+		case RC_CINEMATIC:
+			data = RB_Cinematic( data );
+			break;
+		case RC_SCREENSHOT_MT:
+			data = RB_ScreenshotMT( data );
+			break;
+#endif
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering

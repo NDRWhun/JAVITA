@@ -577,19 +577,49 @@ void S_MP3_CalcVols_f( void )
 
 
 
+// free a read buffer: malloc'd on the worker, Z_Malloc'd (FS) on the main thread.
+static void S_FreeReadData( byte *data, qboolean bDataIsMalloc )
+{
+#ifdef VITA
+	if ( bDataIsMalloc ) { free( data ); return; }
+#else
+	(void)bDataIsMalloc;
+#endif
+	FS_FreeFile( data );
+}
+
+// worker reads via its own pk3 handles into malloc; main thread uses FS_ReadFile.
+static int S_LoadSound_ReadWholeFile( const char *psFilename, byte **pData, qboolean bWorker )
+{
+#ifdef VITA
+	if ( bWorker ) {
+		long len = FS_ReadFileWorker( psFilename, NULL, 0 );
+		if ( len < 0 ) { *pData = NULL; return -1; }
+		byte *buf = (byte *)malloc( len + 1 );
+		if ( !buf || FS_ReadFileWorker( psFilename, buf, len ) != len ) { free( buf ); *pData = NULL; return -1; }
+		buf[len] = 0;
+		*pData = buf;
+		return (int)len;
+	}
+#else
+	(void)bWorker;
+#endif
+	return FS_ReadFile( psFilename, (void **)pData );
+}
+
 // adjust filename for foreign languages and WAV/MP3 issues.
 //
 // returns qfalse if failed to load, else fills in *pData
 //
 extern	cvar_t	*com_buildScript;
-static qboolean S_LoadSound_FileLoadAndNameAdjuster(char *psFilename, byte **pData, int *piSize, int iNameStrlen)
+static qboolean S_LoadSound_FileLoadAndNameAdjuster(char *psFilename, byte **pData, int *piSize, int iNameStrlen, qboolean bWorker)
 {
 	char *psVoice = strstr(psFilename,"chars");
 	if (psVoice)
 	{
 		// cache foreign voices...
 		//
-		if (com_buildScript->integer)
+		if (!bWorker && com_buildScript->integer)
 		{
 			fileHandle_t hFile;
 			//German
@@ -656,12 +686,12 @@ static qboolean S_LoadSound_FileLoadAndNameAdjuster(char *psFilename, byte **pDa
 		}
 	}
 
-	*piSize = FS_ReadFile( psFilename, (void **)pData );	// try WAV
+	*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try WAV
 	if ( !*pData ) {
 		psFilename[iNameStrlen-3] = 'm';
 		psFilename[iNameStrlen-2] = 'p';
 		psFilename[iNameStrlen-1] = '3';
-		*piSize = FS_ReadFile( psFilename, (void **)pData );	// try MP3
+		*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try MP3
 
 		if ( !*pData )
 		{
@@ -681,13 +711,13 @@ static qboolean S_LoadSound_FileLoadAndNameAdjuster(char *psFilename, byte **pDa
 				psFilename[iNameStrlen-3] = 'w';
 				psFilename[iNameStrlen-2] = 'a';
 				psFilename[iNameStrlen-1] = 'v';
-				*piSize = FS_ReadFile( psFilename, (void **)pData );	// try English WAV
+				*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try English WAV
 				if ( !*pData )
 				{
 					psFilename[iNameStrlen-3] = 'm';
 					psFilename[iNameStrlen-2] = 'p';
 					psFilename[iNameStrlen-1] = '3';
-					*piSize = FS_ReadFile( psFilename, (void **)pData );	// try English MP3
+					*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try English MP3
 				}
 			}
 
@@ -717,6 +747,12 @@ static qboolean S_LoadSound_DirIsAllowedToKeepMP3s(const char *psFilename)
 	if ( Q_stricmpn( psFilename, SOUND_CHARS_DIR, SOUND_CHARS_DIR_LENGTH ) == 0 )
 		return qtrue;	// found a dir that's allowed to keep MP3s
 
+#ifdef VITA
+	// unpacking a music cue is a whole song of PCM (multi-second decode)
+	if ( Q_stricmpn( psFilename, "music/", 6 ) == 0 )
+		return qtrue;
+#endif
+
 	return qfalse;
 }
 
@@ -729,15 +765,10 @@ of a forced fallback of a player specific sound	(or of a wav/mp3 substitution no
 ==============
 */
 qboolean gbInsideLoadSound = qfalse;
-static qboolean S_LoadSound_Actual( sfx_t *sfx )
-{
-	byte	*data;
-	short	*samples;
-	wavinfo_t	info;
-	int		size;
-	char	*psExt;
-	char	sLoadName[MAX_QPATH];
 
+// read + name-resolve; worker-safe when bWorker (own pk3 handles + malloc buffer).
+qboolean S_LoadSound_ReadFile( sfx_t *sfx, char *sLoadName, int iBufSize, byte **pData, int *piSize, qboolean bWorker )
+{
 	int		len = strlen(sfx->sSoundName);
 	if (len<5)
 	{
@@ -751,24 +782,29 @@ static qboolean S_LoadSound_Actual( sfx_t *sfx )
 	}
 	// make up a local filename to try wav/mp3 substitutes...
 	//
-	Q_strncpyz(sLoadName, sfx->sSoundName, sizeof(sLoadName));
+	Q_strncpyz(sLoadName, sfx->sSoundName, iBufSize);
 	Q_strlwr( sLoadName );
 	//
 	// Ensure name has an extension (which it must have, but you never know), and get ptr to it...
 	//
-	psExt = &sLoadName[strlen(sLoadName)-4];
+	char *psExt = &sLoadName[strlen(sLoadName)-4];
 	if (*psExt != '.')
 	{
 		//Com_Printf( "WARNING: soundname '%s' does not have 3-letter extension\n",sLoadName);
-		COM_DefaultExtension(sLoadName,sizeof(sLoadName),".wav");	// so psExt below is always valid
+		COM_DefaultExtension(sLoadName,iBufSize,".wav");	// so psExt below is always valid
 		psExt = &sLoadName[strlen(sLoadName)-4];
 		len = strlen(sLoadName);
 	}
 
-	if (!S_LoadSound_FileLoadAndNameAdjuster(sLoadName, &data, &size, len))
-	{
-		return qfalse;
-	}
+	return S_LoadSound_FileLoadAndNameAdjuster(sLoadName, pData, piSize, len, bWorker);
+}
+
+// decode + finalize already-read data; main thread only.
+qboolean S_LoadSound_Finish( sfx_t *sfx, char *sLoadName, byte *data, int size, qboolean bDataIsMalloc )
+{
+	short	*samples;
+	wavinfo_t	info;
+	char	*psExt = &sLoadName[strlen(sLoadName)-4];
 
 	SND_TouchSFX(sfx);
 
@@ -889,7 +925,7 @@ static qboolean S_LoadSound_Actual( sfx_t *sfx )
 		{
 			// MP3_IsValid() will already have printed any errors via Com_Printf at this point...
 			//
-			FS_FreeFile (data);
+			S_FreeReadData (data, bDataIsMalloc);
 			return qfalse;
 		}
 	}
@@ -902,7 +938,7 @@ static qboolean S_LoadSound_Actual( sfx_t *sfx )
 		info = GetWavinfo( sLoadName, data, size );
 		if ( info.channels != 1 ) {
 			Com_Printf ("%s is a stereo wav file\n", sLoadName);
-			FS_FreeFile (data);
+			S_FreeReadData (data, bDataIsMalloc);
 			return qfalse;
 		}
 
@@ -957,9 +993,23 @@ static qboolean S_LoadSound_Actual( sfx_t *sfx )
 		Z_Free(samples);
 	}
 
-	FS_FreeFile( data );
+	S_FreeReadData( data, bDataIsMalloc );
 
 	return qtrue;
+}
+
+static qboolean S_LoadSound_Actual( sfx_t *sfx )
+{
+	byte	*data;
+	int		size;
+	char	sLoadName[MAX_QPATH];
+
+	if (!S_LoadSound_ReadFile(sfx, sLoadName, sizeof(sLoadName), &data, &size, qfalse))
+	{
+		return qfalse;
+	}
+
+	return S_LoadSound_Finish(sfx, sLoadName, data, size, qfalse);
 }
 
 
@@ -970,7 +1020,16 @@ qboolean S_LoadSound( sfx_t *sfx )
 {
 	gbInsideLoadSound = qtrue;	// !!!!!!!!!!!!!
 
+#ifdef VITA
+		const int iLoadStart = Com_Milliseconds();
+#endif
 		qboolean bReturn = S_LoadSound_Actual( sfx );
+#ifdef VITA
+		const int iLoadMs = Com_Milliseconds() - iLoadStart;
+		if ( iLoadMs >= 5 ) {
+			Com_Printf( "^3[snd] %s: %dms load\n", sfx->sSoundName, iLoadMs );
+		}
+#endif
 
 	gbInsideLoadSound = qfalse;	// !!!!!!!!!!!!!
 

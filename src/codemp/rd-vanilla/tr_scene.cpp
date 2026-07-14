@@ -71,6 +71,12 @@ void R_InitNextFrame( void ) {
 	r_firstScenePoly = 0;
 
 	r_numpolyverts = 0;
+
+#ifdef VITA
+	// runs after the hand-off flip: this buffer's Ghoul2 skin arena is no longer
+	// read by the render thread, so its slices can be recycled
+	R_ResetGhoulSkinArena();
+#endif
 }
 
 

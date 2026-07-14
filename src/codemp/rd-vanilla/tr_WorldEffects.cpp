@@ -1332,6 +1332,13 @@ ratl::vector_vs<CWeatherParticleCloud, MAX_PARTICLE_CLOUDS>	mParticleClouds;
 ////////////////////////////////////////////////////////////////////////////////////////
 void R_InitWorldEffects(void)
 {
+#ifdef VITA
+	// the backend's world-effects pass iterates these containers one frame behind;
+	// park the render thread before freeing/clearing them
+	if (r_renderThread && r_renderThread->integer) {
+		R_IssuePendingRenderCommands();
+	}
+#endif
 	srand(ri.Milliseconds());
 
 	for (int i=0; i<mParticleClouds.size(); i++)
@@ -1471,6 +1478,13 @@ void RE_WorldEffectCommand(const char *command)
 	{
 		return;
 	}
+
+#ifdef VITA
+	// every branch below mutates containers the render thread iterates one frame behind
+	if (r_renderThread && r_renderThread->integer) {
+		R_IssuePendingRenderCommands();
+	}
+#endif
 
 	COM_BeginParseSession ("RE_WorldEffectCommand");
 

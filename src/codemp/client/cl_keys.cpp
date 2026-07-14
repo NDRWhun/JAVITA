@@ -1429,6 +1429,34 @@ void CL_KeyUpEvent( int key, unsigned time )
 		CGVM_KeyEvent( key, qfalse );
 }
 
+#ifdef VITA
+// --- Vita combo (held-modifier) layer ----------------------------------------
+// Rear-touch top-left zone (A_AUX1 from IN_VitaRearTouch) is a held modifier: while
+// down, face/d-pad buttons fire INSTANT alternate commands instead of their bind.
+// Only instant commands live here so a released modifier can't strand a held (+) command;
+// the alt role is latched per key at its down edge. Index = key - A_JOY0.
+static qboolean			vita_modDown  = qfalse;
+static unsigned			vita_altLatch = 0;
+static qboolean			vita_circleClosedConsole = qfalse;
+extern qboolean			cl_vitaHideMenuCursor;	// sdl_input.cpp; set on d-pad menu nav
+static const char * const vita_altTable[16] = {
+	NULL,				// 0  JOY0
+	"taunt",			// 1  JOY1  Triangle
+	"engage_duel",		// 2  JOY2  Circle
+	NULL,				// 3  JOY3  Cross    (keep bind)
+	"saberAttackCycle",	// 4  JOY4  Square   (cycle saber stance)
+	NULL,				// 5  JOY5  L
+	NULL,				// 6  JOY6  R
+	"invprev",			// 7  JOY7  D-Down
+	"forceprev",		// 8  JOY8  D-Left
+	"invnext",			// 9  JOY9  D-Up
+	"forcenext",		// 10 JOY10 D-Right
+	NULL,				// 11 JOY11 Select
+	NULL,				// 12 JOY12 Start
+	NULL, NULL, NULL
+};
+#endif
+
 /*
 ===================
 CL_KeyEvent
@@ -1437,6 +1465,65 @@ Called by the system for both key up and key down events
 ===================
 */
 void CL_KeyEvent (int key, qboolean down, unsigned time) {
+#ifdef VITA
+	// rear top-left zone = combo modifier: latch state, never run a bind
+	if ( key == A_AUX1 ) {
+		vita_modDown = down;
+		return;
+	}
+
+	// combo layer (in-game only, never in menus)
+	if ( key >= A_JOY0 && key <= A_JOY31 && !( Key_GetCatcher() & KEYCATCH_UI ) ) {
+		unsigned idx = (unsigned)( key - A_JOY0 );
+		unsigned bit = 1u << ( idx & 31 );
+		if ( down ) {
+			if ( vita_modDown && idx < 16 && vita_altTable[idx] ) {
+				vita_altLatch |= bit;
+				Cbuf_AddText( vita_altTable[idx] );
+				Cbuf_AddText( "\n" );
+				return;
+			}
+		} else if ( vita_altLatch & bit ) {
+			vita_altLatch &= ~bit;	// swallow the up edge of a consumed alt press
+			return;
+		}
+	}
+
+	// Circle closes the console; swallow both edges so it never also runs its bind
+	if ( key == A_JOY2 ) {
+		if ( down && ( Key_GetCatcher() & KEYCATCH_CONSOLE ) ) {
+			vita_circleClosedConsole = qtrue;
+			Con_ToggleConsole_f();
+			Key_ClearStates();
+			return;
+		}
+		if ( !down && vita_circleClosedConsole ) {
+			vita_circleClosedConsole = qfalse;
+			return;
+		}
+	}
+
+	// cursor-driven menus: Cross = click, Circle = back; d-pad navigates
+	if ( Key_GetCatcher() & KEYCATCH_UI ) {
+		if ( key == A_JOY3 )		// Cross: enter in d-pad mode, else click
+			key = cl_vitaHideMenuCursor ? A_ENTER : A_MOUSE1;
+		else if ( key == A_JOY2 )	// Circle -> back
+			key = A_ESCAPE;
+		else if ( key == A_JOY9 )	// D-Up
+			key = A_CURSOR_UP;
+		else if ( key == A_JOY7 )	// D-Down
+			key = A_CURSOR_DOWN;
+		else if ( key == A_JOY8 )	// D-Left
+			key = A_CURSOR_LEFT;
+		else if ( key == A_JOY10 )	// D-Right
+			key = A_CURSOR_RIGHT;
+		// hide the pointer while navigating by d-pad; the stick/touch shows it again
+		if ( down && ( key == A_CURSOR_UP || key == A_CURSOR_DOWN ||
+					   key == A_CURSOR_LEFT || key == A_CURSOR_RIGHT ) ) {
+			cl_vitaHideMenuCursor = qtrue;
+		}
+	}
+#endif
 	if( down )
 		CL_KeyDownEvent( key, time );
 	else

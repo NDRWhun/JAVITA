@@ -472,7 +472,17 @@ static void SetFarClip( void )
 	// Bring in the zFar to the distanceCull distance
 	// The sky renders at zFar so need to move it out a little
 	// ...and make sure there is a minimum zfar to prevent problems
+#ifdef VITA
+	{
+		// clamp zFar to the render-distance cap
+		float vitaDC = tr.distanceCull;
+		if ( r_distanceCull && r_distanceCull->value > 0.0f && vitaDC > r_distanceCull->value )
+			vitaDC = r_distanceCull->value;
+		tr.viewParms.zFar = Com_Clamp(2048.0f, vitaDC * (1.732), sqrtf( farthestCornerDistance ));
+	}
+#else
 	tr.viewParms.zFar = Com_Clamp(2048.0f, tr.distanceCull * (1.732), sqrtf( farthestCornerDistance ));
+#endif
 
 	/*
 	if (r_shadows->integer == 2)
