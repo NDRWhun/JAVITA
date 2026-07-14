@@ -3586,6 +3586,55 @@ static void G2_PreSkinSurface( const mdxmSurface_t *surface, const mdxaBone_t *s
 #undef PS_BONE
 }
 
+// --- pre-skin worker: splits the per-vertex math with the main thread (core 1) ---
+#define G2MT_MAX_JOBS 256
+typedef struct {
+	const mdxmSurface_t *surface;
+	const mdxaBone_t    *snap;
+	float               *out;
+} g2SkinJob_t;
+static g2SkinJob_t   s_g2Jobs[G2MT_MAX_JOBS];
+static int           s_g2JobCount = 0;
+static volatile int  s_g2JobNext = 0;		// shared take-index, atomic
+static SceUID        s_g2WorkSema = -1, s_g2DoneSema = -1;
+static SceUID        s_g2WorkerThid = -1;
+
+static void G2_DrainSkinJobs( void )
+{
+	for ( ;; ) {
+		const int i = __atomic_fetch_add( &s_g2JobNext, 1, __ATOMIC_SEQ_CST );
+		if ( i >= s_g2JobCount ) break;
+		G2_PreSkinSurface( s_g2Jobs[i].surface, s_g2Jobs[i].snap, s_g2Jobs[i].out );
+	}
+}
+
+static int G2_SkinWorker( SceSize argc, void *argv )
+{
+	for ( ;; ) {
+		sceKernelWaitSema( s_g2WorkSema, 1, NULL );
+		G2_DrainSkinJobs();
+		sceKernelSignalSema( s_g2DoneSema, 1 );
+	}
+	return sceKernelExitDeleteThread( 0 );
+}
+
+static qboolean G2_EnsureSkinWorker( void )
+{
+	if ( s_g2WorkerThid >= 0 ) return qtrue;
+	s_g2WorkSema = sceKernelCreateSema( "g2skin_in",  0, 0, 1, NULL );
+	s_g2DoneSema = sceKernelCreateSema( "g2skin_out", 0, 0, 1, NULL );
+	s_g2WorkerThid = sceKernelCreateThread( "g2skin", G2_SkinWorker, 0x10000100, 0x10000, 0, SCE_KERNEL_CPU_MASK_USER_1, NULL );
+	if ( s_g2WorkSema < 0 || s_g2DoneSema < 0 || s_g2WorkerThid < 0 ) {
+		if ( s_g2WorkSema >= 0 )   { sceKernelDeleteSema( s_g2WorkSema );   s_g2WorkSema = -1; }
+		if ( s_g2DoneSema >= 0 )   { sceKernelDeleteSema( s_g2DoneSema );   s_g2DoneSema = -1; }
+		if ( s_g2WorkerThid >= 0 ) { sceKernelDeleteThread( s_g2WorkerThid ); }
+		s_g2WorkerThid = -1;
+		return qfalse;
+	}
+	sceKernelStartThread( s_g2WorkerThid, 0, NULL );
+	return qtrue;
+}
+
 // Render-thread mode only: called from R_AddDrawSurfCmd on the FRONTEND, once per view.
 // Every bone Eval must happen here, before hand-off; an Eval on the render thread races
 // the frontend's next-frame G2_TransformGhoulBones.
@@ -3607,6 +3656,7 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		s_g2SkinArena[buf] = (byte*)malloc( G2_SKIN_ARENA_SIZE );	// best-effort; NULL -> pre-skin skipped
 	}
 	s_g2NumGroups = 0;
+	s_g2JobCount = 0;
 
 	// group SF_MDX surfaces by boneCache
 	for ( int i = 0; i < numDrawSurfs; i++ )
@@ -3668,8 +3718,8 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 			g->surfs[s]->boneMats = snap;
 		}
 
-		// pre-skin each surface from the snapshot so the backend only copies; arena
-		// overflow leaves preSkinned NULL -> that surface skins on the backend
+		// queue each surface's pre-skin from the snapshot; arena overflow leaves
+		// preSkinned NULL -> that surface skins on the backend
 		for ( int s = 0; s < g->n; s++ )
 		{
 			CRenderableSurface *rs = g->surfs[s];
@@ -3680,9 +3730,26 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 			}
 			float *out = (float *)( s_g2SkinArena[buf] + s_g2SkinUsed[buf] );
 			s_g2SkinUsed[buf] += vneed;
-			G2_PreSkinSurface( surface, snap, out );
-			rs->preSkinned = out;
+			rs->preSkinned = out;	// safe pre-math: joined below, before the frame hand-off
+			if ( s_g2JobCount < G2MT_MAX_JOBS ) {
+				s_g2Jobs[s_g2JobCount].surface = surface;
+				s_g2Jobs[s_g2JobCount].snap = snap;
+				s_g2Jobs[s_g2JobCount].out = out;
+				s_g2JobCount++;
+			} else {
+				G2_PreSkinSurface( surface, snap, out );
+			}
 		}
+	}
+
+	// drain the job queue on both cores; the join keeps the hand-off ordering intact
+	s_g2JobNext = 0;
+	if ( s_g2JobCount >= 8 && G2_EnsureSkinWorker() ) {
+		sceKernelSignalSema( s_g2WorkSema, 1 );
+		G2_DrainSkinJobs();
+		sceKernelWaitSema( s_g2DoneSema, 1, NULL );
+	} else {
+		G2_DrainSkinJobs();
 	}
 }
 #endif // VITA

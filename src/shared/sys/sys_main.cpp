@@ -35,6 +35,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifdef VITA
 #include <psp2/apputil.h>
 #include <psp2/ctrl.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/appmgr.h>
 #include <psp2/kernel/processmgr.h>
@@ -813,6 +814,8 @@ int main ( int argc, char* argv[] )
 
 #ifdef VITA
 	Sys_BootMark( "main" );
+	// deterministic core layout: main 0, G2 skin worker 1, render backend 2
+	sceKernelChangeThreadCpuAffinityMask( sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_0 );
 	Sys_Vita_CheckConfigGate();
 #endif
 
