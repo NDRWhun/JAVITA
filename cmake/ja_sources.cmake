@@ -57,7 +57,6 @@ set(JA_SOURCES
     src/code/qcommon/matcomp.cpp
     src/code/qcommon/md4.cpp
     src/code/qcommon/msg.cpp
-    src/code/qcommon/vita_jobpool.cpp
     src/code/qcommon/net_chan.cpp
     src/code/qcommon/ojk_saved_game.cpp
     src/code/qcommon/persistence.cpp
@@ -106,6 +105,7 @@ set(JA_SOURCES
     src/code/rd-vanilla/tr_surface.cpp
     src/code/rd-vanilla/tr_surfacesprites.cpp
     src/code/rd-vanilla/tr_world.cpp
+    src/code/rd-vanilla/tr_worldvbo.cpp
     src/code/server/exe_headers.cpp
     src/code/server/sv_ccmds.cpp
     src/code/server/sv_client.cpp

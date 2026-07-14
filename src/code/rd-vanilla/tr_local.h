@@ -31,6 +31,35 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "mdx_format.h"
 #include "qgl.h"
 
+#ifdef VITA
+#include <psp2/kernel/threadmgr.h>
+#define BACKEND_DATA_NUM 2
+extern int activeBackEnd;		// frontend's double-buffer slot
+extern int rendBackEnd;			// render thread's double-buffer slot
+extern SceUID rend_mutex_in;
+extern SceUID rend_mutex_out;
+extern SceUID rend_init_done;	// init-only handshake (vglInit-done, ctx-init-done)
+extern volatile qboolean pendingCtxInit;	// one-shot: run ctx init on render thread's first wake
+extern cvar_t *r_renderThread;
+extern cvar_t *r_mtLockstep;
+extern cvar_t *r_worldVBO;		// bake eligible static world surfaces into one VBO
+extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not first frame
+void R_StartRenderThread( void );
+void R_StopRenderThread( void );
+void R_Splash( void );			// defined in tr_init.cpp; run on the render thread during ctx init
+// tess is thread-local: the frontend (main) and the render backend each pick
+// their own tessArray slot via the ARM user-RW TLS register, so frame N+1's
+// frontend build and frame N's backend draw never share the work buffer.
+static inline unsigned int vita_get_tls_reg( void ) {
+	unsigned int v;
+	__asm__ __volatile__( "mrc p15, 0, %0, c13, c0, 3" : "=r" (v) );
+	return v;
+}
+#define get_tls_addr() ( vita_get_tls_reg() - 1980 )
+#define set_tessPtr(x) ( *(uintptr_t *)get_tls_addr() = (uintptr_t)(x) )
+#define tessPtr ( (shaderCommands_t *)( *(uintptr_t *)get_tls_addr() ) )
+#endif
+
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
 typedef unsigned int glIndex_t;
 
@@ -618,7 +647,7 @@ typedef struct srfGridMesh_s {
 	surfaceType_t	surfaceType;
 
 	// dynamic lighting information
-	int				dlightBits;
+	int				dlightBits[2];	// [smpFrame]: frontend marks one half, render thread reads the other
 
 	// culling information
 	vec3_t			meshBounds[2];
@@ -651,7 +680,7 @@ typedef struct {
 	cplane_t	plane;
 
 	// dynamic lighting information
-	int			dlightBits;
+	int			dlightBits[2];	// [smpFrame]: frontend marks one half, render thread reads the other
 
 	// triangle definitions (no normals at points)
 	int			numPoints;
@@ -667,7 +696,7 @@ typedef struct {
 	surfaceType_t	surfaceType;
 
 	// dynamic lighting information
-	int				dlightBits;
+	int				dlightBits[2];	// [smpFrame]: frontend marks one half, render thread reads the other
 
 	// culling information (FIXME: use this!)
 	vec3_t			bounds[2];
@@ -924,6 +953,11 @@ typedef struct {
 	int		c_flareTests;
 	int		c_flareRenders;
 
+#ifdef VITA
+	int		c_wvboSurfaces;	// world surfaces drawn from the static VBO
+	int		c_wvboDraws;	// draw calls those merged into
+#endif
+
 	int		msec;			// total msec for backend run
 } backEndCounters_t;
 
@@ -936,6 +970,7 @@ typedef struct {
 	backEndCounters_t	pc;
 	qboolean	isHyperspace;
 	trRefEntity_t	*currentEntity;
+	int				smpFrame;		// which dlightBits half this frame reads (rendBackEnd parity)
 	qboolean	skyRenderedThisView;	// flag for drawing sun
 
 	qboolean	projection2D;	// if qtrue, drawstretchpic doesn't need to change modes
@@ -959,6 +994,7 @@ typedef struct {
 
 	int						visCount;		// incremented every time a new vis cluster is entered
 	int						frameCount;		// incremented every frame
+	int						smpFrame;		// which dlightBits half the frontend marks (activeBackEnd parity)
 	int						sceneCount;		// incremented every scene
 	int						viewCount;		// incremented every view (twice a scene if portaled)
 											// and every R_MarkFragments call
@@ -1109,7 +1145,6 @@ extern cvar_t	*r_distanceCull;		// render-distance cap, clamps the map's distanc
 extern cvar_t	*r_forceFog;			// forced global fog END distance in units (0 = off)
 extern cvar_t	*r_forceFogColor;		// forced fog colour "r g b"
 extern cvar_t	*r_g2Threaded;			// skin ghoul2 verts on the worker pool (0 = off)
-extern cvar_t	*r_texCache;			// pre-decoded RGBA texture cache on ux0 (0 = off)
 extern cvar_t	*r_texCacheCompressed;	// DXT mip-chain texture cache on ux0 (0 = off)
 extern cvar_t	*r_dxtFast;				// DXT encode quality (1 = fast/STB_DXT_NORMAL, 0 = high)
 
@@ -1274,6 +1309,7 @@ void	GL_CheckErrors( void );
 void	GL_State( uint32_t stateVector );
 void	GL_TexEnv( int env );
 void	GL_Cull( int cullType );
+void	R_BindAnimatedImage( const textureBundle_t *bundle );
 
 #define GLS_SRCBLEND_ZERO						0x00000001
 #define GLS_SRCBLEND_ONE						0x00000002
@@ -1453,7 +1489,12 @@ typedef __declspec(align(16)) shaderCommands_s	shaderCommands_t;
 typedef shaderCommands_s	shaderCommands_t;
 #endif
 
+#ifdef VITA
+extern shaderCommands_t tessArray[BACKEND_DATA_NUM];
+#define tess (*tessPtr)
+#else
 extern	shaderCommands_t	tess;
+#endif
 
 extern	color4ub_t	styleColors[MAX_LIGHT_STYLES];
 extern	bool		styleUpdated[MAX_LIGHT_STYLES];
@@ -1596,7 +1637,11 @@ public:
 #endif
  	CBoneCache 		*boneCache;		// pointer to transformed bone list for this surf
 	mdxmSurface_t	*surfaceData;	// pointer to surface data loaded into file - only used by client renderer DO NOT USE IN GAME SIDE - if there is a vid restart this will be out of wack on the game
-	float			*skinOut;		// pre-skinned xyz+normal from a worker thread (r_g2Threaded). NULL => skin inline on main thread.
+	const mdxaBone_t *boneMats;		// per-frame bone matrix snapshot, filled on the frontend (render-thread
+	const float *preSkinned;		// per-frame pre-skinned verts (xyz+normal interleaved), frontend prep
+									// mode). The backend skins from this instead of the live CBoneCache,
+									// which the frontend mutates for the next frame. NULL => drop under
+									// r_renderThread, inline cache eval otherwise.
 #ifdef _G2_GORE
 	float			*alternateTex;		// alternate texture coordinates.
 	void			*goreChain;
@@ -1612,7 +1657,8 @@ public:
 		ident	 = src.ident;
 		boneCache = src.boneCache;
 		surfaceData = src.surfaceData;
-		skinOut = 0;	// don't carry a stale skin buffer across copies
+		boneMats = src.boneMats;	// same frame, same cache -> same snapshot
+		preSkinned = src.preSkinned;
 		alternateTex = src.alternateTex;
 		goreChain = src.goreChain;
 
@@ -1624,7 +1670,8 @@ CRenderableSurface():
 	ident(SF_MDX),
 	boneCache(0),
 	surfaceData(0),
-	skinOut(0)
+	boneMats(0),
+	preSkinned(0)
 #ifdef _G2_GORE
 	,
 	alternateTex(0),
@@ -1636,7 +1683,7 @@ CRenderableSurface():
 	{
 		boneCache=0;
 		surfaceData=0;
-		skinOut=0;
+		boneMats=0;
 #ifdef _G2_GORE
 		ident = SF_MDX;
 		alternateTex=0;
@@ -1648,9 +1695,19 @@ CRenderableSurface():
 void R_AddGhoulSurfaces( trRefEntity_t *ent );
 void RB_SurfaceGhoul( CRenderableSurface *surface );
 #ifdef VITA
-// skin all visible Ghoul2 chars on the worker pool (one job per boneCache) up front,
-// result lands in CRenderableSurface::skinOut for RB_SurfaceGhoul to pick up.
+// snapshot the bone matrices of all visible Ghoul2 chars on the frontend
+// (R_AddDrawSurfCmd, render-thread mode only); lands in CRenderableSurface::boneMats.
+// The backend then does the per-vertex skinning from the snapshot - it must never
+// touch a live CBoneCache (the frontend mutates it for the next frame).
 void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs );
+// per-frame recycle of the frontend's bone snapshot arena (render-thread mode)
+void R_ResetGhoulSkinArena( void );
+void R_FreeGhoulSkinArena( void );
+// static world VBO (tr_worldvbo.cpp)
+void R_BuildWorldVBO( world_t *world );
+void R_FreeWorldVBO( void );
+qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlighted, int entityNum );
+void RB_EndWorldVBO( void );
 #endif
 /*
 Ghoul2 Insert End
@@ -1741,6 +1798,23 @@ typedef struct {
 } swapBuffersCommand_t;
 
 typedef struct {
+	int			commandId;
+	const byte	*pixels;	// renderer-owned staging, valid until this buffer's next frame
+	int			x, y, w, h;	// w == 0: upload only, no draw
+	int			cols, rows;
+	int			client;
+	qboolean	dirty;
+} cinematicCommand_t;
+
+typedef struct {
+	int		commandId;
+	byte	*buffer;		// caller-owned; the emitter drains until this is filled
+	int		w, h;
+} screenshotSPCommand_t;
+
+void RB_GetScreenShotSP( byte *buffer, int w, int h );
+
+typedef struct {
 	int		commandId;
 	int		buffer;
 } endFrameCommand_t;
@@ -1793,6 +1867,8 @@ typedef enum {
 	RC_ROTATE_PIC2,
 	RC_DRAW_SURFS,
 	RC_DRAW_BUFFER,
+	RC_CINEMATIC,
+	RC_SCREENSHOT_SP,
 	RC_SWAP_BUFFERS,
 	RC_WORLD_EFFECTS,
 } renderCommand_t;
@@ -1816,6 +1892,9 @@ typedef struct {
 } backEndData_t;
 
 extern	backEndData_t	*backEndData;
+#ifdef VITA
+extern	backEndData_t	*backEndDataPtr[BACKEND_DATA_NUM];
+#endif
 
 void RB_ExecuteRenderCommands( const void *data );
 
@@ -1824,6 +1903,7 @@ void R_IssuePendingRenderCommands( void );
 void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
 void RE_SetColor( const float *rgba );
+void *R_GetCommandBuffer( int bytes );
 void RE_StretchPic ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader );
 void RE_RotatePic ( float x, float y, float w, float h,
