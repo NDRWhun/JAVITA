@@ -1786,9 +1786,8 @@ void R_Register( void )
 
 	r_primitives = ri.Cvar_Get( "r_primitives", "0", CVAR_ARCHIVE_ND );
 #ifdef VITA
-	// 1 = backend on a dedicated render thread, 0 = inline on main. CVAR_LATCH.
-	// default off: render thread faults the GPU at startup.
-	r_renderThread = ri.Cvar_Get( "r_renderThread", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	// 1 = backend on a dedicated render thread (default), 0 = inline on main. CVAR_LATCH.
+	r_renderThread = ri.Cvar_Get( "r_renderThread", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	// 0 = free-run (default), 1 = full lockstep, 2 = serialize scene build; free-run races only stat counters.
 	r_mtLockstep   = ri.Cvar_Get( "r_mtLockstep", "0", CVAR_ARCHIVE_ND );
 	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ARCHIVE );	// takes effect on next map load
