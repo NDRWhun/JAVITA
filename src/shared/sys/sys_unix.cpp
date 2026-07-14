@@ -39,6 +39,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "qcommon/q_shared.h"
 #include "sys_local.h"
 
+#ifdef VITA
+#include <psp2/kernel/rng.h>
+#endif
+
 qboolean stdinIsATTY = qfalse;
 
 // Used to determine where to store user-specific files
@@ -141,6 +145,17 @@ Sys_RandomBytes
 */
 bool Sys_RandomBytes( byte *string, int len )
 {
+#ifdef VITA
+	// no /dev/urandom; kernel RNG caps at 64 bytes per call
+	while ( len > 0 ) {
+		const int chunk = len > 64 ? 64 : len;
+		if ( sceKernelGetRandomNumber( string, chunk ) < 0 )
+			return false;
+		string += chunk;
+		len -= chunk;
+	}
+	return true;
+#else
 	FILE *fp;
 
 	fp = fopen( "/dev/urandom", "r" );
@@ -157,6 +172,7 @@ bool Sys_RandomBytes( byte *string, int len )
 
 	fclose( fp );
 	return true;
+#endif
 }
 
 /*
