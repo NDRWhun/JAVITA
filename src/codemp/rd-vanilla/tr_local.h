@@ -1920,6 +1920,7 @@ typedef enum {
 #ifdef VITA
 	,RC_CINEMATIC			// staged RE_StretchRaw frame (render-thread mode)
 	,RC_SCREENSHOT_MT		// glReadPixels must run on the render thread
+	,RC_PROGRESS			// load-stall progress bar (first-run texture bakes)
 #endif
 } renderCommand_t;
 
@@ -1944,6 +1945,14 @@ typedef struct {
 	int		*padlen;
 	byte	**out;
 } screenshotMTReq_t;
+
+typedef struct {
+	int		commandId;
+	int		count;			// images loaded this stall; fill is asymptotic
+} progressCommand_t;
+
+void RB_NotePresent( void );
+int R_MsSinceLastPresent( void );
 #endif
 
 
