@@ -57,6 +57,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifndef VITA
 #include <sys/ioctl.h>
 #endif
+#ifdef VITA
+#include <psp2/net/net.h>
+#include <psp2/net/netctl.h>
+#include <psp2/sysmodule.h>
+#endif
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -780,6 +785,19 @@ void NET_GetLocalAddress( void ) {
 
 	close(interfaceSocket);
 }
+#elif defined(VITA)
+void NET_GetLocalAddress( void ) {
+	SceNetCtlInfo info;
+	unsigned int a, b, c, d;
+	numIP = 0;
+	if ( sceNetCtlInetGetInfo( SCE_NETCTL_INFO_GET_IP_ADDRESS, &info ) < 0 )
+		return;	// Wi-Fi down: run without networking
+	if ( sscanf( info.ip_address, "%u.%u.%u.%u", &a, &b, &c, &d ) != 4 )
+		return;
+	localIP[0][0] = a; localIP[0][1] = b; localIP[0][2] = c; localIP[0][3] = d;
+	numIP = 1;
+	Com_Printf( "IP: %s\n", info.ip_address );
+}
 #else
 void NET_GetLocalAddress( void )
 {
@@ -976,6 +994,20 @@ NET_Init
 ====================
 */
 void NET_Init( void ) {
+#ifdef VITA
+	// newlib sockets are dead until the net modules are up
+	static qboolean vitaNetUp = qfalse;
+	if ( !vitaNetUp ) {
+		static char netmem[1024 * 1024] __attribute__((aligned(4096)));
+		SceNetInitParam param = { netmem, sizeof( netmem ), 0 };
+		sceSysmoduleLoadModule( SCE_SYSMODULE_NET );
+		int nr = sceNetInit( &param );
+		if ( nr < 0 ) Com_Printf( "WARNING: sceNetInit: 0x%x\n", nr );
+		nr = sceNetCtlInit();
+		if ( nr < 0 ) Com_Printf( "WARNING: sceNetCtlInit: 0x%x\n", nr );
+		vitaNetUp = qtrue;
+	}
+#endif
 #ifdef _WIN32
 	int r = WSAStartup( MAKEWORD( 1, 1 ), &winsockdata );
 	if( r ) {
