@@ -475,6 +475,15 @@ void CG_RegisterCvars( void ) {
 	for ( i=0, cv=cvarTable; i<cvarTableSize; i++, cv++ ) {
 		cgi_Cvar_Register( cv->vmCvar, cv->cvarName, cv->defaultString, cv->cvarFlags );
 	}
+
+#ifdef VITA
+	// Disable the JKA-only render features JK2 never had, to recover FPS on Vita.
+	cgi_Cvar_Set( "cg_renderToTextureFX", "0" );	// full-scene render-to-texture distortion pass
+	cgi_Cvar_Set( "cg_g2Marks",           "0" );	// decals projected onto ghoul2 characters
+	cgi_Cvar_Set( "cg_saberEntMarks",     "0" );	// saber marks on entities
+	cgi_Cvar_Set( "cg_speedTrail",        "0" );	// force-speed motion-blur trail
+	cgi_Cvar_Set( "cg_shadows",           "0" );	// character shadows
+#endif
 }
 
 /*

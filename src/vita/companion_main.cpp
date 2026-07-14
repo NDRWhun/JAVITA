@@ -1,4 +1,25 @@
 /*
+===========================================================================
+Copyright (C) 2026, JK2VITA contributors
+
+This file is part of JAVITA, a PS Vita port built on the OpenJK
+source code.
+
+OpenJK is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, see <http://www.gnu.org/licenses/>.
+===========================================================================
+*/
+
+/*
  * JK2VITA - standalone config companion app.
  *
  * Its own Vita eboot, launched from a separate LiveArea entry. Draws a settings
@@ -25,7 +46,7 @@
 #define SCR_W 960
 #define SCR_H 544
 
-static const char *CFG_PATH = "ux0:data/JK2VITA/base/openjo_sp.cfg";
+static const char *CFG_PATH = "ux0:data/JAVITA/base/openjk_sp.cfg";
 static const char *GAME_EXEC = "app0:/eboot.bin";
 
 /* ------------------------------------------------------------------------- */
@@ -56,7 +77,6 @@ static Setting g_settings[] = {
 	{ "Curve quality (subdiv)",   "r_subdivisions",      KIND_INT,   4.0f,  24.0f, 4.0f,  4.0f,  4.0f },
 	{ "Model LOD bias",           "r_lodbias",           KIND_INT,   0.0f,  2.0f,  1.0f,  0.0f,  0.0f },
 	{ "Threaded skinning",        "r_g2Threaded",        KIND_BOOL,  0.0f,  1.0f,  1.0f,  0.0f,  0.0f },
-	{ "Texture cache (ux0)",      "r_texCache",          KIND_BOOL,  0.0f,  1.0f,  1.0f,  0.0f,  0.0f },
 	{ "Render distance cap",      "r_distanceCull",      KIND_INT,   0.0f,  6000.0f, 500.0f, 0.0f, 0.0f },
 	{ "Forced fog distance",      "r_forceFog",          KIND_INT,   0.0f,  6000.0f, 500.0f, 0.0f, 0.0f },
 	{ "Crowd LOD (chars)",        "r_ghoul2CrowdLod",    KIND_INT,   0.0f,  16.0f, 1.0f,  4.0f,  4.0f },
