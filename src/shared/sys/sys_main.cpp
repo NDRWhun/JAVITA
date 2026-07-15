@@ -858,7 +858,7 @@ int main ( int argc, char* argv[] )
 		if ( pad.buttons & SCE_CTRL_LTRIGGER ) {
 			Sys_BootMark( "safe mode" );
 			Q_strcat( commandLine, sizeof( commandLine ),
-				"+set r_renderThread 0 +set s_asyncLoad 0 " );
+				"+set r_renderThread 0 +set s_asyncLoad 0 +set s_mixThread 0 " );
 		}
 	}
 #endif
