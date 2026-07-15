@@ -2177,6 +2177,7 @@ const void	*RB_SwapBuffers( const void *data ) {
     ri.WIN_Present(&window);
 #ifdef VITA
 	RB_NotePresent();
+	tr.vitaFramePresented = qtrue;
 #endif
 
 	backEnd.projection2D = qfalse;

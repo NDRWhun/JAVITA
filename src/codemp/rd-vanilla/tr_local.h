@@ -1121,6 +1121,9 @@ typedef struct trGlobals_s {
 
 	float					rangedFog;
 	float					distanceCull;
+#ifdef VITA
+	qboolean				vitaFramePresented;	// a real frame has hit the screen since R_Init
+#endif
 } trGlobals_t;
 
 struct glconfigExt_t
