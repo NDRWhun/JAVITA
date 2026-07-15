@@ -3362,6 +3362,9 @@ void CL_LocalServers_f( void ) {
 	int			i, j;
 	netadr_t	to;
 
+#ifdef VITA
+	Sys_BootMark( "localservers" );
+#endif
 	Com_Printf( "Scanning for servers on the local network...\n");
 
 	// reset the list, waiting for response
@@ -3410,6 +3413,10 @@ void CL_GlobalServers_f( void ) {
 	netadr_t	to;
 	int			count, i, masterNum;
 	char		command[1024], *masteraddress;
+
+#ifdef VITA
+	Sys_BootMark( "globalservers" );
+#endif
 
 	if ((count = Cmd_Argc()) < 3 || (masterNum = atoi(Cmd_Argv(1))) < 0 || masterNum > MAX_MASTER_SERVERS)
 	{

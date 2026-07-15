@@ -2607,6 +2607,10 @@ int	FS_GetModList( char *listbuf, int bufsize ) {
 	char descPath[MAX_OSPATH];
 	fileHandle_t descHandle;
 
+#ifdef VITA
+	Sys_BootMark( "modlist scan" );
+#endif
+
 	int dummy;
 	char **pFiles0 = NULL;
 	char **pFiles1 = NULL;

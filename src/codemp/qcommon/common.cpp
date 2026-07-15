@@ -1517,6 +1517,12 @@ Com_Frame
 */
 void Com_Frame( void ) {
 
+#ifdef VITA
+	{
+		extern volatile unsigned int g_vitaMainTicks;
+		g_vitaMainTicks++;
+	}
+#endif
 	try
 	{
 #ifdef G2_PERFORMANCE_ANALYSIS

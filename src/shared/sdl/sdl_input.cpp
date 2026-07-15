@@ -709,8 +709,8 @@ void IN_Init( void *windowData )
 		"  Circle: use   Triangle: use force   D-pad UD: weapons   D-pad LR: force select\n"
 		"  Start: menu   Select: objectives   Start+Select: console\n"
 		"  Rear top-LEFT = HOLD modifier, then:\n"
-		"    +Triangle force-speed  +Circle force-heal  +Cross force-push  +Square force-pull\n"
-		"    +R saber-stance  +D-pad U/D inv-next/prev  +D-pad L inv-use  +D-pad R quick-saber\n"
+		"    +Triangle taunt  +Circle engage-duel  +Square saber-stance\n"
+		"    +D-pad U/D inv-next/prev  +D-pad L/R force-prev/next\n"
 		"  Rear top-right: zoom   rear bottom-left: force-fire   rear bottom-right: run\n"
 		"  (disable rear touch: vita_rearTouch 0)\n\n" );
 #endif

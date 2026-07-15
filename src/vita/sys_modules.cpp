@@ -24,12 +24,16 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // one ELF carries three modules whose bg_* copies can't collide.
 
 #include <string.h>
+#include <stdio.h>
 #include "sys/sys_public.h"
 
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
+#include <psp2/kernel/threadmgr.h>
 
 // unbuffered boot-milestone trail; survives a hang + forced power-off
+char g_lastBootMark[64] = "none";
+
 void Sys_BootMark( const char *s )
 {
 	static int first = 1;
@@ -43,6 +47,37 @@ void Sys_BootMark( const char *s )
 	sceIoWrite( fd, s, strlen( s ) );
 	sceIoWrite( fd, "\n", 1 );
 	sceIoClose( fd );
+	strncpy( g_lastBootMark, s, sizeof( g_lastBootMark ) - 1 );
+}
+
+// main-loop stall watchdog: names any main-thread freeze in the trail
+volatile unsigned int g_vitaMainTicks = 0;
+
+static int Sys_StallWatchdog( SceSize argc, void *argv )
+{
+	unsigned int last = 0;
+	int stalledFor = 0;
+	for ( ;; ) {
+		sceKernelDelayThread( 5 * 1000 * 1000 );
+		const unsigned int now = g_vitaMainTicks;
+		if ( now == last && now != 0 ) {
+			stalledFor += 5;
+			char msg[128];
+			snprintf( msg, sizeof( msg ), "STALL %ds (last mark: %s)", stalledFor, g_lastBootMark );
+			Sys_BootMark( msg );
+		} else {
+			if ( stalledFor ) Sys_BootMark( "stall recovered" );
+			stalledFor = 0;
+		}
+		last = now;
+	}
+	return 0;
+}
+
+void Sys_StartStallWatchdog( void )
+{
+	SceUID t = sceKernelCreateThread( "stall_wd", Sys_StallWatchdog, 0x10000100, 0x4000, 0, 0, NULL );
+	if ( t >= 0 ) sceKernelStartThread( t, 0, NULL );
 }
 
 extern "C" {

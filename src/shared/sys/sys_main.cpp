@@ -865,6 +865,13 @@ int main ( int argc, char* argv[] )
 
 	Com_Init (commandLine);
 
+#ifdef VITA
+	{
+		extern void Sys_StartStallWatchdog( void );
+		Sys_StartStallWatchdog();
+	}
+#endif
+
 #ifndef DEDICATED
 	SDL_version compiled;
 	SDL_version linked;
