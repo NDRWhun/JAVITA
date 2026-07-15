@@ -1781,6 +1781,7 @@ void R_BuildWorldVBO( world_t *world );
 void R_FreeWorldVBO( void );
 qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlighted, int entityNum );
 void RB_EndWorldVBO( void );
+void R_QueueEntityLightJob( trRefEntity_t *ent );	// batched onto the cores-0+1 drain
 qboolean R_OnRenderThread( void );
 void *R_GetCommandBuffer( int bytes );
 #endif

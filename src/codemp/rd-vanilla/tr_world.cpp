@@ -550,7 +550,11 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 
 	if(pModel->bspInstance)
 	{ //rwwRMG - added
+#ifdef VITA
+		R_QueueEntityLightJob( ent );
+#else
 		R_SetupEntityLighting(&tr.refdef, ent);
+#endif
 	}
 
 	//rww - Take this into account later?

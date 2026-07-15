@@ -3283,7 +3283,11 @@ void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 
 	// set up lighting now that we know we aren't culled
 	if ( !personalModel || r_shadows->integer > 1 ) {
+#ifdef VITA
+		R_QueueEntityLightJob( ent );
+#else
 		R_SetupEntityLighting( &tr.refdef, ent );
+#endif
 	}
 
 	// see if we are in a fog volume
@@ -3591,6 +3595,21 @@ static void G2_PreSkinSurface( const mdxmSurface_t *surface, const mdxaBone_t *s
 // --- anim worker (core 1): drains whole characters (bone eval + pre-skin) with core 0.
 // Safe per character: each job owns its CBoneCache; G2_TransformBone is statics-free now.
 static volatile int  s_g2JobNext = 0;		// shared take-index over s_g2Groups, atomic
+
+// entity light setup shares the drain: per-entity lightgrid sample + dlight adds
+#define G2MT_MAX_LIGHT_ENTS 512
+static trRefEntity_t *s_lightEnts[G2MT_MAX_LIGHT_ENTS];
+static int            s_lightEntCount = 0;
+static volatile int   s_lightEntNext = 0;
+
+void R_QueueEntityLightJob( trRefEntity_t *ent )
+{
+	if ( r_renderThread && r_renderThread->integer && s_lightEntCount < G2MT_MAX_LIGHT_ENTS ) {
+		s_lightEnts[s_lightEntCount++] = ent;
+		return;
+	}
+	R_SetupEntityLighting( &tr.refdef, ent );
+}
 static SceUID        s_g2WorkSema = -1, s_g2DoneSema = -1;
 static SceUID        s_g2WorkerThid = -1;
 
@@ -3631,6 +3650,11 @@ static void G2_DrainSkinJobs( void )
 		const int i = __atomic_fetch_add( &s_g2JobNext, 1, __ATOMIC_SEQ_CST );
 		if ( i >= s_g2NumGroups ) break;
 		G2_RunCharJob( &s_g2Groups[i] );
+	}
+	for ( ;; ) {
+		const int i = __atomic_fetch_add( &s_lightEntNext, 1, __ATOMIC_SEQ_CST );
+		if ( i >= s_lightEntCount ) break;
+		R_SetupEntityLighting( &tr.refdef, s_lightEnts[i] );
 	}
 }
 
@@ -3676,7 +3700,13 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 
 	if ( !s_g2SnapArena[buf] ) {
 		s_g2SnapArena[buf] = (byte*)malloc( G2_SNAP_ARENA_SIZE );
-		if ( !s_g2SnapArena[buf] ) { return; }	// no snapshots -> can't prep this frame
+		if ( !s_g2SnapArena[buf] ) {
+			// no snapshots this frame, but queued light jobs still must run
+			for ( int i = 0; i < s_lightEntCount; i++ )
+				R_SetupEntityLighting( &tr.refdef, s_lightEnts[i] );
+			s_lightEntCount = 0;
+			return;
+		}
 	}
 	if ( !s_g2SkinArena[buf] ) {
 		s_g2SkinArena[buf] = (byte*)malloc( G2_SKIN_ARENA_SIZE );	// best-effort; NULL -> pre-skin skipped
@@ -3737,15 +3767,17 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		}
 	}
 
-	// drain whole characters on cores 0+1; the join keeps the hand-off ordering intact
+	// drain characters + light setups on cores 0+1; joined before hand-off
 	s_g2JobNext = 0;
-	if ( s_g2NumGroups >= 2 && G2_EnsureSkinWorker() ) {
+	s_lightEntNext = 0;
+	if ( ( s_g2NumGroups + s_lightEntCount ) >= 2 && G2_EnsureSkinWorker() ) {
 		sceKernelSignalSema( s_g2WorkSema, 1 );
 		G2_DrainSkinJobs();
 		sceKernelWaitSema( s_g2DoneSema, 1, NULL );
 	} else {
 		G2_DrainSkinJobs();
 	}
+	s_lightEntCount = 0;
 }
 #endif // VITA
 

@@ -346,7 +346,11 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	// set up lighting now that we know we aren't culled
 	//
 	if ( !personalModel || r_shadows->integer > 1 ) {
+#ifdef VITA
+		R_QueueEntityLightJob( ent );
+#else
 		R_SetupEntityLighting( &tr.refdef, ent );
+#endif
 	}
 
 	//
