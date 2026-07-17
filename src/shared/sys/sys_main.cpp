@@ -815,7 +815,7 @@ int main ( int argc, char* argv[] )
 #ifdef VITA
 	Sys_BootMark( "main" );
 	// deterministic core layout: main 0, G2 skin worker 1, render backend 2
-	sceKernelChangeThreadCpuAffinityMask( sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_0 );
+	sceKernelChangeThreadCpuAffinityMask( sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_1 );
 	Sys_Vita_CheckConfigGate();
 #endif
 
