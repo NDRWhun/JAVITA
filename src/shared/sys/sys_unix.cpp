@@ -357,8 +357,7 @@ char **Sys_ListFiles( const char *directory, const char *extension, char *filter
 
 	while ((d = readdir(fdir)) != NULL) {
 #ifdef VITA
-		// readdir already carries the stat (sceIoDread); a stat() per entry cost
-		// 50+ s over the texture cache and froze the server browser
+		// readdir already carries the stat (sceIoDread); no per-entry stat() syscall
 		const int entIsDir = SCE_S_ISDIR( d->d_stat.st_mode );
 		if ( ( dironly && !entIsDir ) || ( !dironly && entIsDir ) )
 			continue;
