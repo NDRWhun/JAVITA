@@ -509,6 +509,8 @@ void RE_LAGoggles( void )
 	fog->tcScale = 2.0f / ( fog->parms.depthForOpaque * (1.0f + cos( tr.refdef.floatTime) * 0.1f));
 }
 
+extern void R_CacheWorldEffects( void );	// tr_WorldEffects.cpp
+
 void RE_RenderWorldEffects(void)
 {
 	setModeCommand_t	*cmd;
@@ -516,6 +518,8 @@ void RE_RenderWorldEffects(void)
 	if (!tr.registered) {
 		return;
 	}
+
+	R_CacheWorldEffects();
 
 	cmd = (setModeCommand_t *)R_GetCommandBuffer( sizeof( *cmd ) );
 	if ( !cmd ) {
