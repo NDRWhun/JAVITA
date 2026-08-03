@@ -2363,6 +2363,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 				{
 					dst = s_rawend&(MAX_RAW_SAMPLES-1);
 					s_rawend++;
+					// the ring wraps onto samples the mixer has not taken yet
+					if (s_rawend > rawEndStart + MAX_RAW_SAMPLES)
+						break;
 					s_rawsamples[dst].left = ((short *)data)[i*2] * intVolume;
 					s_rawsamples[dst].right = ((short *)data)[i*2+1] * intVolume;
 				}
@@ -2373,6 +2376,8 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 				{
 					dst = s_rawend&(MAX_RAW_SAMPLES-1);
 					s_rawend++;
+					if (s_rawend > rawEndStart + MAX_RAW_SAMPLES)
+						break;
 					s_rawsamples[dst].left  += ((short *)data)[i*2] * intVolume;
 					s_rawsamples[dst].right += ((short *)data)[i*2+1] * intVolume;
 				}
