@@ -175,6 +175,11 @@ without compiled vertex arrays.
 ==================
 */
 static void R_DrawElements( int numIndexes, const glIndex_t *indexes, int numVertexes ) {
+#ifdef USE_GXM_NATIVE
+	GXM_SetStateBits( glState.glStateBits );
+	GXM_DrawTess( numIndexes, indexes, numVertexes );
+	return;
+#endif
 	int		primitives;
 
 	primitives = r_primitives->integer;
@@ -510,12 +515,20 @@ static void DrawMultitextured( shaderCommands_t *input, int stage ) {
 
 	R_BindAnimatedImage( &pStage->bundle[1] );
 
+#ifdef USE_GXM_NATIVE
+	GXM_SetTexUnitCount( 2 );
+#endif
+
 	R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
 
 	//
 	// disable texturing on TEXTURE1, then select TEXTURE0
 	//
 	qglDisable( GL_TEXTURE_2D );
+
+#ifdef USE_GXM_NATIVE
+	GXM_SetTexUnitCount( 1 );
+#endif
 
 	GL_SelectTexture( 0 );
 }

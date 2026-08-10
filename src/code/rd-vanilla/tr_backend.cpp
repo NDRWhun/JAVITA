@@ -129,6 +129,13 @@ void GL_SelectTexture( int unit )
 }
 
 
+#ifdef USE_GXM_NATIVE
+// the GL cull face, translated for GXM's inverted winding
+#define GXM_SETCULL( glMode, on )	GXM_SetCull( glMode, on )
+#else
+#define GXM_SETCULL( glMode, on )	((void)0)
+#endif
+
 /*
 ** GL_Cull
 */
@@ -137,6 +144,9 @@ void GL_Cull( int cullType ) {
 		return;
 	}
 	glState.faceCulling = cullType;
+#ifdef USE_GXM_NATIVE
+	GXM_SetCullFlip( r_gxmCullFlip ? r_gxmCullFlip->integer : 0 );
+#endif
 	if (backEnd.projection2D){	//don't care, we're in 2d when it's always disabled
 		return;
 	}
@@ -144,6 +154,7 @@ void GL_Cull( int cullType ) {
 	if ( cullType == CT_TWO_SIDED )
 	{
 		qglDisable( GL_CULL_FACE );
+		GXM_SETCULL( 0, 0 );
 	}
 	else
 	{
@@ -154,10 +165,12 @@ void GL_Cull( int cullType ) {
 			if ( backEnd.viewParms.isMirror )
 			{
 				qglCullFace( GL_FRONT );
+				GXM_SETCULL( GL_FRONT, 1 );
 			}
 			else
 			{
 				qglCullFace( GL_BACK );
+				GXM_SETCULL( GL_BACK, 1 );
 			}
 		}
 		else
@@ -165,10 +178,12 @@ void GL_Cull( int cullType ) {
 			if ( backEnd.viewParms.isMirror )
 			{
 				qglCullFace( GL_BACK );
+				GXM_SETCULL( GL_BACK, 1 );
 			}
 			else
 			{
 				qglCullFace( GL_FRONT );
+				GXM_SETCULL( GL_FRONT, 1 );
 			}
 		}
 	}
@@ -179,6 +194,13 @@ void GL_Cull( int cullType ) {
 */
 void GL_TexEnv( int env )
 {
+#ifdef USE_GXM_NATIVE
+	// only unit 1 has an env, and it is set ahead of the cache test
+	if ( glState.currenttmu == 1 ) {
+		GXM_SetTexEnv( env == GL_ADD     ? GXM_TEXENV_ADD :
+					   env == GL_REPLACE ? GXM_TEXENV_REPLACE : GXM_TEXENV_MODULATE );
+	}
+#endif
 	if ( env == glState.texEnv[glState.currenttmu] )
 	{
 		return;
@@ -440,6 +462,13 @@ void SetViewportAndScissor( void ) {
 		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
 	qglScissor( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
 		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
+
+#ifdef USE_GXM_NATIVE
+	GXM_SetProjection( backEnd.viewParms.projectionMatrix );
+	GXM_SetDepthRange( 0.0f, 1.0f );	// the entity loop overrides this per depth hack
+	GXM_SetViewport( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
+		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
+#endif
 }
 
 /*
@@ -868,6 +897,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			RB_EndWorldVBO();	// leaving world surfaces -> flush VBO batch before entity/world matrix swap
 #endif
 			qglLoadMatrixf( backEnd.ori.modelMatrix );
+			#ifdef USE_GXM_NATIVE
+			GXM_SetModelView( backEnd.ori.modelMatrix );
+			#endif
 
 			//
 			// change depthrange if needed
@@ -941,6 +973,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 
 			qglLoadMatrixf( backEnd.ori.modelMatrix );
+			#ifdef USE_GXM_NATIVE
+			GXM_SetModelView( backEnd.ori.modelMatrix );
+			#endif
 
 			depthRange = pRender->depthRange;
 			switch ( depthRange )
@@ -1006,6 +1041,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	// go back to the world modelview matrix
 	qglLoadMatrixf( backEnd.viewParms.world.modelMatrix );
+	#ifdef USE_GXM_NATIVE
+	GXM_SetModelView( backEnd.viewParms.world.modelMatrix );
+	#endif
 	if ( depthRange ) {
 		qglDepthRange (0, 1);
 	}

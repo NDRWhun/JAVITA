@@ -117,6 +117,7 @@ cvar_t	*r_primitives;
 #ifdef VITA
 cvar_t	*r_renderThread;
 cvar_t	*r_worldVBO;
+cvar_t *r_gxmCullFlip;
 cvar_t	*r_dropTexturesOnLoad;
 #endif
 cvar_t	*r_texturebits;
@@ -1768,6 +1769,7 @@ void R_Register( void )
 	r_renderThread = ri.Cvar_Get( "r_renderThread", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
 	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
+	r_gxmCullFlip = ri.Cvar_Get( "r_gxmCullFlip", "1", CVAR_ARCHIVE );
 #ifdef USE_GXM_NATIVE
 	// read-only off: this is the gen-1 VBO and its buffer calls are qgl holes here
 	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ROM );
