@@ -976,7 +976,17 @@ static void ProjectDlightTexture2( void ) {
 
 			GL_State(GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL);// | GLS_ATEST_GT_0);
 
+#ifdef USE_GXM_NATIVE
+			// this pass stages its own de-indexed arrays, so tess holds the wrong data
+			GXM_SetTexUnitCount( 2 );
+			GXM_SetVertexArrays( &vertCoordsArray[0][0], &oldTexCoordsArray[0][0],
+				&texCoordsArray[0][0], (const unsigned char *)colorArray );
+#endif
+
 			R_DrawElements( numIndexes, hitIndexes, numIndexes );
+#ifdef USE_GXM_NATIVE
+			GXM_SetTexUnitCount( 1 );
+#endif
 
 			qglDisable( GL_TEXTURE_2D );
 			GL_SelectTexture(0);
@@ -999,6 +1009,11 @@ static void ProjectDlightTexture2( void ) {
 			{
 				GL_State( GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
 			}
+
+#ifdef USE_GXM_NATIVE
+			GXM_SetVertexArrays( &vertCoordsArray[0][0], &texCoordsArray[0][0],
+				NULL, (const unsigned char *)colorArray );
+#endif
 
 			R_DrawElements( numIndexes, hitIndexes, numIndexes );
 		}
@@ -1322,7 +1337,15 @@ static void ProjectDlightTexture( void ) {
 
 			GL_State(GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL);// | GLS_ATEST_GT_0);
 
+#ifdef USE_GXM_NATIVE
+			GXM_SetTexUnitCount( 2 );
+			GXM_SetVertexArrays( &tess.xyz[0][0], (const float *)tess.svars.texcoords[0],
+				&texCoordsArray[0][0], (const unsigned char *)colorArray );
+#endif
 			R_DrawElements( numIndexes, hitIndexes, tess.numVertexes );
+#ifdef USE_GXM_NATIVE
+			GXM_SetTexUnitCount( 1 );
+#endif
 
 			qglDisable( GL_TEXTURE_2D );
 			GL_SelectTexture(0);
@@ -1346,6 +1369,10 @@ static void ProjectDlightTexture( void ) {
 				GL_State( GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
 			}
 
+#ifdef USE_GXM_NATIVE
+			GXM_SetVertexArrays( &tess.xyz[0][0], &texCoordsArray[0][0],
+				NULL, (const unsigned char *)colorArray );
+#endif
 			R_DrawElements( numIndexes, hitIndexes, tess.numVertexes );
 		}
 
