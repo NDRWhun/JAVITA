@@ -301,9 +301,6 @@ void R_BuildWorldVBO( world_t *w )
 		s_wvbo.hash[h] = r;
 	}
 
-	size_t vramBefore = vglMemFree( VGL_MEM_VRAM );
-	size_t ramBefore  = vglMemFree( VGL_MEM_RAM );
-
 	glGenBuffers( 1, &s_wvbo.vbo );
 	glBindBuffer( GL_ARRAY_BUFFER, s_wvbo.vbo );
 	// DYNAMIC_DRAW: vitaGL then allocates RAM-first instead of VRAM-first, leaving
@@ -316,9 +313,6 @@ void R_BuildWorldVBO( world_t *w )
 	s_wvbo.ready = qtrue;
 	ri.Printf( PRINT_ALL, "r_worldVBO: baked %d surfaces (%d verts, %d indices, %d KB VBO)\n",
 		rCount, vCount, iCount, (int)( ( vCount * sizeof(wvboVert_t) ) >> 10 ) );
-	ri.Printf( PRINT_ALL, "r_worldVBO: VRAM free %u -> %u KB, RAM pool free %u -> %u KB\n",
-		(unsigned)( vramBefore >> 10 ), (unsigned)( vglMemFree( VGL_MEM_VRAM ) >> 10 ),
-		(unsigned)( ramBefore >> 10 ), (unsigned)( vglMemFree( VGL_MEM_RAM ) >> 10 ) );
 }
 
 static wvboSurf_t *WorldVbo_Lookup( const void *surfData )

@@ -24,7 +24,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #ifdef VITA
-#include <vitaGL.h>
+// the GL vocabulary the renderer is written in; the holes come after it
+#include "gl_vita_types.h"
 #else
 #if defined( __LINT__ )
 #	include <GL/gl.h>

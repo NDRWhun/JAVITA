@@ -46,7 +46,6 @@ include_directories(
   ${CMAKE_SOURCE_DIR}/src/lib/minizip/include
   ${CMAKE_SOURCE_DIR}/src/lib/minizip/include/minizip
   ${CMAKE_BINARY_DIR}/generated
-  $ENV{VITASDK}/arm-vita-eabi/include/SDL2
 )
 
 # Generate qcommon/q_version.h (normally produced by OpenJK's build).
@@ -91,6 +90,18 @@ add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-D__GNU_VISIBLE>)
 #----------------------------------------------------------------------------
 # Source set (see cmake/ja_sources.cmake).
 #----------------------------------------------------------------------------
+
+# Build SDL2 from the submodule with the vitaGL video driver off: the SDK's prebuilt
+# SDL2 pulls SDL_vitagles_vgl.c, which references vgl* symbols we no longer link
+set(VIDEO_VITA_VGL OFF CACHE BOOL "" FORCE)
+set(VIDEO_VITA_PVR OFF CACHE BOOL "" FORCE)
+set(VIDEO_VITA_PIB OFF CACHE BOOL "" FORCE)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SDL-vitagl EXCLUDE_FROM_ALL)
+
 include(${CMAKE_SOURCE_DIR}/cmake/ja_sources.cmake)
 
 # Native GXM backend. Compiled but inert until USE_GXM_NATIVE is defined and the
@@ -103,6 +114,14 @@ set(GXM_SOURCES
   ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla/tr_gxm_bridge.cpp
 )
 
+# same backend without the rd-vanilla bridge, for the standalone companion app
+set(GXM_SOURCES_NOBRIDGE
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_device.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_backend.cpp
+)
+
 add_executable(${PROJECT_NAME}.elf ${JA_SOURCES} ${GXM_SOURCES})
 target_compile_definitions(${PROJECT_NAME}.elf PRIVATE USE_GXM_NATIVE)
 
@@ -113,22 +132,17 @@ file(GLOB JK2_MP3_SOURCES ${CMAKE_SOURCE_DIR}/src/code/mp3code/*.c)
 set_source_files_properties(${JK2_MP3_SOURCES} PROPERTIES COMPILE_DEFINITIONS "window=mp3code_window")
 
 target_link_libraries(${PROJECT_NAME}.elf
-  # Vita GL stack
-  SDL2
-  vitaGL
-  vitashark
-  SceShaccCgExt
+  SDL2-static
   # image / compression
   jpeg
   png16
   z
   # math
   mathneon
-  # C++ runtime (vitaGL + OpenJK are C++)
+  # C++ runtime
   stdc++
   # Sce stubs
   taihen_stub
-  SceShaccCg_stub
   SceGxm_stub
   SceDisplay_stub
   SceCtrl_stub
@@ -152,18 +166,14 @@ target_link_libraries(${PROJECT_NAME}.elf
 
 #----------------------------------------------------------------------------
 # Companion: standalone "Configuration" app launched by the LiveArea -config gate.
-# Separate ELF/SELF (its own vitaGL context) bundled into the same VPK as
+# Separate ELF/SELF (its own GXM context) bundled into the same VPK as
 # companion.bin; the engine eboot sceAppMgrLoadExec's it when launched with -config.
 #----------------------------------------------------------------------------
-add_executable(companion.elf ${CMAKE_SOURCE_DIR}/src/vita/companion_main.cpp)
+add_executable(companion.elf ${CMAKE_SOURCE_DIR}/src/vita/companion_main.cpp ${GXM_SOURCES_NOBRIDGE})
 target_link_libraries(companion.elf
-  vitaGL
-  vitashark
-  SceShaccCgExt
   mathneon
   stdc++
   taihen_stub
-  SceShaccCg_stub
   SceGxm_stub
   SceDisplay_stub
   SceCtrl_stub
