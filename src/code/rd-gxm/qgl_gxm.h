@@ -760,8 +760,6 @@ void GXM_ImmEnd( void );
 #define qglVertexPointer(...) ((void)0)
 #undef qglViewport
 #define qglViewport(...) ((void)0)
-#undef qglX
-#define qglX(...) ((void)0)
 
 // used as calls AND as bare pointer tests, so these need real symbols
 void GXM_NoOpMultiTexCoord2f( unsigned int, float, float );
@@ -778,8 +776,6 @@ void GXM_NoOpTexUnit( unsigned int );
 
 // called directly, never through a qgl macro
 #define glActiveTextureARB(...) ((void)0)
-#define glAttachShader(...) ((void)0)
-#define glBindAttribLocation(...) ((void)0)
 #define glBindBuffer(...) ((void)0)
 #define glBindFramebuffer(...) ((void)0)
 #define glBindRenderbuffer(...) ((void)0)
@@ -787,14 +783,7 @@ void GXM_NoOpTexUnit( unsigned int );
 #define glBufferData(...) ((void)0)
 #define glCheckFramebufferStatus(...) (0)
 #define glClientActiveTextureARB(...) ((void)0)
-#define glCompileShader(...) ((void)0)
-#define glCreateProgram(...) (0)
-#define glCreateShader(...) (0)
 #define glDeleteBuffers(...) ((void)0)
-#define glDeleteProgram(...) ((void)0)
-#define glDeleteShader(...) ((void)0)
-#define glDisableVertexAttribArray(...) ((void)0)
-#define glEnableVertexAttribArray(...) ((void)0)
 #define glFinish(...) ((void)0)
 #define glFramebufferRenderbuffer(...) ((void)0)
 #define glFramebufferTexture2D(...) ((void)0)
@@ -803,18 +792,9 @@ void GXM_NoOpTexUnit( unsigned int );
 #define glGenRenderbuffers(...) ((void)0)
 #define glGenTextures(...) ((void)0)
 #define glGetError(...) (0)
-#define glGetProgramiv(...) ((void)0)
-#define glGetShaderiv(...) ((void)0)
-#define glGetUniformLocation(...) ((-1))
-#define glLinkProgram(...) ((void)0)
 #define glRenderbufferStorage(...) ((void)0)
-#define glShaderSource(...) ((void)0)
+#define glStencilOpSeparate(...) ((void)0)
 #define glTexImage2D(...) ((void)0)
 #define glTexParameteri(...) ((void)0)
-#define glUniform1i(...) ((void)0)
-#define glUniform4fv(...) ((void)0)
-#define glUniformMatrix4fv(...) ((void)0)
-#define glUseProgram(...) ((void)0)
-#define glVertexAttribPointer(...) ((void)0)
 
 #endif // QGL_GXM_H
