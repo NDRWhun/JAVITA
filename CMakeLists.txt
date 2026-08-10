@@ -26,7 +26,8 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 
 set(VITA_APP_NAME "JAVITA: Jedi Academy")
 set(VITA_TITLEID  "JAVITA001")
-set(VITA_VERSION  "00.01")
+set(PORT_VERSION  "0.1")
+set(VITA_VERSION  "00.01")	# SFO APP_VER is NN.NN and cannot carry the patch digit
 
 #----------------------------------------------------------------------------
 # Include domains: native OpenJK Jedi Academy single-player (code/).
@@ -49,7 +50,7 @@ include_directories(
 )
 
 # Generate qcommon/q_version.h (normally produced by OpenJK's build).
-set(GIT_TAG "JAVITA-0.1")
+set(GIT_TAG "JAVITA-${PORT_VERSION}")
 set(SOURCE_DATE "${CMAKE_BUILD_TYPE}")
 configure_file(
   ${CMAKE_SOURCE_DIR}/src/shared/qcommon/q_version.h.in

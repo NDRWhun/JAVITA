@@ -602,7 +602,7 @@ static void S_AsyncLoad_Poll( void )
 #endif // VITA
 
 
-// --- mixer thread (core 1): PCM mixing + music decode off the main thread ---
+// --- mixer thread (core 0): PCM mixing + music decode off the main thread ---
 static cvar_t		*s_mixThreadCvar;
 static SceUID		 s_mixThread = -1;
 static SceUID		 s_mixMutex  = -1;	// recursive: entry points nest via the Z_Malloc freeup cascade
@@ -5365,17 +5365,7 @@ byte *SND_malloc(int iSize, sfx_t *sfx)
 //
 void SND_setup()
 {
-#ifdef VITA
-	// big enough to keep a whole level's sounds resident (~33 MB at 22 kHz) so the pool never
-	// evicts mid-level. Otherwise a replayed sound re-decodes on the main thread and hangs.
-	// Costs heap (shared with Hunk/vitaGL); drop to 25 if memory gets tight.
-	s_soundpoolmegs = Cvar_Get("s_soundpoolmegs", "64", CVAR_ARCHIVE);
-	// floor: a stale archived value would defeat the default and revive the evict/reload hang.
-	if (s_soundpoolmegs->integer < 64)
-		Cvar_Set("s_soundpoolmegs", "64");
-#else
 	s_soundpoolmegs = Cvar_Get("s_soundpoolmegs", "25", CVAR_ARCHIVE);
-#endif
 	if (Sys_LowPhysicalMemory() )
 	{
 		Cvar_Set("s_soundpoolmegs", "0");

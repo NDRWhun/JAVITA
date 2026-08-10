@@ -49,10 +49,14 @@ typedef struct {
 	int			numIndexes;
 } wvboSurf_t;
 
+// a whole map can pass 65535 verts, so this buffer keeps 32-bit indices
+typedef unsigned int	wvboIndex_t;
+#define WVBO_INDEX_TYPE	GL_UNSIGNED_INT
+
 // Not stored in tr/world_t: both are memset every map load, which would leak the GL buffer.
 static struct {
 	GLuint		vbo;
-	glIndex_t	*idx;		// malloc; baked indices stay CPU-side, staged per shader run
+	wvboIndex_t	*idx;		// malloc; baked indices stay CPU-side, staged per shader run
 	wvboSurf_t	*surfs;		// malloc
 	int			numSurfs;
 	int			*hash;		// malloc; surfData -> surfs index, -1 empty
@@ -63,7 +67,7 @@ static struct {
 // backend-thread-only batch state; a run stages indices and flushes as one draw
 // (per-surface draws drown in vitaGL's per-draw shader re-patch cost)
 #define WVBO_STAGE_MAX 32768
-static glIndex_t	s_wvboStage[WVBO_STAGE_MAX];
+static wvboIndex_t	s_wvboStage[WVBO_STAGE_MAX];
 static int			s_wvboStaged;
 static qboolean		s_wvboBatch;
 static shader_t		*s_wvboBatchShader;
@@ -73,7 +77,7 @@ static void WorldVbo_Flush( void )
 	if ( !s_wvboStaged ) {
 		return;
 	}
-	qglDrawElements( GL_TRIANGLES, s_wvboStaged, GL_INDEX_TYPE, s_wvboStage );
+	qglDrawElements( GL_TRIANGLES, s_wvboStaged, WVBO_INDEX_TYPE, s_wvboStage );
 	backEnd.pc.c_wvboDraws++;
 	s_wvboStaged = 0;
 }
@@ -217,7 +221,7 @@ void R_BuildWorldVBO( world_t *w )
 	if ( numEl == 0 || totalVerts == 0 || totalIdx == 0 ) return;
 
 	wvboVert_t *verts = (wvboVert_t *)malloc( (size_t)totalVerts * sizeof(wvboVert_t) );
-	glIndex_t  *idx   = (glIndex_t *)malloc( (size_t)totalIdx * sizeof(glIndex_t) );
+	wvboIndex_t *idx  = (wvboIndex_t *)malloc( (size_t)totalIdx * sizeof(wvboIndex_t) );
 	s_wvbo.surfs      = (wvboSurf_t *)malloc( (size_t)numEl * sizeof(wvboSurf_t) );
 	if ( !verts || !idx || !s_wvbo.surfs ) {
 		free( verts ); free( idx ); free( s_wvbo.surfs ); s_wvbo.surfs = NULL;
@@ -247,7 +251,7 @@ void R_BuildWorldVBO( world_t *w )
 				WorldVbo_BakeColor( st, (const byte *)&pv[VERTEX_COLOR], o->rgba );
 			}
 			const int *si = (const int *)( (const byte *)f + f->ofsIndices );
-			for ( int k = 0; k < f->numIndices; k++ ) idx[iCount++] = (glIndex_t)( si[k] + baseVertex );
+			for ( int k = 0; k < f->numIndices; k++ ) idx[iCount++] = (wvboIndex_t)( si[k] + baseVertex );
 		} else {
 			srfGridMesh_t *g = (srfGridMesh_t *)s->data;
 			if ( g->width < 2 || g->height < 2 ) continue;
@@ -401,13 +405,13 @@ qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlight
 	if ( s_wvboStaged + rec->numIndexes > WVBO_STAGE_MAX ) {
 		WorldVbo_Flush();
 		if ( rec->numIndexes > WVBO_STAGE_MAX ) {	// oversized surface: draw straight from the bake
-			qglDrawElements( GL_TRIANGLES, rec->numIndexes, GL_INDEX_TYPE, s_wvbo.idx + rec->firstIndex );
+			qglDrawElements( GL_TRIANGLES, rec->numIndexes, WVBO_INDEX_TYPE, s_wvbo.idx + rec->firstIndex );
 			backEnd.pc.c_wvboDraws++;
 			backEnd.pc.c_wvboSurfaces++;
 			return qtrue;
 		}
 	}
-	memcpy( s_wvboStage + s_wvboStaged, s_wvbo.idx + rec->firstIndex, (size_t)rec->numIndexes * sizeof(glIndex_t) );
+	memcpy( s_wvboStage + s_wvboStaged, s_wvbo.idx + rec->firstIndex, (size_t)rec->numIndexes * sizeof(wvboIndex_t) );
 	s_wvboStaged += rec->numIndexes;
 	backEnd.pc.c_wvboSurfaces++;
 	return qtrue;

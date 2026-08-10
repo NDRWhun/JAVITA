@@ -5481,6 +5481,12 @@ void  Menus_Activate(menuDef_t *menu)
 		}
 	}
 
+#ifdef VITA
+	// The SP main menu ships silent; play the JAMP main-menu theme (shared JA asset) when it opens.
+	if ( menu->window.name && !Q_stricmp( menu->window.name, "mainMenu" ) )
+		DC->executeText( EXEC_APPEND, "music music/t2_dpred/ImpBaseB_Action\n" );
+#endif
+
 //	menu->appearanceTime = DC->realTime + 1000;
 	menu->appearanceTime = 0;
 	menu->appearanceCnt = 0;

@@ -93,6 +93,7 @@ cvar_t	*r_allowExtensions;
 
 cvar_t	*r_ext_compressed_textures;
 cvar_t	*r_ext_compressed_lightmaps;
+cvar_t	*r_mergeLightmaps;
 cvar_t	*r_ext_preferred_tc_method;
 cvar_t	*r_ext_gamma_control;
 cvar_t	*r_ext_multitexture;
@@ -1643,6 +1644,7 @@ void R_Register( void )
 	}
 #endif
 	r_ext_compressed_lightmaps = ri.Cvar_Get( "r_ext_compress_lightmaps", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_mergeLightmaps = ri.Cvar_Get( "r_mergeLightmaps", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ext_preferred_tc_method = ri.Cvar_Get( "r_ext_preferred_tc_method", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ext_gamma_control = ri.Cvar_Get( "r_ext_gamma_control", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ext_multitexture = ri.Cvar_Get( "r_ext_multitexture", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
@@ -1745,7 +1747,7 @@ void R_Register( void )
 	r_facePlaneCull = ri.Cvar_Get ("r_facePlaneCull", "1", CVAR_ARCHIVE_ND );
 
 	r_dlightStyle = ri.Cvar_Get ("r_dlightStyle", "1", CVAR_ARCHIVE_ND);
-	r_surfaceSprites = ri.Cvar_Get ("r_surfaceSprites", "1", CVAR_ARCHIVE_ND);
+	r_surfaceSprites = ri.Cvar_Get ("r_surfaceSprites", "0", CVAR_ARCHIVE_ND);	// Vita default off: foliage sprite overdraw
 	r_surfaceWeather = ri.Cvar_Get ("r_surfaceWeather", "0", CVAR_TEMP);
 
 	r_windSpeed = ri.Cvar_Get ("r_windSpeed", "0", 0);
@@ -1760,9 +1762,9 @@ void R_Register( void )
 #ifdef VITA
 	// 1 = backend on a dedicated render thread (default), 0 = inline on main. CVAR_LATCH.
 	r_renderThread = ri.Cvar_Get( "r_renderThread", "1", CVAR_ARCHIVE | CVAR_LATCH );
-	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ARCHIVE );	// takes effect on next map load
 	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
 	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
+	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ARCHIVE );	// takes effect on next map load
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE );
 #endif
 	ri.Cvar_CheckRange( r_primitives, MIN_PRIMITIVES, MAX_PRIMITIVES, qtrue );
@@ -1986,6 +1988,11 @@ void R_Init( void ) {
 		backEndDataPtr[1] = backEndDataPtr[0];
 	}
 	backEndData = backEndDataPtr[0];
+	// vid_restart can land here on odd parity; the hand-off state must match slot 0
+	activeBackEnd = 0;
+	rendBackEnd = 0;
+	tr.smpFrame = 0;
+	set_tessPtr( &tessArray[0] );
 #else
 	backEndData = (backEndData_t *) R_Hunk_Alloc( sizeof( backEndData_t ), qtrue );
 #endif
@@ -2039,12 +2046,6 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 		R_IssuePendingRenderCommands();
 		R_FreeGhoulSkinArena();	// release the bone-snapshot arenas during load; re-malloc'd next frame
 	}
-	// Every shutdown (map change too, not just vid_restart): the hunk that s_wvbo's
-	// surfData/shader keys point into is about to be cleared, and the old VBO would
-	// otherwise sit in the vitaGL pool through the next map's texture load.
-	if ( tr.registered ) {
-		R_FreeWorldVBO();
-	}
 #endif
 
 	if ( r_DynamicGlow && r_DynamicGlow->integer )
@@ -2080,6 +2081,13 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 		qglDeleteTextures( 1, &tr.blurImage );
 	}
 
+	// Every shutdown (map change too, not just vid_restart): the hunk that s_wvbo's
+	// surfData/shader keys point into is about to be cleared, and the old VBO would
+	// otherwise sit in the vitaGL pool through the next map's texture load.
+	if ( tr.registered ) {
+		R_FreeWorldVBO();
+	}
+
 	R_ShutdownWorldEffects();
 	R_ShutdownFonts();
 	if ( tr.registered )
@@ -2095,16 +2103,6 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 #endif
 		if ( destroyWindow )
 		{
-#ifdef VITA
-			// vid_restart: the render thread OWNS the GXM context and is about to have
-			// its window torn down. Stop + join it here (after the drain above parked
-			// it) so the remaining teardown GL (R_DeleteTextures, WIN_Shutdown) runs
-			// single-threaded, exactly like the default path. Resets rend_thid so the
-			// next R_Init re-creates the thread. No-op unless r_renderThread was on.
-			if ( r_renderThread && r_renderThread->integer ) {
-				R_StopRenderThread();
-			}
-#endif
 			R_DeleteTextures();	// only do this for vid_restart now, not during things like map load
 
 			if ( restarting )
@@ -2116,6 +2114,10 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
+#ifdef VITA
+		// the render thread owns the GXM context; join it before the window goes away
+		R_StopRenderThread();
+#endif
 		ri.WIN_Shutdown();
 #ifdef VITA
 		// WIN_Shutdown destroyed the window/context (and R_StopRenderThread killed the

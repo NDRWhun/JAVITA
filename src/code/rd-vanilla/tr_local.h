@@ -59,8 +59,8 @@ static inline unsigned int vita_get_tls_reg( void ) {
 #define tessPtr ( (shaderCommands_t *)( *(uintptr_t *)get_tls_addr() ) )
 #endif
 
-#define GL_INDEX_TYPE		GL_UNSIGNED_INT
-typedef unsigned int glIndex_t;
+#define GL_INDEX_TYPE		GL_UNSIGNED_SHORT
+typedef unsigned short glIndex_t;	// batch indices are < SHADER_MAX_VERTEXES (1000); GXM-native 16-bit halves the index fetch
 
 extern refimport_t ri;
 
@@ -801,6 +801,7 @@ typedef struct {
 	int			globalFog;
 
 	int			startLightMapIndex;
+	qboolean	lightmapsMerged;	// false when the lump was empty, so the surfaces must not be remapped
 
 	vec3_t		lightGridOrigin;
 	vec3_t		lightGridSize;
@@ -1193,6 +1194,7 @@ extern cvar_t	*r_ignorehwgamma;		// overrides hardware gamma capabilities
 extern cvar_t	*r_allowExtensions;				// global enable/disable of OpenGL extensions
 extern cvar_t	*r_ext_compressed_textures;		// these control use of specific extensions
 extern cvar_t	*r_ext_compressed_lightmaps;	// turns on compression of lightmaps, off by default
+extern cvar_t	*r_mergeLightmaps;				// pack lightmaps into atlas pages so world surfaces batch
 extern cvar_t	*r_ext_preferred_tc_method;
 extern cvar_t	*r_ext_gamma_control;
 extern cvar_t	*r_ext_texenv_op;
@@ -1683,6 +1685,7 @@ CRenderableSurface():
 		boneCache=0;
 		surfaceData=0;
 		boneMats=0;
+		preSkinned=0;
 #ifdef _G2_GORE
 		ident = SF_MDX;
 		alternateTex=0;

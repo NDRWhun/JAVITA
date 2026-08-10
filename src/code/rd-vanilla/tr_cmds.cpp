@@ -100,7 +100,8 @@ SceUID rend_init_done = -1;
 volatile qboolean pendingCtxInit = qfalse;
 static SceUID rend_thid = -1;
 static volatile qboolean rend_should_exit = qfalse;
-static volatile int rend_handedBuffer = 0;	// index of the frame being handed off; written before Signal(in), read after Wait(in)
+static volatile int rend_handedBuffer = 0;
+static volatile int rend_error = 0;	// index of the frame being handed off; written before Signal(in), read after Wait(in)
 
 /*
 Render-thread semaphore protocol (all created at 0; R = render thread, M = main):
@@ -142,6 +143,8 @@ static int renderThread( SceSize argc, void *argv ) {
 			// this, every present from the render thread does nothing -> black screen.
 			ri.WIN_MakeCurrent();
 			GL_SetDefaultState();
+			extern void RB_ReprimeFFP( void );
+			RB_ReprimeFFP();		// fresh context: re-run the FFP prime
 			R_Splash();				// get something on screen asap
 			// wait out the splash before releasing main: registration GL must not
 			// overlap the first scene
@@ -155,10 +158,20 @@ static int renderThread( SceSize argc, void *argv ) {
 		rendBackEnd = rend_handedBuffer;	// adopt the handed index; mispairing is structurally impossible
 		backEnd.smpFrame = rendBackEnd;
 		set_tessPtr( &tessArray[rendBackEnd] );
-		RB_ExecuteRenderCommands( backEndDataPtr[rendBackEnd]->commands.cmds );
+		try {
+			RB_ExecuteRenderCommands( backEndDataPtr[rendBackEnd]->commands.cmds );
+		} catch ( int code ) {
+			// else a backend Com_Error would std::terminate the process
+			rend_error = code;
+		}
 		sceKernelSignalSema( rend_mutex_out, 1 );
 	}
 	return sceKernelExitDeleteThread( 0 );
+}
+
+// so Com_Error can throw to main instead of shutting down from the backend
+extern "C" qboolean Sys_InRenderThread( void ) {
+	return (qboolean)( rend_thid >= 0 && sceKernelGetThreadId() == rend_thid );
 }
 
 void R_StartRenderThread( void ) {
@@ -167,6 +180,7 @@ void R_StartRenderThread( void ) {
 	}
 	rend_should_exit = qfalse;
 	pendingCtxInit   = qfalse;
+	rend_error       = 0;
 	rend_init_done = sceKernelCreateSema( "rend_init", 0, 0, 2, NULL );
 	rend_mutex_in  = sceKernelCreateSema( "rend_in",   0, 0, 1, NULL );
 	rend_mutex_out = sceKernelCreateSema( "rend_out",  0, 0, 1, NULL );
@@ -198,7 +212,8 @@ void R_StopRenderThread( void ) {
 R_IssueRenderCommands
 ====================
 */
-void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
+// endOfFrame: a mid-frame flush must not flip away from the scene arrays still in use
+void R_IssueRenderCommands( qboolean runPerformanceCounters, qboolean endOfFrame ) {
 	renderCommandList_t	*cmdList;
 
 	cmdList = &backEndData->commands;
@@ -214,16 +229,24 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 	if ( r_renderThread && r_renderThread->integer ) {
 		// hand the frame to the render thread, flip the frontend to the other buffer
 		sceKernelWaitSema( rend_mutex_out, 1, NULL );
+
+		if ( rend_error ) {	// console isn't backend-safe, so log it here on main
+			ri.Printf( PRINT_WARNING, "render backend dropped a frame (err %d): %s\n",
+				rend_error, ri.Cvar_VariableString( "com_errorMessage" ) );
+			rend_error = 0;
+		}
 		// backend parked between Wait(out) and Signal(in): its counters are stable here
 		if ( runPerformanceCounters ) {
 			R_PerformanceCounters();
 		}
 		rend_handedBuffer = activeBackEnd;
 		sceKernelSignalSema( rend_mutex_in, 1 );
-		activeBackEnd = !activeBackEnd;
-		tr.smpFrame = activeBackEnd;
-		backEndData = backEndDataPtr[activeBackEnd];
-		set_tessPtr( &tessArray[activeBackEnd] );
+		if ( endOfFrame ) {
+			activeBackEnd = !activeBackEnd;
+			tr.smpFrame = activeBackEnd;
+			backEndData = backEndDataPtr[activeBackEnd];
+			set_tessPtr( &tessArray[activeBackEnd] );
+		}
 		return;
 	}
 #endif
@@ -253,7 +276,7 @@ void R_IssuePendingRenderCommands( void ) {
 	if ( !tr.registered ) {
 		return;
 	}
-	R_IssueRenderCommands( qfalse );
+	R_IssueRenderCommands( qfalse, qfalse );
 
 #ifdef VITA
 	// The hand-off above is asynchronous; a pending flush must wait until the backend
@@ -647,7 +670,7 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	}
 	cmd->commandId = RC_SWAP_BUFFERS;
 
-	R_IssueRenderCommands( qtrue );
+	R_IssueRenderCommands( qtrue, qtrue );
 
 	R_InitNextFrame();
 
