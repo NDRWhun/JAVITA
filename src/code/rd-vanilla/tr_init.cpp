@@ -118,6 +118,7 @@ cvar_t	*r_primitives;
 cvar_t	*r_renderThread;
 cvar_t	*r_worldVBO;
 cvar_t *r_gxmCullFlip;
+cvar_t *r_gxmStats;
 cvar_t	*r_dropTexturesOnLoad;
 #endif
 cvar_t	*r_texturebits;
@@ -1770,12 +1771,8 @@ void R_Register( void )
 	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
 	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
 	r_gxmCullFlip = ri.Cvar_Get( "r_gxmCullFlip", "1", CVAR_ARCHIVE );
-#ifdef USE_GXM_NATIVE
-	// read-only off: this is the gen-1 VBO and its buffer calls are qgl holes here
-	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ROM );
-#else
-	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ARCHIVE );	// takes effect on next map load
-#endif
+	r_gxmStats = ri.Cvar_Get( "r_gxmStats", "0", CVAR_ARCHIVE );	// frames per stat line, 0 = off
+	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE );
 #endif
 	ri.Cvar_CheckRange( r_primitives, MIN_PRIMITIVES, MAX_PRIMITIVES, qtrue );
@@ -2099,7 +2096,7 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 		R_IssuePendingRenderCommands();
 #ifdef VITA
 		// map change: the hunk the VBO's surface keys point into is about to be cleared
-		R_FreeWorldVBO();
+		R_WorldVBO_Clear();
 
 		// map change: drop old-map textures now, not at the new map's first frame
 		// (drained above so main owns GL; builtins re-create in R_Init)

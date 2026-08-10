@@ -1,9 +1,11 @@
 /*
 ===========================================================================
-Copyright (C) 2026, JK2VITA contributors
+Copyright (C) 1999 - 2005, Id Software, Inc.
+Copyright (C) 2000 - 2013, Raven Software, Inc.
+Copyright (C) 2001 - 2013, Activision, Inc.
+Copyright (C) 2013 - 2015, OpenJK contributors
 
-This file is part of JAVITA, a PS Vita port built on the OpenJK
-source code.
+This file is part of the OpenJK source code.
 
 OpenJK is free software; you can redistribute it and/or modify it
 under the terms of the GNU General Public License version 2 as
@@ -19,397 +21,458 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// tr_worldvbo.cpp -- static world VBO (Vita, r_worldVBO). Eligible opaque world
-// surfaces bake into a resident vertex buffer; indices stage per shader run.
-// Ineligible/dlit/fogged fall back to tess. Grids bake at full LOD.
+// World geometry is static, so its vertices live in GPU buffers built at load and
+// only indices are written per frame. Eligible planar surfaces draw straight from
+// there; everything else falls through to the unchanged tess path.
 
 #include "../server/exe_headers.h"
 
 #include "tr_local.h"
+#ifdef USE_GXM_NATIVE
 #include "../rd-gxm/gxm_device.h"
+#endif
 
 #ifdef VITA
 
-// interleaved vertex: xyz f3 @0, diffuse st f2 @12, lightmap st f2 @20, rgba u8 @28 -> 32 bytes.
-typedef struct {
-	float	xyz[3];
-	float	st0[2];
-	float	st1[2];
-	byte	rgba[4];
-} wvboVert_t;
-#define WVBO_STRIDE		((GLsizei)sizeof(wvboVert_t))
-#define WVBO_OFS_XYZ	((const GLvoid *)0)
-#define WVBO_OFS_ST0	((const GLvoid *)12)
-#define WVBO_OFS_ST1	((const GLvoid *)20)
-#define WVBO_OFS_RGBA	((const GLvoid *)28)
+// owned by tr_init.cpp
+extern cvar_t	*r_worldVBO;
+#ifdef USE_GXM_NATIVE
+extern cvar_t	*r_gxmStats;
+extern cvar_t	*r_gxmCullFlip;
+#endif
+
+#define WVBO_MAXGROUPS		64
+#define WVBO_GROUPVERTS		65000					// u16 indices address one group
+#define WVBO_STRIDE			32						// xyz(12) st(8) lm(8) rgba(4)
+#define WVBO_OFS_ST			12
+#define WVBO_OFS_LM			20
+#define WVBO_OFS_RGBA		28
 
 typedef struct {
-	const void	*surfData;	// == msurface_t.data; render-time lookup key
-	shader_t	*shader;
-	int			firstIndex;	// into the baked index array
-	int			numIndexes;
-} wvboSurf_t;
+#ifdef USE_GXM_NATIVE
+	void	*data;					// GPU-mapped, read straight by sceGxmSetVertexStream
+	SceUID	uid;
+#else
+	GLuint	vbo;
+#endif
+	int		numVerts;
+} wvboGroup_t;
 
-// a whole map can pass 65535 verts, so this buffer keeps 32-bit indices
-typedef unsigned int	wvboIndex_t;
-#define WVBO_INDEX_TYPE	GL_UNSIGNED_INT
+static wvboGroup_t	wvbo_groups[WVBO_MAXGROUPS];
+static int			wvbo_numGroups;
+static int			wvbo_bytes;
+static qboolean		wvbo_failed;
 
-// Not stored in tr/world_t: both are memset every map load, which would leak the GL buffer.
-static struct {
-	GLuint		vbo;
-	wvboIndex_t	*idx;		// malloc; baked indices stay CPU-side, staged per shader run
-	wvboSurf_t	*surfs;		// malloc
-	int			numSurfs;
-	int			*hash;		// malloc; surfData -> surfs index, -1 empty
-	int			hashSize;	// power of two
-	qboolean	ready;
-} s_wvbo;
+// per-frame index scratch; one draw flushes it
+#define WVBO_MAXIDX	(1 << 16)
+static glIndex_t	wvbo_idx[WVBO_MAXIDX];
+static int			wvbo_numIdx;
+static int			wvbo_curGroup = -1;
 
-// backend-thread-only batch state; a run stages indices and flushes as one draw
-// (per-surface draws drown in vitaGL's per-draw shader re-patch cost)
-#define WVBO_STAGE_MAX 32768
-static wvboIndex_t	s_wvboStage[WVBO_STAGE_MAX];
-static int			s_wvboStaged;
-static qboolean		s_wvboBatch;
-static shader_t		*s_wvboBatchShader;
+// per-frame, so the fallback reasons can be told apart
+static int	wvbo_statBatches, wvbo_statSurfs, wvbo_statTris;
+static int	wvbo_statNotResident, wvbo_statLit, wvbo_statGroupSplit, wvbo_statFull;
 
-static void WorldVbo_Flush( void )
+/*
+===============
+R_WorldVBO_Clear
+===============
+*/
+void R_WorldVBO_Clear( void )
 {
-	if ( !s_wvboStaged ) {
-		return;
+	GXM_Sync();
+	for ( int i = 0; i < wvbo_numGroups; i++ ) {
+#ifdef USE_GXM_NATIVE
+		if ( wvbo_groups[i].data ) {
+			GXM_Free( wvbo_groups[i].uid );
+		}
+#else
+		if ( wvbo_groups[i].vbo ) {
+			glDeleteBuffers( 1, &wvbo_groups[i].vbo );
+		}
+#endif
 	}
-	qglDrawElements( GL_TRIANGLES, s_wvboStaged, WVBO_INDEX_TYPE, s_wvboStage );
-	backEnd.pc.c_wvboDraws++;
-	s_wvboStaged = 0;
+	memset( wvbo_groups, 0, sizeof( wvbo_groups ) );
+	wvbo_numGroups = 0;
+	wvbo_bytes = 0;
+	wvbo_failed = qfalse;
+	wvbo_numIdx = 0;
+	wvbo_curGroup = -1;
 }
 
-extern bool g_bRenderGlowingObjects;	// glow prepass draws per-stage subsets; VBO can't
-
-static qboolean WorldVbo_Eligible( const shader_t *sh, int surfaceType )
+// A fresh GL context invalidates every buffer name. GXM memblocks are owned by the
+// process rather than a context, so there is nothing to forget there.
+void R_WorldVBO_ContextReset( void )
 {
-	if ( surfaceType != SF_FACE && surfaceType != SF_GRID ) return qfalse;
-	if ( !sh || sh->defaultShader || !sh->stages ) return qfalse;
-	if ( sh->sky || ( sh->surfaceFlags & SURF_SKY ) ) return qfalse;
-	if ( sh->polygonOffset || sh->numDeforms != 0 ) return qfalse;
-	if ( sh->sort != SS_OPAQUE || sh->numUnfoggedPasses != 1 ) return qfalse;
-	// JKA lightstyles animate per-frame; styled surfaces normally produce extra
-	// stages (rejected above) but keep the bake strictly static-style-0 anyway.
-	if ( sh->styles[0] != LS_NORMAL && sh->styles[0] < LS_UNUSED ) return qfalse;
-	if ( sh->styles[1] < LS_UNUSED ) return qfalse;
+#ifndef USE_GXM_NATIVE
+	memset( wvbo_groups, 0, sizeof( wvbo_groups ) );
+	wvbo_numGroups = 0;
+	wvbo_bytes = 0;
+#endif
+}
 
-	const shaderStage_t *st = &sh->stages[0];
-	if ( !st->active ) return qfalse;
-	if ( st->ss && st->ss->surfaceSpriteType ) return qfalse;
-	if ( st->stateBits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS | GLS_ATEST_BITS ) ) return qfalse;
-
-	switch ( st->rgbGen ) {
-	case CGEN_IDENTITY: case CGEN_IDENTITY_LIGHTING: case CGEN_CONST:
-		break;
-	case CGEN_VERTEX: case CGEN_EXACT_VERTEX:
-		if ( sh->lightmapIndex[0] == LIGHTMAP_BY_VERTEX ) return qfalse;	// per-frame styleColors
-		break;
-	default:
-		return qfalse;	// waveform/entity/lightingDiffuse/fog/lightmapstyle are per-frame
+// A stage can be drawn from the buffer when both its coordinates and its colour
+// are already in it: uv0 for the diffuse, uv1 for a collapsed lightmap, and
+// either a constant tint or the stream colour.
+static qboolean R_WorldVBO_StageEligible( const shaderStage_t *st )
+{
+	if ( !st->active ) {
+		return qfalse;
 	}
-	switch ( st->alphaGen ) {
-	case AGEN_IDENTITY: case AGEN_SKIP: case AGEN_CONST: case AGEN_VERTEX:
+	if ( st->bundle[0].tcGen != TCGEN_TEXTURE || st->bundle[0].numTexMods ) {
+		return qfalse;
+	}
+	if ( st->bundle[1].image
+		&& ( st->bundle[1].tcGen != TCGEN_LIGHTMAP || st->bundle[1].numTexMods ) ) {
+		return qfalse;
+	}
+	switch ( st->rgbGen ) {
+	case CGEN_IDENTITY:
+	case CGEN_IDENTITY_LIGHTING:
+	case CGEN_EXACT_VERTEX:
+	case CGEN_VERTEX:
 		break;
 	default:
 		return qfalse;
 	}
-	// The bake hardwires st0=diffuse/st1=lightmap; admit only that exact layout
-	// (CollapseMultitexture also merges non-lightmap stage pairs -> reject those).
-	const textureBundle_t *b0 = &st->bundle[0];
-	if ( !b0->image || b0->isVideoMap || b0->numImageAnimations > 1 ) return qfalse;
-	if ( b0->tcGen != TCGEN_TEXTURE || b0->isLightmap ) return qfalse;
-	if ( b0->numTexMods != 0 ) return qfalse;	// scroll/turb/etc are per-frame
-	const textureBundle_t *b1 = &st->bundle[1];
-	if ( b1->image ) {
-		if ( b1->isVideoMap || b1->numImageAnimations > 1 ) return qfalse;
-		if ( b1->tcGen != TCGEN_LIGHTMAP || !b1->isLightmap ) return qfalse;
-		if ( b1->numTexMods != 0 ) return qfalse;
+	// ParseStage rewrites identity to skip on script-authored stages
+	return (qboolean)( st->alphaGen == AGEN_IDENTITY || st->alphaGen == AGEN_SKIP );
+}
+
+// Only the static per-vertex data the backend reads can come from the buffer;
+// anything view- or time-dependent has to keep running through tess.
+static qboolean R_WorldVBO_ShaderEligible( const shader_t *shader )
+{
+	if ( shader->sky ) {
+		return qfalse;					// sky runs its own stage iterator, not the generic one
+	}
+	if ( shader->polygonOffset ) {
+		return qfalse;					// this path never sets GL_POLYGON_OFFSET_FILL
+	}
+	if ( shader->sort > SS_OPAQUE ) {
+		return qfalse;					// blended surfaces need their draw order kept
+	}
+	if ( shader->numDeforms ) {
+		return qfalse;					// deformVertexes rewrites xyz every frame
+	}
+	if ( shader->numUnfoggedPasses < 1 || shader->numUnfoggedPasses > MAX_SHADER_STAGES ) {
+		return qfalse;
+	}
+	if ( shader->lightmapIndex[0] == LIGHTMAP_BY_VERTEX ) {
+		// the stream colour is only static while no light style animates it
+		if ( shader->styles[0] != LS_NORMAL ) {
+			return qfalse;
+		}
+		for ( int i = 1; i < MAXLIGHTMAPS; i++ ) {
+			if ( shader->styles[i] != LS_UNUSED && shader->styles[i] != LS_NONE ) {
+				return qfalse;
+			}
+		}
+	} else if ( shader->lightmapIndex[0] < 0 ) {
+		return qfalse;
+	}
+
+	for ( int i = 0; i < shader->numUnfoggedPasses; i++ ) {
+		if ( !R_WorldVBO_StageEligible( &shader->stages[i] ) ) {
+			return qfalse;
+		}
 	}
 	return qtrue;
 }
 
-// Reproduce ComputeColors for the eligible cgens. Eligible surfaces are opaque and
-// unblended, so alpha is never sampled -> bake 255.
-static void WorldVbo_BakeColor( const shaderStage_t *st, const byte *raw, byte *out )
+typedef struct {
+	srfSurfaceFace_t	*face;
+	int					shader;			// tr.shaders[] index; only adjacency matters
+} wvboEntry_t;
+
+static int R_WorldVBO_CompareEntry( const void *a, const void *b )
 {
-	switch ( st->rgbGen ) {
-	default:
-	case CGEN_IDENTITY:
-		out[0] = out[1] = out[2] = 255;
-		break;
-	case CGEN_IDENTITY_LIGHTING:
-		out[0] = out[1] = out[2] = tr.identityLightByte;
-		break;
-	case CGEN_CONST:
-		out[0] = st->constantColor[0]; out[1] = st->constantColor[1]; out[2] = st->constantColor[2];
-		break;
-	case CGEN_EXACT_VERTEX:
-		out[0] = raw[0]; out[1] = raw[1]; out[2] = raw[2];
-		break;
-	case CGEN_VERTEX:
-		if ( tr.identityLight == 1.0f ) {
-			out[0] = raw[0]; out[1] = raw[1]; out[2] = raw[2];
-		} else {
-			out[0] = (byte)( raw[0] * tr.identityLight );
-			out[1] = (byte)( raw[1] * tr.identityLight );
-			out[2] = (byte)( raw[2] * tr.identityLight );
-		}
-		break;
-	}
-	out[3] = 255;
+	return ( (const wvboEntry_t *)a )->shader - ( (const wvboEntry_t *)b )->shader;
 }
 
-void R_FreeWorldVBO( void )
+/*
+===============
+R_BuildWorldVBO
+
+Packs eligible planar surfaces into GPU vertex buffers once per map.
+===============
+*/
+void R_BuildWorldVBO( world_t &worldData )
 {
-	if ( s_wvbo.vbo ) {
-		// vitaGL keeps per-array vbo references (written through at draw); re-point
-		// the arrays we used before deleting so no dangling buffer pointer survives.
-		glBindBuffer( GL_ARRAY_BUFFER, 0 );
-		qglVertexPointer( 3, GL_FLOAT, 16, NULL );
-		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, NULL );
-		GL_SelectTexture( 1 );
-		qglTexCoordPointer( 2, GL_FLOAT, 0, NULL );
+	if ( !r_worldVBO || !r_worldVBO->integer || wvbo_failed ) {
+		return;
+	}
+
+	const int numSurfaces = worldData.numsurfaces;
+	if ( numSurfaces <= 0 ) {
+		return;
+	}
+
+	// the buffers below are GL work issued from the loading thread
+	R_IssuePendingRenderCommands();
+	R_WorldVBO_Clear();
+
+	// Gather eligible surfaces and pack them in material order. The backend batches a
+	// run of one shader into one draw only while the run stays inside one buffer, so
+	// packing in surface order would scatter a shader across groups and split it.
+	wvboEntry_t *list = (wvboEntry_t *)R_Malloc( numSurfaces * sizeof( wvboEntry_t ),
+												TAG_TEMP_WORKSPACE, qfalse );
+	int numEligible = 0;
+
+	for ( int i = 0; i < numSurfaces; i++ )
+	{
+		msurface_t *surf = &worldData.surfaces[i];
+		if ( *surf->data != SF_FACE || !R_WorldVBO_ShaderEligible( surf->shader ) ) {
+			continue;
+		}
+		list[numEligible].face  = (srfSurfaceFace_t *)surf->data;
+		list[numEligible].shader = surf->shader->index;
+		numEligible++;
+	}
+
+	qsort( list, numEligible, sizeof( wvboEntry_t ), R_WorldVBO_CompareEntry );
+
+	byte *verts = (byte *)R_Malloc( WVBO_GROUPVERTS * WVBO_STRIDE, TAG_TEMP_WORKSPACE, qfalse );
+	int groupVerts = 0;
+	int resident = 0, totalVerts = 0, totalIdx = 0, splitShaders = 0;
+	int lastShader = -1;
+
+	for ( int i = 0; i <= numEligible; i++ )
+	{
+		srfSurfaceFace_t *face = ( i < numEligible ) ? list[i].face : NULL;
+
+		// a shader that outgrows one buffer still has to split, so count it
+		if ( face && list[i].shader != lastShader ) {
+			lastShader = list[i].shader;
+		} else if ( face && groupVerts + face->numPoints > WVBO_GROUPVERTS ) {
+			splitShaders++;
+		}
+
+		// close only when this surface cannot fit, or the list ran out
+		if ( groupVerts && ( i == numEligible
+			|| ( face && groupVerts + face->numPoints > WVBO_GROUPVERTS ) ) )
+		{
+			if ( wvbo_numGroups >= WVBO_MAXGROUPS ) {
+				break;
+			}
+#ifdef USE_GXM_NATIVE
+			SceUID uid = 0;
+			void *gpu = GXM_Alloc( SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
+				groupVerts * WVBO_STRIDE, 4, SCE_GXM_MEMORY_ATTRIB_READ, &uid );
+			if ( !gpu ) {
+				wvbo_failed = qtrue;
+				break;
+			}
+			memcpy( gpu, verts, groupVerts * WVBO_STRIDE );
+
+			wvbo_groups[wvbo_numGroups].data = gpu;
+			wvbo_groups[wvbo_numGroups].uid  = uid;
+#else
+			GLuint id = 0;
+			glGenBuffers( 1, &id );
+			if ( !id ) {
+				wvbo_failed = qtrue;
+				break;
+			}
+			glBindBuffer( GL_ARRAY_BUFFER, id );
+			glBufferData( GL_ARRAY_BUFFER, groupVerts * WVBO_STRIDE, verts, GL_STATIC_DRAW );
+			glBindBuffer( GL_ARRAY_BUFFER, 0 );
+
+			wvbo_groups[wvbo_numGroups].vbo = id;
+#endif
+			wvbo_groups[wvbo_numGroups].numVerts = groupVerts;
+			wvbo_bytes += groupVerts * WVBO_STRIDE;
+			wvbo_numGroups++;
+			groupVerts = 0;
+		}
+
+		// re-test against the group that is current now, which may be a fresh one
+		if ( !face || groupVerts + face->numPoints > WVBO_GROUPVERTS ) {
+			continue;
+		}
+
+		const int base = groupVerts;
+		for ( int v = 0; v < face->numPoints; v++ )
+		{
+			const float	*p = face->points[v];
+			byte		*dst = verts + ( base + v ) * WVBO_STRIDE;
+
+			memcpy( dst, p, 3 * sizeof( float ) );					// xyz
+			memcpy( dst + WVBO_OFS_ST, &p[3], 2 * sizeof( float ) );	// diffuse st
+			memcpy( dst + WVBO_OFS_LM, &p[VERTEX_LM], 2 * sizeof( float ) );
+			*(unsigned int *)( dst + WVBO_OFS_RGBA ) = *(const unsigned int *)&p[VERTEX_COLOR];
+		}
+		groupVerts += face->numPoints;
+
+		// pre-offset the indices so a frame only memcpys them
+		const int *src = (const int *)( (byte *)face + face->ofsIndices );
+		glIndex_t *dst = (glIndex_t *)R_Hunk_Alloc( face->numIndices * sizeof( glIndex_t ), qfalse );
+		for ( int n = 0; n < face->numIndices; n++ ) {
+			dst[n] = (glIndex_t)( base + src[n] );
+		}
+
+		face->vboGroup = wvbo_numGroups;	// the group being filled
+		face->vboIndexes = dst;
+		resident++;
+		totalVerts += face->numPoints;
+		totalIdx += face->numIndices;
+	}
+
+	R_Free( verts );
+	R_Free( list );
+
+	ri.Printf( PRINT_ALL, "world VBO: %i/%i surfaces resident, %i verts %i tris, %i groups, %i split, %.2f MB\n",
+		resident, numSurfaces, totalVerts, totalIdx / 3, wvbo_numGroups, splitShaders,
+		wvbo_bytes / (1024.0f * 1024.0f) );
+}
+
+// what the batcher managed this frame, and where the rest went
+void R_WorldVBO_Stats( char *out, int outSize )
+{
+	Com_sprintf( out, outSize,
+		"WVBO: draws=%d surfs=%d tris=%d | tess: noresident=%d lit=%d split=%d full=%d\n",
+		wvbo_statBatches, wvbo_statSurfs, wvbo_statTris,
+		wvbo_statNotResident, wvbo_statLit, wvbo_statGroupSplit, wvbo_statFull );
+
+	wvbo_statBatches = wvbo_statSurfs = wvbo_statTris = 0;
+	wvbo_statNotResident = wvbo_statLit = wvbo_statGroupSplit = wvbo_statFull = 0;
+}
+
+/*
+===============
+R_WorldVBO_Surface
+
+Appends a resident surface's indices. False means it has to go through tess.
+===============
+*/
+qboolean R_WorldVBO_Surface( const srfSurfaceFace_t *face, int fogNum, int dlighted )
+{
+	if ( !r_worldVBO || !r_worldVBO->integer || wvbo_failed ) {
+		return qfalse;
+	}
+	if ( !face->vboIndexes ) {
+		wvbo_statNotResident++;
+		return qfalse;
+	}
+	if ( fogNum || dlighted || face->dlightBits[backEnd.smpFrame] ) {
+		wvbo_statLit++;
+		return qfalse;					// the fog and dlight passes only exist on the tess path
+	}
+	if ( wvbo_numIdx + face->numIndices > WVBO_MAXIDX ) {
+		wvbo_statFull++;
+		return qfalse;						// scratch full; tess takes the remainder
+	}
+	if ( wvbo_curGroup >= 0 && wvbo_curGroup != face->vboGroup ) {
+		wvbo_statGroupSplit++;
+		return qfalse;						// a different buffer, so a different draw
+	}
+
+	wvbo_curGroup = face->vboGroup;
+	wvbo_statSurfs++;
+	memcpy( wvbo_idx + wvbo_numIdx, face->vboIndexes, face->numIndices * sizeof( glIndex_t ) );
+	wvbo_numIdx += face->numIndices;
+	return qtrue;
+}
+
+/*
+===============
+R_WorldVBO_Flush
+
+Draws whatever the current batch accumulated.
+===============
+*/
+void R_WorldVBO_Flush( shader_t *shader )
+{
+	if ( !wvbo_numIdx || wvbo_curGroup < 0 || wvbo_curGroup >= wvbo_numGroups ) {
+		wvbo_numIdx = 0;
+		wvbo_curGroup = -1;
+		return;
+	}
+
+	const shaderStage_t *st = &shader->stages[0];
+
+	wvbo_statTris += wvbo_numIdx / 3;
+	GL_Cull( shader->cullType );
+
+#ifdef USE_GXM_NATIVE
+	// every stage reads the same resident vertices; only bindings and state move
+	for ( int i = 0; i < shader->numUnfoggedPasses; i++ ) {
+		const shaderStage_t *ps = &shader->stages[i];
+		const int ntex = ps->bundle[1].image ? 2 : 1;
+		const int vcol = ( ps->rgbGen == CGEN_EXACT_VERTEX || ps->rgbGen == CGEN_VERTEX );
+		const float lit = ( ps->rgbGen == CGEN_IDENTITY_LIGHTING || ps->rgbGen == CGEN_VERTEX )
+						  ? tr.identityLight : 1.0f;
+
+		GL_State( ps->stateBits );
 		GL_SelectTexture( 0 );
-		qglTexCoordPointer( 2, GL_FLOAT, 0, NULL );
-	}
-	if ( s_wvbo.vbo ) { glDeleteBuffers( 1, &s_wvbo.vbo ); s_wvbo.vbo = 0; }
-	if ( s_wvbo.idx ) { free( s_wvbo.idx ); s_wvbo.idx = NULL; }
-	if ( s_wvbo.surfs ) { free( s_wvbo.surfs ); s_wvbo.surfs = NULL; }
-	if ( s_wvbo.hash )  { free( s_wvbo.hash );  s_wvbo.hash  = NULL; }
-	s_wvbo.numSurfs = 0;
-	s_wvbo.hashSize = 0;
-	s_wvbo.ready = qfalse;
-	s_wvboStaged = 0;
-	s_wvboBatch = qfalse;
-	s_wvboBatchShader = NULL;
-}
-
-// Two passes (count, then fill) select the identical surface set. Caller must have
-// parked the render thread (the GL upload runs on the main thread).
-void R_BuildWorldVBO( world_t *w )
-{
-	R_FreeWorldVBO();
-	if ( !r_worldVBO || !r_worldVBO->integer || !w || w->numsurfaces <= 0 ) return;
-
-	// world model (bmodels[0]) only: inline bmodel surfaces render as entities and
-	// would be dead weight in the VBO (the entityNum guard never draws them).
-	const int surfFirst = w->bmodels ? (int)( w->bmodels[0].firstSurface - w->surfaces ) : 0;
-	const int surfLast  = w->bmodels ? surfFirst + w->bmodels[0].numSurfaces : w->numsurfaces;
-
-	int totalVerts = 0, totalIdx = 0, numEl = 0;
-	for ( int i = surfFirst; i < surfLast; i++ ) {
-		msurface_t *s = &w->surfaces[i];
-		if ( s->fogIndex != 0 || !s->data ) continue;
-		surfaceType_t t = *(surfaceType_t *)s->data;
-		if ( !WorldVbo_Eligible( s->shader, t ) ) continue;
-		if ( t == SF_FACE ) {
-			srfSurfaceFace_t *f = (srfSurfaceFace_t *)s->data;
-			if ( f->numPoints <= 0 || f->numIndices <= 0 ) continue;
-			totalVerts += f->numPoints;
-			totalIdx   += f->numIndices;
-		} else {
-			srfGridMesh_t *g = (srfGridMesh_t *)s->data;
-			if ( g->width < 2 || g->height < 2 ) continue;
-			totalVerts += g->width * g->height;
-			totalIdx   += ( g->width - 1 ) * ( g->height - 1 ) * 6;
-		}
-		numEl++;
-	}
-	if ( numEl == 0 || totalVerts == 0 || totalIdx == 0 ) return;
-
-	wvboVert_t *verts = (wvboVert_t *)malloc( (size_t)totalVerts * sizeof(wvboVert_t) );
-	wvboIndex_t *idx  = (wvboIndex_t *)malloc( (size_t)totalIdx * sizeof(wvboIndex_t) );
-	s_wvbo.surfs      = (wvboSurf_t *)malloc( (size_t)numEl * sizeof(wvboSurf_t) );
-	if ( !verts || !idx || !s_wvbo.surfs ) {
-		free( verts ); free( idx ); free( s_wvbo.surfs ); s_wvbo.surfs = NULL;
-		return;
-	}
-
-	int vCount = 0, iCount = 0, rCount = 0;
-	for ( int i = surfFirst; i < surfLast; i++ ) {
-		msurface_t *s = &w->surfaces[i];
-		if ( s->fogIndex != 0 || !s->data ) continue;
-		surfaceType_t t = *(surfaceType_t *)s->data;
-		if ( !WorldVbo_Eligible( s->shader, t ) ) continue;
-
-		const shaderStage_t *st = &s->shader->stages[0];
-		int baseVertex = vCount;
-		int firstIndex = iCount;
-
-		if ( t == SF_FACE ) {
-			srfSurfaceFace_t *f = (srfSurfaceFace_t *)s->data;
-			if ( f->numPoints <= 0 || f->numIndices <= 0 ) continue;
-			const float *pv = f->points[0];
-			for ( int p = 0; p < f->numPoints; p++, pv += VERTEXSIZE ) {
-				wvboVert_t *o = &verts[vCount++];
-				o->xyz[0] = pv[0]; o->xyz[1] = pv[1]; o->xyz[2] = pv[2];
-				o->st0[0] = pv[3]; o->st0[1] = pv[4];
-				o->st1[0] = pv[VERTEX_LM]; o->st1[1] = pv[VERTEX_LM + 1];
-				WorldVbo_BakeColor( st, (const byte *)&pv[VERTEX_COLOR], o->rgba );
-			}
-			const int *si = (const int *)( (const byte *)f + f->ofsIndices );
-			for ( int k = 0; k < f->numIndices; k++ ) idx[iCount++] = (wvboIndex_t)( si[k] + baseVertex );
-		} else {
-			srfGridMesh_t *g = (srfGridMesh_t *)s->data;
-			if ( g->width < 2 || g->height < 2 ) continue;
-			const int W = g->width, H = g->height;
-			for ( int n = 0; n < W * H; n++ ) {
-				const drawVert_t *dv = &g->verts[n];
-				wvboVert_t *o = &verts[vCount++];
-				o->xyz[0] = dv->xyz[0]; o->xyz[1] = dv->xyz[1]; o->xyz[2] = dv->xyz[2];
-				o->st0[0] = dv->st[0]; o->st0[1] = dv->st[1];
-				o->st1[0] = dv->lightmap[0][0]; o->st1[1] = dv->lightmap[0][1];
-				WorldVbo_BakeColor( st, dv->color[0], o->rgba );
-			}
-			for ( int r = 0; r < H - 1; r++ ) {
-				for ( int c = 0; c < W - 1; c++ ) {
-					int v1 = baseVertex + r * W + c + 1;
-					int v2 = v1 - 1;
-					int v3 = v2 + W;
-					int v4 = v3 + 1;
-					idx[iCount++] = v2; idx[iCount++] = v3; idx[iCount++] = v1;
-					idx[iCount++] = v1; idx[iCount++] = v3; idx[iCount++] = v4;
-				}
-			}
+		R_BindAnimatedImage( &ps->bundle[0] );
+		if ( ntex == 2 ) {
+			GL_SelectTexture( 1 );
+			GL_TexEnv( r_lightmap->integer ? GL_REPLACE : shader->multitextureEnv );
+			R_BindAnimatedImage( &ps->bundle[1] );
+			GL_SelectTexture( 0 );
 		}
 
-		wvboSurf_t *rec = &s_wvbo.surfs[rCount++];
-		rec->surfData   = s->data;
-		rec->shader     = s->shader;
-		rec->firstIndex = firstIndex;
-		rec->numIndexes = iCount - firstIndex;
+		GXM_SetConstantColor( lit, lit, lit, 1.0f );
+		GXM_SetTexUnitCount( ntex );
+		GXM_SetStateBits( glState.glStateBits );
+		GXM_DrawStaticBuffer( wvbo_groups[wvbo_curGroup].data, wvbo_idx, wvbo_numIdx, vcol );
+		wvbo_statBatches++;
 	}
-	s_wvbo.numSurfs = rCount;
+	GXM_SetTexUnitCount( 1 );
+	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
+	GL_SelectTexture( 0 );
 
-	int hs = 16;
-	while ( hs < rCount * 2 ) hs <<= 1;
-	s_wvbo.hash = (int *)malloc( (size_t)hs * sizeof(int) );
-	if ( !s_wvbo.hash ) {	// low-memory map load: bail rather than deref NULL
-		free( verts ); free( idx );
-		R_FreeWorldVBO();
-		return;
-	}
-	s_wvbo.hashSize = hs;
-	for ( int h = 0; h < hs; h++ ) s_wvbo.hash[h] = -1;
-	for ( int r = 0; r < rCount; r++ ) {
-		unsigned h = (unsigned)( ( (uintptr_t)s_wvbo.surfs[r].surfData >> 4 ) & ( hs - 1 ) );
-		while ( s_wvbo.hash[h] != -1 ) h = ( h + 1 ) & ( hs - 1 );
-		s_wvbo.hash[h] = r;
-	}
+	wvbo_numIdx = 0;
+	wvbo_curGroup = -1;
+	return;
+#else
+	GL_State( st->stateBits );
+	wvbo_statBatches++;
+	const GLuint vbo = wvbo_groups[wvbo_curGroup].vbo;
 
-	glGenBuffers( 1, &s_wvbo.vbo );
-	glBindBuffer( GL_ARRAY_BUFFER, s_wvbo.vbo );
-	// DYNAMIC_DRAW: vitaGL then allocates RAM-first instead of VRAM-first, leaving
-	// CDRAM for textures (a failed texture upload is silent and binds stale data).
-	glBufferData( GL_ARRAY_BUFFER, (GLsizei)( vCount * sizeof(wvboVert_t) ), verts, GL_DYNAMIC_DRAW );
-	glBindBuffer( GL_ARRAY_BUFFER, 0 );
-
-	free( verts );
-	s_wvbo.idx = idx;	// indices stay CPU-side; staged per shader run at draw time
-	s_wvbo.ready = qtrue;
-	ri.Printf( PRINT_ALL, "r_worldVBO: baked %d surfaces (%d verts, %d indices, %d KB VBO)\n",
-		rCount, vCount, iCount, (int)( ( vCount * sizeof(wvboVert_t) ) >> 10 ) );
-}
-
-static wvboSurf_t *WorldVbo_Lookup( const void *surfData )
-{
-	if ( !s_wvbo.ready || !s_wvbo.hash ) return NULL;
-	unsigned h = (unsigned)( ( (uintptr_t)surfData >> 4 ) & ( s_wvbo.hashSize - 1 ) );
-	for ( int probe = 0; probe < s_wvbo.hashSize; probe++ ) {
-		int r = s_wvbo.hash[h];
-		if ( r == -1 ) return NULL;
-		if ( s_wvbo.surfs[r].surfData == surfData ) return &s_wvbo.surfs[r];
-		h = ( h + 1 ) & ( s_wvbo.hashSize - 1 );
-	}
-	return NULL;
-}
-
-// Mirror DrawMultitextured's per-surface GL, but with the vertex VBO bound and byte
-// offsets. Indices stay client-side (staged), so ELEMENT_ARRAY is never bound.
-static void WorldVbo_SetupBatch( shader_t *sh )
-{
-	const shaderStage_t *st = &sh->stages[0];
-
-	WorldVbo_Flush();	// stale staged indices must not draw with the new shader's state
-	GL_Cull( sh->cullType );
-	glBindBuffer( GL_ARRAY_BUFFER, s_wvbo.vbo );
+	glBindBuffer( GL_ARRAY_BUFFER, vbo );
 
 	qglEnableClientState( GL_VERTEX_ARRAY );
-	qglVertexPointer( 3, GL_FLOAT, WVBO_STRIDE, WVBO_OFS_XYZ );
-	qglEnableClientState( GL_COLOR_ARRAY );
-	qglColorPointer( 4, GL_UNSIGNED_BYTE, WVBO_STRIDE, WVBO_OFS_RGBA );
-
-	GL_State( st->stateBits );
+	qglVertexPointer( 3, GL_FLOAT, WVBO_STRIDE, (void *)0 );
 
 	GL_SelectTexture( 0 );
-	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
-	qglTexCoordPointer( 2, GL_FLOAT, WVBO_STRIDE, WVBO_OFS_ST0 );
+	qglEnable( GL_TEXTURE_2D );
 	R_BindAnimatedImage( &st->bundle[0] );
+	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+	qglTexCoordPointer( 2, GL_FLOAT, WVBO_STRIDE, (void *)WVBO_OFS_ST );
 
-	if ( st->bundle[1].image ) {
-		GL_SelectTexture( 1 );
-		qglEnable( GL_TEXTURE_2D );
-		qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
-		qglTexCoordPointer( 2, GL_FLOAT, WVBO_STRIDE, WVBO_OFS_ST1 );
-		GL_TexEnv( sh->multitextureEnv );
-		R_BindAnimatedImage( &st->bundle[1] );
+	GL_SelectTexture( 1 );
+	qglEnable( GL_TEXTURE_2D );
+	GL_TexEnv( r_lightmap->integer ? GL_REPLACE : shader->multitextureEnv );
+	R_BindAnimatedImage( &st->bundle[1] );
+	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+	qglTexCoordPointer( 2, GL_FLOAT, WVBO_STRIDE, (void *)WVBO_OFS_LM );
+
+	// the gate only lets constant-colour stages through
+	qglDisableClientState( GL_COLOR_ARRAY );
+	if ( st->rgbGen == CGEN_IDENTITY_LIGHTING ) {
+		qglColor4f( tr.identityLight, tr.identityLight, tr.identityLight, 1.0f );
+	} else {
+		qglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
 	}
 
-	s_wvboBatch = qtrue;
-	s_wvboBatchShader = sh;
-}
+	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, 0 );
+	qglDrawRangeElements( GL_TRIANGLES, 0, wvbo_groups[wvbo_curGroup].numVerts - 1,
+		wvbo_numIdx, GL_INDEX_TYPE, wvbo_idx );
 
-// End the current VBO batch: flush staged indices, undo the tmu1 enable and
-// (critically) unbind the buffer, so tess client-pointer arrays aren't read as offsets.
-void RB_EndWorldVBO( void )
-{
-	if ( !s_wvboBatch ) return;
-	WorldVbo_Flush();
-	if ( s_wvboBatchShader && s_wvboBatchShader->stages[0].bundle[1].image ) {
-		GL_SelectTexture( 1 );
-		qglDisable( GL_TEXTURE_2D );
-		GL_SelectTexture( 0 );
-	}
+	// unit 1 has to go back off, or the next single-texture pass (the sky) draws
+	// through the lightmap still bound here
+	qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
+	qglDisable( GL_TEXTURE_2D );
+
+	GL_SelectTexture( 0 );
+	qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
 	glBindBuffer( GL_ARRAY_BUFFER, 0 );
-	s_wvboBatch = qfalse;
-	s_wvboBatchShader = NULL;
+
+	wvbo_numIdx = 0;
+	wvbo_curGroup = -1;
+#endif
 }
 
-// Returns qtrue if the surface was staged for the VBO; qfalse -> caller draws via tess.
-// A same-shader run accumulates indices and flushes as one draw at run end.
-qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlighted, int entityNum )
-{
-	if ( !s_wvbo.ready || !r_worldVBO->integer
-		|| entityNum != REFENTITYNUM_WORLD || dlighted || fogNum || g_bRenderGlowingObjects
-		|| r_lightmap->integer || r_showtris->integer || r_shownormals->integer || r_fullbright->integer ) {
-		RB_EndWorldVBO();
-		return qfalse;
-	}
-	wvboSurf_t *rec = WorldVbo_Lookup( surface );
-	if ( !rec || rec->shader != shader ) {
-		RB_EndWorldVBO();
-		return qfalse;
-	}
-	if ( !s_wvboBatch || s_wvboBatchShader != shader ) {
-		WorldVbo_SetupBatch( shader );
-	}
-	if ( s_wvboStaged + rec->numIndexes > WVBO_STAGE_MAX ) {
-		WorldVbo_Flush();
-		if ( rec->numIndexes > WVBO_STAGE_MAX ) {	// oversized surface: draw straight from the bake
-			qglDrawElements( GL_TRIANGLES, rec->numIndexes, WVBO_INDEX_TYPE, s_wvbo.idx + rec->firstIndex );
-			backEnd.pc.c_wvboDraws++;
-			backEnd.pc.c_wvboSurfaces++;
-			return qtrue;
-		}
-	}
-	memcpy( s_wvboStage + s_wvboStaged, s_wvbo.idx + rec->firstIndex, (size_t)rec->numIndexes * sizeof(wvboIndex_t) );
-	s_wvboStaged += rec->numIndexes;
-	backEnd.pc.c_wvboSurfaces++;
-	return qtrue;
-}
-
-#endif // VITA
+#endif	// VITA

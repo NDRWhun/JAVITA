@@ -44,8 +44,9 @@ extern SceUID rend_mutex_out;
 extern SceUID rend_init_done;	// init-only handshake (vglInit-done, ctx-init-done)
 extern volatile qboolean pendingCtxInit;	// one-shot: run ctx init on render thread's first wake
 extern cvar_t *r_renderThread;
-extern cvar_t *r_worldVBO;
-extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping		// bake eligible static world surfaces into one VBO
+extern cvar_t *r_worldVBO;		// bake eligible static world surfaces into gpu buffers
+extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
+extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
 extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not first frame
 void R_StartRenderThread( void );
 void R_StopRenderThread( void );
@@ -689,6 +690,10 @@ typedef struct {
 	int			numPoints;
 	int			numIndices;
 	int			ofsIndices;
+#ifdef VITA
+	int			vboGroup;			// static world buffer this lives in, -1 if not resident
+	glIndex_t	*vboIndexes;		// pre-offset to the group, NULL if not resident
+#endif
 	float		points[1][VERTEXSIZE];	// variable sized
 										// there is a variable length list of indices here also
 } srfSurfaceFace_t;
@@ -1704,10 +1709,12 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_ResetGhoulSkinArena( void );
 void R_FreeGhoulSkinArena( void );
 // static world VBO (tr_worldvbo.cpp)
-void R_BuildWorldVBO( world_t *world );
-void R_FreeWorldVBO( void );
-qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlighted, int entityNum );
-void RB_EndWorldVBO( void );
+void		R_BuildWorldVBO( world_t &worldData );
+void		R_WorldVBO_Clear( void );
+void		R_WorldVBO_ContextReset( void );
+qboolean	R_WorldVBO_Surface( const srfSurfaceFace_t *face, int fogNum, int dlighted );
+void		R_WorldVBO_Flush( shader_t *shader );
+void		R_WorldVBO_Stats( char *out, int outSize );
 // static MD3 vertex cache (tr_surface.cpp)
 void R_MD3VertCacheClear( void );
 #endif

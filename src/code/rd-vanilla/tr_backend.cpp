@@ -767,7 +767,10 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		if ( drawSurf->sort == oldSort ) {
 			// fast path, same as previous sort
 #ifdef VITA
-			if ( !RB_TryWorldVBO( drawSurf->surface, oldShader, oldFogNum, oldDlighted, oldEntityNum ) )
+			if ( *drawSurf->surface == SF_FACE
+				&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, fogNum, dlighted ) ) {
+				continue;
+			}
 #endif
 			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 			continue;
@@ -844,7 +847,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		{
 			if (oldShader != NULL) {
 #ifdef VITA
-				RB_EndWorldVBO();
+				R_WorldVBO_Flush( oldShader );
 #endif
 				RB_EndSurface();
 
@@ -894,7 +897,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 
 #ifdef VITA
-			RB_EndWorldVBO();	// leaving world surfaces -> flush VBO batch before entity/world matrix swap
+			R_WorldVBO_Flush( oldShader );	// leaving world surfaces: flush before the matrix swap
 #endif
 			qglLoadMatrixf( backEnd.ori.modelMatrix );
 			#ifdef USE_GXM_NATIVE
@@ -928,7 +931,10 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 		// add the triangles for this surface
 #ifdef VITA
-		if ( !RB_TryWorldVBO( drawSurf->surface, shader, fogNum, dlighted, entityNum ) )
+		if ( *drawSurf->surface == SF_FACE
+			&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, fogNum, dlighted ) ) {
+			continue;
+		}
 #endif
 		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 	}
@@ -936,7 +942,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	// draw the contents of the last shader batch
 	if (oldShader != NULL) {
 #ifdef VITA
-		RB_EndWorldVBO();
+		R_WorldVBO_Flush( oldShader );
 #endif
 		RB_EndSurface();
 	}
@@ -1956,6 +1962,20 @@ const void	*RB_SwapBuffers( const void *data ) {
 	}
 
     GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
+
+#ifdef USE_GXM_NATIVE
+	if ( r_gxmStats && r_gxmStats->integer > 0 ) {
+		static int gxmReportFrame = 0;
+		if ( ( ++gxmReportFrame % r_gxmStats->integer ) == 0 ) {
+			char line[192];
+			GXM_ReportStats( line, sizeof( line ) );
+			ri.Printf( PRINT_ALL, "%s", line );
+			R_WorldVBO_Stats( line, sizeof( line ) );
+			ri.Printf( PRINT_ALL, "%s", line );
+			GXM_LogStatsLine( line );
+		}
+	}
+#endif
 
 	ri.WIN_Present(&window);
 
