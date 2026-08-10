@@ -774,7 +774,12 @@ static void InitOpenGL( void )
 
 	if ( glConfig.vidWidth == 0 )
 	{
+#ifdef USE_GXM_NATIVE
+		// GRAPHICS_API_OPENGL is what makes SDL set SDL_WINDOW_OPENGL
+		windowDesc_t windowDesc = { GRAPHICS_API_GENERIC };
+#else
 		windowDesc_t windowDesc = { GRAPHICS_API_OPENGL };
+#endif
 		memset(&glConfig, 0, sizeof(glConfig));
 
 #ifdef VITA
@@ -929,7 +934,15 @@ byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, int *pa
 	buffer = (byte *) R_Malloc(padwidth * height + *offset + packAlign - 1, TAG_TEMP_WORKSPACE, qfalse);
 
 	bufstart = (byte *)PADP((intptr_t) buffer + *offset, packAlign);
+#ifdef USE_GXM_NATIVE
+	// the screenshot commands come from the console; RC_SCREENSHOT_SP is already here
+	if ( !Sys_InRenderThread() ) {
+		R_IssuePendingRenderCommands();
+	}
+	GXM_ReadPixels(x, y, width, height, 3, padwidth, bufstart);
+#else
 	qglReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, bufstart);
+#endif
 
 	*offset = bufstart - buffer;
 	*padlen = padwidth - linelen;
