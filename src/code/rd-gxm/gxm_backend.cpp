@@ -1050,7 +1050,5 @@ void GXM_ReportStats( char *out, int outSize )
 	gxm_statDraws = gxm_statImmDraws = gxm_statTextured = gxm_statNoTex = gxm_statRingFail = 0;
 	gxm_statProgFail = 0;
 
-	gxm_statDraws = gxm_statTextured = gxm_statNoTex = gxm_statRingFail = 0;
-
 	GXM_LogStatsLine( out );
 }
