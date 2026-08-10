@@ -201,6 +201,13 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 			}
 			if ( logfile ) {
 				FS_Write(line, strlen(line), logfile);
+#ifdef VITA
+				// libc flush alone dies with a hard power-off; sync the card so the log survives one
+				if ( com_logfile->integer > 1 ) {
+					extern void Sys_SyncVolume( void );
+					Sys_SyncVolume();
+				}
+#endif
 			}
 		}
 	}

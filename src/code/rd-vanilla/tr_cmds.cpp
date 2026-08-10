@@ -190,6 +190,10 @@ void R_StartRenderThread( void ) {
 	// Core budget (3 usable cores; core 3 is system-reserved): main/frontend on core 1,
 	// backend owns core 2. Default priority (160), same as main.
 	rend_thid = sceKernelCreateThread( "Renderer Thread", renderThread, 0x10000100, 0x40000, 0, SCE_KERNEL_CPU_MASK_USER_2, NULL );
+	if ( rend_thid < 0 || rend_init_done < 0 || rend_mutex_in < 0 || rend_mutex_out < 0 ) {
+		// else main blocks forever on the init handshake
+		ri.Error( ERR_FATAL, "R_StartRenderThread: kernel object creation failed (thid %d)", (int)rend_thid );
+	}
 	sceKernelStartThread( rend_thid, 0, NULL );
 }
 

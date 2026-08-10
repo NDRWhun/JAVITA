@@ -688,3 +688,12 @@ void Sys_AnsiColorPrint( const char *msg )
 		fputs( buffer, stderr );
 	}
 }
+
+#ifdef VITA
+#include <psp2/io/fcntl.h>
+// flush the kernel's card cache so a hard power-off keeps what was written
+void Sys_SyncVolume( void )
+{
+	sceIoSync( "ux0:", 0 );
+}
+#endif
