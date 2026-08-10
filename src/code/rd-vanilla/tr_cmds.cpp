@@ -147,7 +147,6 @@ static int renderThread( SceSize argc, void *argv ) {
 			GL_SetDefaultState();
 			extern void RB_ReprimeFFP( void );
 			RB_ReprimeFFP();		// fresh context: re-run the FFP prime
-			R_WorldVBO_ContextReset();
 			R_Splash();				// get something on screen asap
 			// wait out the splash before releasing main: registration GL must not
 			// overlap the first scene
