@@ -785,10 +785,10 @@ static void InitOpenGL( void )
 			//
 			// 1. main: SDL video + window cvars (needs main thread so SDL `_this` exists).
 			ri.WIN_InitSDLVideo();
-			// 2. main: start the render thread; it runs WIN_LoadGL (vglInit) on itself,
+			// 2. main: start the render thread; it runs WIN_LoadGL (device init) on itself,
 			//    then Signal(rend_init_done) and parks on Wait(rend_mutex_in).
 			R_StartRenderThread();
-			// 3. main: wait for vglInit to have run on the render thread.
+			// 3. main: wait for device init to have run on the render thread.
 			sceKernelWaitSema( rend_init_done, 1, NULL );
 			// 4. main: create the window + GL context (SDL_CreateWindow now no-ops vglInit).
 			window = ri.WIN_CreateWindow( &windowDesc, &glConfig );

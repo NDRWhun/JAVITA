@@ -159,15 +159,8 @@ static qboolean R_WorldVBO_ShaderEligible( const shader_t *shader )
 		return qfalse;
 	}
 	if ( shader->lightmapIndex[0] == LIGHTMAP_BY_VERTEX ) {
-		// the stream colour is only static while no light style animates it
-		if ( shader->styles[0] != LS_NORMAL ) {
-			return qfalse;
-		}
-		for ( int i = 1; i < MAXLIGHTMAPS; i++ ) {
-			if ( shader->styles[i] != LS_UNUSED && shader->styles[i] != LS_NONE ) {
-				return qfalse;
-			}
-		}
+		// resident verts carry the raw colour and would ignore r_fullbright and RE_SetLightStyle
+		return qfalse;
 	} else if ( shader->lightmapIndex[0] < 0 ) {
 		return qfalse;
 	}
