@@ -93,7 +93,16 @@ add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-D__GNU_VISIBLE>)
 #----------------------------------------------------------------------------
 include(${CMAKE_SOURCE_DIR}/cmake/ja_sources.cmake)
 
-add_executable(${PROJECT_NAME}.elf ${JA_SOURCES})
+# Native GXM backend. Compiled but inert until USE_GXM_NATIVE is defined and the
+# rd-vanilla bridge is wired in; nothing calls into it yet.
+set(GXM_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_device.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_backend.cpp
+)
+
+add_executable(${PROJECT_NAME}.elf ${JA_SOURCES} ${GXM_SOURCES})
 
 # mp3code's global `window` (float decode table) collides with rd-vanilla's
 # `window_t window`. Rename it consistently across the (self-contained) mp3
