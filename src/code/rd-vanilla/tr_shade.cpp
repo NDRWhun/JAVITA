@@ -1838,10 +1838,13 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 	{	// only gl fog global fog and the "special fog"
 		fog = tr.world->fogs + tess.fogNum;
 
+		// hoisted: the exp2 branch leaves 0..depthForOpaque, which is the range the shader wants
+		float fStart = 0.0f, fEnd = fog->parms.depthForOpaque;
+
 		if (tr.rangedFog)
 		{ //ranged fog, used for sniper scope
-			float fStart = fog->parms.depthForOpaque;
-			float fEnd = tr.distanceCull;
+			fStart = fog->parms.depthForOpaque;
+			fEnd = tr.distanceCull;
 
 			if (tr.rangedFog < 0.0f)
 			{ //special designer override
@@ -1889,6 +1892,10 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 
 		qglEnable(GL_FOG);
 		UseGLFog = true;
+#ifdef USE_GXM_NATIVE
+		// the fragment programs carry the fog curve, so the volume drives them directly
+		GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+#endif
 	}
 #endif
 
@@ -2235,6 +2242,9 @@ void RB_StageIteratorGeneric( void )
 		(tess.fogNum == tr.world->globalFog || tess.fogNum == tr.world->numfogs))
 	{
 		qglDisable(GL_FOG);
+#ifdef USE_GXM_NATIVE
+		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+#endif
 	}
 #endif
 }
