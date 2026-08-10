@@ -1401,7 +1401,7 @@ RB_SurfaceFace
 ==============
 */
 void RB_SurfaceFace( srfSurfaceFace_t *surf ) {
-	int			i;
+	int			i, k;
 	unsigned int *indices;
 	glIndex_t	*tessIndexes;
 	float		*v;
