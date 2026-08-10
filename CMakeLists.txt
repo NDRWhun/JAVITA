@@ -100,9 +100,11 @@ set(GXM_SOURCES
   ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
   ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_state.cpp
   ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla/tr_gxm_bridge.cpp
 )
 
 add_executable(${PROJECT_NAME}.elf ${JA_SOURCES} ${GXM_SOURCES})
+target_compile_definitions(${PROJECT_NAME}.elf PRIVATE USE_GXM_NATIVE)
 
 # mp3code's global `window` (float decode table) collides with rd-vanilla's
 # `window_t window`. Rename it consistently across the (self-contained) mp3

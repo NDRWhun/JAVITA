@@ -27,6 +27,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 
 #include "tr_local.h"
+#include "../rd-gxm/gxm_device.h"
 #include "../rd-common/tr_common.h"
 #include "tr_stl.h"
 #include "../rd-common/tr_font.h"
@@ -1767,7 +1768,12 @@ void R_Register( void )
 	r_renderThread = ri.Cvar_Get( "r_renderThread", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
 	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
+#ifdef USE_GXM_NATIVE
+	// read-only off: this is the gen-1 VBO and its buffer calls are qgl holes here
+	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ROM );
+#else
 	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "0", CVAR_ARCHIVE );	// takes effect on next map load
+#endif
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE );
 #endif
 	ri.Cvar_CheckRange( r_primitives, MIN_PRIMITIVES, MAX_PRIMITIVES, qtrue );

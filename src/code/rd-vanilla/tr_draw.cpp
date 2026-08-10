@@ -26,6 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 #include "tr_common.h"
 #include "tr_local.h"
+#include "../rd-gxm/gxm_device.h"
 
 /*
 =============

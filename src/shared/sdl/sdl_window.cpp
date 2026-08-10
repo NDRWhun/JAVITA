@@ -25,6 +25,16 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "rd-common/tr_types.h"
 #include "sys/sys_local.h"
 #include "sdl_icon.h"
+#ifdef USE_GXM_NATIVE
+#include <psp2/libime.h>
+#include <psp2/sysmodule.h>
+#include "../../code/rd-gxm/gxm_device.h"
+#include "../../code/rd-gxm/gxm_texture.h"
+#include "../../code/rd-gxm/gxm_backend.h"
+// supplied by tr_gxm_bridge.cpp, which is where tess is visible
+extern "C" void GXM_GetTessArrays( const float **xyz, const float **uv0,
+								   const float **uv1, const unsigned char **rgba );
+#endif
 
 enum rserr_t
 {
@@ -144,6 +154,21 @@ void GLimp_Minimize(void)
 
 void WIN_Present( window_t *window )
 {
+#ifdef USE_GXM_NATIVE
+	// the IME draws and reads input only while this is pumped, and SDL only did it
+	// from the GL swap this path replaces
+	if ( SDL_IsScreenKeyboardShown( screen ) ) {
+		sceImeUpdate();
+	}
+
+	// end the frame's scene, queue the flip, and open the next one so the
+	// renderer always has a scene to draw into
+	GXM_EndFrame();
+	GXM_BeginFrame();
+	GXM_RingBeginFrame();
+	(void)window;
+	return;
+#endif
 	if ( window->api == GRAPHICS_API_OPENGL )
 	{
 		SDL_GL_SwapWindow(screen);
@@ -318,26 +343,8 @@ static bool GLimp_DetectAvailableModes(void)
 
 #ifdef VITA
 #include <psp2/kernel/sysmem.h>
-// must run on the vglInit thread, before vglInit
-extern "C" void vglSetParamBufferSize( uint32_t size );
-extern "C" void vglSetCircularPoolSize( uint32_t size );
-extern "C" void vglUseExtraMem( uint8_t usage );
 
-// pre-vglInit config; the 224 MB heap leaves ~93 MB for the GPU pools
-static void WIN_SetupVglMem( const char *where )
-{
-	SceKernelFreeMemorySizeInfo fmi;
-	fmi.size = sizeof( fmi );
-	if ( sceKernelGetFreeMemorySize( &fmi ) == 0 )
-		Com_Printf( "%s: kernel free USER %d KiB, CDRAM %d KiB, PHYCONT %d KiB\n",
-			where, fmi.size_user / 1024, fmi.size_cdram / 1024, fmi.size_phycont / 1024 );
-
-	// 16 MB: 2-3 in-flight scenes share it, smaller overflows the tiler
-	vglSetParamBufferSize( 16 * 1024 * 1024 );
-	// default 32 MB circular pool spills into slow fallback allocations
-	vglSetCircularPoolSize( 48 * 1024 * 1024 );
-	vglUseExtraMem( 0 );	// no heap spill: GXM blocks in the newlib arena corrupt it (JK2 config)
-}
+// pre-device config; heap spill off - GC-freed GXM blocks in the newlib arena corrupt it
 #endif
 
 /*
@@ -367,9 +374,8 @@ static rserr_t GLimp_SetMode(glconfig_t *glConfig, const windowDesc_t *windowDes
 	Com_Printf( "Initializing display\n");
 
 #ifdef VITA
-	// r_renderThread 0 fallback: vglInit fires later in SDL_CreateWindow on this thread.
+	// r_renderThread 0 fallback: the device comes up later on this thread.
 	if ( doParamBufferSize ) {
-		WIN_SetupVglMem( "vgl mem setup (main thread)" );
 	}
 #endif
 
@@ -907,24 +913,34 @@ void WIN_InitSDLVideo( void )
 ===============
 WIN_LoadGL
 
-render thread: pool sizes + vglInit (fires inside SDL_GL_LoadLibrary),
+render thread: pool sizes + device bring-up,
 so the GXM context is owned here
 ===============
 */
 void WIN_LoadGL( void )
 {
-	WIN_SetupVglMem( "vgl mem setup (render thread)" );
+#ifdef USE_GXM_NATIVE
+	// SDL loads this only from its GL path, which a native device never takes;
+	// without it every sceIme import resolves to zero and the console keyboard faults
+	sceSysmoduleLoadModule( SCE_SYSMODULE_IME );
+	if ( !GXM_DeviceInit() || !GXM_RingInit( 4 * 1024 * 1024 ) || !GXM_BackendInit() )
+	{
+		Com_Error( ERR_FATAL, "WIN_LoadGL: native GXM device init failed" );
+	}
+	GXM_SetTessArraysHook( GXM_GetTessArrays );
+#else
 	if ( SDL_GL_LoadLibrary( NULL ) < 0 )
 	{
 		Com_Error( ERR_FATAL, "WIN_LoadGL: SDL_GL_LoadLibrary failed (%s)", SDL_GetError() );
 	}
+#endif
 }
 
 /*
 ===============
 WIN_CreateWindow
 
-main thread: window + GL context only; vglInit already ran in WIN_LoadGL
+main thread: window only; the device already came up in WIN_LoadGL
 ===============
 */
 window_t WIN_CreateWindow( const windowDesc_t *windowDesc, glconfig_t *glConfig )
@@ -962,16 +978,19 @@ window_t WIN_CreateWindow( const windowDesc_t *windowDesc, glconfig_t *glConfig 
 ===============
 WIN_MakeCurrent
 
-render thread must call this before its first present:
-SDL_GL_SwapWindow no-ops unless the window is current on the calling thread
+render thread must call this before its first present
 ===============
 */
 void WIN_MakeCurrent( void )
 {
+#ifndef USE_GXM_NATIVE
+	// SDL's GL hooks are absent without a GL video driver, and this one is
+	// dispatched unchecked; the native present owns its context anyway
 	if ( SDL_GL_MakeCurrent( screen, opengl_context ) < 0 )
 	{
 		Com_Printf( "WIN_MakeCurrent: SDL_GL_MakeCurrent failed (%s)\n", SDL_GetError() );
 	}
+#endif
 }
 #endif // VITA
 
@@ -1069,5 +1088,20 @@ void *WIN_GL_GetProcAddress( const char *proc )
 
 qboolean WIN_GL_ExtensionSupported( const char *extension )
 {
+#ifdef USE_GXM_NATIVE
+	// no GL context to ask; S3TC is real here because UBC1/UBC3 are DXT1/DXT5
+	static const char *supported[] = {
+		"GL_ARB_texture_compression",
+		"GL_EXT_texture_compression_s3tc",
+		"GL_EXT_texture_env_add",		// the two-texture add program set
+	};
+	for ( size_t i = 0; i < ARRAY_LEN( supported ); i++ ) {
+		if ( !Q_stricmp( extension, supported[i] ) ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
+#else
 	return SDL_GL_ExtensionSupported( extension ) == SDL_TRUE ? qtrue : qfalse;
+#endif
 }
