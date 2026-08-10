@@ -2084,13 +2084,6 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 		qglDeleteTextures( 1, &tr.blurImage );
 	}
 
-	// Every shutdown (map change too, not just vid_restart): the hunk that s_wvbo's
-	// surfData/shader keys point into is about to be cleared, and the old VBO would
-	// otherwise sit in the vitaGL pool through the next map's texture load.
-	if ( tr.registered ) {
-		R_FreeWorldVBO();
-	}
-
 	R_ShutdownWorldEffects();
 	R_ShutdownFonts();
 	if ( tr.registered )
