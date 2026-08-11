@@ -1988,6 +1988,10 @@ extern void CG_BuildSolidList( void );
 extern void CG_ClearHealthBarEnts( void );
 extern vec3_t	serverViewOrg;
 static qboolean cg_rangedFogging = qfalse; //so we know if we should go back to normal fog
+
+// cg_speeds: where the client frame goes, reset each report
+int cg_msecEnts, cg_msecMarks, cg_msecFx, cg_msecLocalEnts;
+
 void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView ) {
 	qboolean	inwater = qfalse;
 
@@ -2139,9 +2143,13 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView ) {
 
 	// build the render lists
 	if ( !cg.hyperspace ) {
+		int t0 = cgi_Milliseconds();
 		CG_AddPacketEntities(qfalse);			// adter calcViewValues, so predicted player state is correct
-		CG_AddMarks();
 		CG_DrawMiscEnts();
+		cg_msecEnts += cgi_Milliseconds() - t0;
+		t0 = cgi_Milliseconds();
+		CG_AddMarks();
+		cg_msecMarks += cgi_Milliseconds() - t0;
 	}
 
 	//check for opaque water
@@ -2202,7 +2210,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView ) {
 	if ( !cg.hyperspace && fx_freeze.integer<2 )
 	{
 		//Add all effects
+		const int t0 = cgi_Milliseconds();
 		theFxScheduler.AddScheduledEffects( false );
+		cg_msecFx += cgi_Milliseconds() - t0;
 	}
 
 	// finish up the rest of the refdef
@@ -2211,7 +2221,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView ) {
 	}
 
 	if ( !cg.hyperspace ) {
+		const int t0 = cgi_Milliseconds();
 		CG_AddLocalEntities();
+		cg_msecLocalEnts += cgi_Milliseconds() - t0;
 	}
 
 	memcpy( cg.refdef.areamask, cg.snap->areamask, sizeof( cg.refdef.areamask ) );
