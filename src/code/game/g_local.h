@@ -361,6 +361,12 @@ extern	cvar_t	*g_ICARUSDebug;
 extern cvar_t	*g_npcdebug;
 
 extern	cvar_t	*g_allowBunnyhopping;
+
+#ifdef VITA
+extern	cvar_t	*g_aimAssist;
+extern	cvar_t	*g_aimAssistSpeed;
+extern	cvar_t	*g_aimAssistPull;
+#endif
 extern gentity_t *player;
 //
 // g_spawn.c

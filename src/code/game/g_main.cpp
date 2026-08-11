@@ -230,6 +230,12 @@ cvar_t	*g_broadsword;
 
 cvar_t	*g_allowBunnyhopping;
 
+#ifdef VITA
+cvar_t	*g_aimAssist;
+cvar_t	*g_aimAssistSpeed;
+cvar_t	*g_aimAssistPull;
+#endif
+
 qboolean	stop_icarus = qfalse;
 
 extern char *G_GetLocationForEnt( gentity_t *ent );
@@ -703,6 +709,12 @@ void G_InitCvars( void ) {
 	g_broadsword = gi.cvar( "broadsword", "1", 0);
 
 	g_allowBunnyhopping = gi.cvar( "g_allowBunnyhopping", "0", 0 );
+
+#ifdef VITA
+	g_aimAssist      = gi.cvar( "g_aimAssist",      "0",    CVAR_ARCHIVE );	// 0 off, 1 look assist (pulls view toward a nearby enemy)
+	g_aimAssistSpeed = gi.cvar( "g_aimAssistSpeed", "0.5",  CVAR_ARCHIVE );	// look-speed scale near a target (1 = full, lower = slower)
+	g_aimAssistPull  = gi.cvar( "g_aimAssistPull",  "3",    CVAR_ARCHIVE );	// pull strength toward the target
+#endif
 
 	gi.cvar( "tier_storyinfo", "0", CVAR_ROM|CVAR_SAVEGAME|CVAR_NORESTART);
 	gi.cvar( "tiers_complete", "", CVAR_ROM|CVAR_SAVEGAME|CVAR_NORESTART);

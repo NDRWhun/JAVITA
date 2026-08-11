@@ -545,6 +545,94 @@ void CalcMuzzlePoint( gentity_t *const ent, vec3_t forwardVec, vec3_t right, vec
 	AddLeanOfs(ent, muzzlePoint);
 }
 
+#ifdef VITA
+// Vita look assist -- eases analog-stick imprecision by gently pulling the view toward a nearby enemy.
+static float WP_AngleDelta( float a, float b )
+{
+	float d = a - b;
+	while ( d > 180.0f )  d -= 360.0f;
+	while ( d < -180.0f ) d += 360.0f;
+	return d;
+}
+
+static qboolean WP_AimAssistValid( gentity_t *self, gentity_t *enemy, float rangeSq )
+{
+	if ( !enemy || enemy == self || !enemy->inuse || !enemy->client )
+		return qfalse;
+	if ( enemy->health <= 0 )
+		return qfalse;
+	// neutrals (droids, civilians) are not targets, and neither is your own team
+	if ( enemy->client->playerTeam == self->client->playerTeam
+		|| enemy->client->playerTeam == TEAM_NEUTRAL )
+		return qfalse;
+	if ( DistanceSquared( self->client->renderInfo.eyePoint, enemy->currentOrigin ) > rangeSq )
+		return qfalse;
+	if ( !G_ClearLOS( self, self->client->renderInfo.eyePoint, enemy ) )
+		return qfalse;	// in-front / in-cone is enforced by the dot check in WP_AimAssistTarget
+	return qtrue;
+}
+
+// pick the hostile head that sits tightest to `forward` from `eye`, within the cone (dot > minDot)
+static gentity_t *WP_AimAssistTarget( gentity_t *self, const vec3_t eye, const vec3_t forward, float range, float minDot )
+{
+	gentity_t	*entityList[MAX_GENTITIES];
+	gentity_t	*best = NULL;
+	vec3_t		mins, maxs, spot, dir;
+	float		rangeSq = range * range, bestDot = minDot;
+	int			num, e, i;
+
+	for ( i = 0; i < 3; i++ )
+	{
+		mins[i] = self->currentOrigin[i] - range;
+		maxs[i] = self->currentOrigin[i] + range;
+	}
+	num = gi.EntitiesInBox( mins, maxs, entityList, MAX_GENTITIES );
+	for ( e = 0; e < num; e++ )
+	{
+		gentity_t *ent = entityList[e];
+		if ( !WP_AimAssistValid( self, ent, rangeSq ) )
+			continue;
+		CalcEntitySpot( ent, SPOT_HEAD, spot );
+		VectorSubtract( spot, eye, dir );
+		VectorNormalize( dir );
+		float d = DotProduct( forward, dir );
+		if ( d > bestDot )
+		{
+			bestDot = d;
+			best = ent;
+		}
+	}
+	return best;
+}
+
+// per-frame look assist: returns the look-speed scale + a gentle pull (deg/sec) toward a target
+float G_VitaAimAssistLook( float *outPullYaw, float *outPullPitch )
+{
+	gentity_t	*player = &g_entities[0];
+	gentity_t	*target;
+	vec3_t		forward, spot, dir, tgtAng;
+
+	*outPullYaw = *outPullPitch = 0.0f;
+	if ( !g_aimAssist || !g_aimAssist->integer )
+		return 1.0f;
+	if ( !player->inuse || !player->client || player->health <= 0 )
+		return 1.0f;
+
+	AngleVectors( player->client->ps.viewangles, forward, NULL, NULL );
+	target = WP_AimAssistTarget( player, player->client->renderInfo.eyePoint, forward, 4096.0f,
+		(float)cos( 10.0f * 0.01745329f ) );
+	if ( !target )
+		return 1.0f;
+
+	CalcEntitySpot( target, SPOT_HEAD, spot );
+	VectorSubtract( spot, player->client->renderInfo.eyePoint, dir );
+	vectoangles( dir, tgtAng );
+	*outPullYaw   = WP_AngleDelta( tgtAng[YAW],   player->client->ps.viewangles[YAW] )   * g_aimAssistPull->value;
+	*outPullPitch = WP_AngleDelta( tgtAng[PITCH], player->client->ps.viewangles[PITCH] ) * g_aimAssistPull->value;
+	return g_aimAssistSpeed->value;
+}
+#endif
+
 // Muzzle point table...
 vec3_t WP_MuzzlePoint[WP_NUM_WEAPONS] =
 {//	Fwd,	right,	up.

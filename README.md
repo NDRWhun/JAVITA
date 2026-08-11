@@ -81,6 +81,16 @@ Defaults are applied on first launch only, so rebinds persist. Set `vita_default
 
 Open with **Start + Select** — the on-screen keyboard pops up. Type a command, press **Enter** to run it. Close with **Circle** or **Start + Select** again.
 
+### Aim assist (optional)
+
+Off by default. When an enemy is near your crosshair it gently steers your view toward them and slows your look speed so you overshoot less — set `g_aimAssist 1` to enable.
+
+| Cvar | Default | What it does |
+|------|---------|--------------|
+| `g_aimAssist` | `0` | `1` = on (look assist) |
+| `g_aimAssistPull` | `3` | Pull strength toward the target — higher = snappier |
+| `g_aimAssistSpeed` | `0.5` | Look-speed scale near a target — lower = more slowdown |
+
 ## Performance & tuning
 
 Tune by editing `ux0:data/JAVITA/base/openjk_sp.cfg` on the card, or from the in-game console (**Start + Select**). *(latched)* renderer cvars need a `vid_restart`; the latched sound cvars need a relaunch.
