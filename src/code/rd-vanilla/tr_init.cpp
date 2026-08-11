@@ -2046,6 +2046,20 @@ void R_Init( void ) {
 	R_InitWorldEffects();
 	R_InitFonts();
 
+#ifdef USE_GXM_NATIVE
+	// The image and shader systems only come up in the calls above, so InitOpenGL is too
+	// early to draw anything textured. Issue the splash here instead, through the normal
+	// command path, so the render thread draws it the way it draws every other frame.
+	{
+		const qhandle_t hSplash = RE_RegisterShaderNoMip( "menu/splash" );
+		if ( hSplash ) {
+			RE_BeginFrame( STEREO_CENTER );
+			RE_StretchPic( 0, 0, 640, 480, 0, 0, 1, 1, hSplash );
+			RE_EndFrame( NULL, NULL );
+		}
+	}
+#endif
+
 	err = qglGetError();
 	if ( err != GL_NO_ERROR )
 		ri.Printf (PRINT_ALL, "glGetError() = 0x%x\n", err);
