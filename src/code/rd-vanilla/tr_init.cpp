@@ -276,8 +276,13 @@ void RE_SetLightStyle(int style, int color);
 
 void R_Splash()
 {
-#ifdef VITA
-	// rt1: clear-only first scene; a draw before any completed scene GPU-faults
+#ifdef USE_GXM_NATIVE
+	// clear-only first scene: no scene is open yet, and gxm state calls outside one fault
+	qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+	qglClear( GL_COLOR_BUFFER_BIT );
+	ri.WIN_Present( &window );
+	return;
+#elif defined(VITA)
 	if ( r_renderThread && r_renderThread->integer )
 	{
 		qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
