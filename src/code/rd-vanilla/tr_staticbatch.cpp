@@ -120,8 +120,14 @@ void R_StaticBatch_Clear( void )
 		sbInstance_t *inst = sb_hash[i];
 		while ( inst ) {
 			sbInstance_t *next = inst->next;
-			R_Free( inst->surfs );
-			R_Free( inst->shaders );
+			// a cached refusal carries no arrays, and each surface owns its index block
+			if ( inst->numSurfs ) {
+				for ( int k = 0; k < inst->numSurfs; k++ ) {
+					R_Free( inst->surfs[k].indexes );
+				}
+				R_Free( inst->surfs );
+				R_Free( inst->shaders );
+			}
 			R_Free( inst );
 			inst = next;
 		}
