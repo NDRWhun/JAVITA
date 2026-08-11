@@ -5,8 +5,7 @@
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 
 A port of Jedi Academy's single-player to the PS Vita, built on
-[OpenJK](https://github.com/JACoders/OpenJK) with a renderer backend written directly against
-the Vita's GXM graphics API — no OpenGL translation layer in between.
+[OpenJK](https://github.com/JACoders/OpenJK) with a native sceGxm rendering backend.
 
 Please report bugs if you find any -> Issues
 
@@ -19,12 +18,8 @@ You need your own legally-owned copy of Jedi Academy (eg.: from Steam)
   `ux0:data/JAVITA/base/`.
 - Launch from the LiveArea. Settings live in `ux0:data/JAVITA/base/openjk_sp.cfg`.
 
-No `libshacccg.suprx` needed — the GXM shaders are compiled ahead of time and built into the
-binary, so there is no runtime shader compiler to install.
-
-**First run is slow.** Textures are re-compressed to DXT once and cached under
-`ux0:data/JAVITA/texcache_dxt/`; the first time you load a given area it will stall while that
-happens. Later loads read the cache and are much faster.
+The first time you visit a level it loads slower, because each texture is compressed once and cached
+to `ux0:data/JAVITA/texcache_dxt`. Later loads of that level read the cache instead and are quicker.
 
 ## Controls
 
@@ -34,9 +29,10 @@ happens. Later loads read the cache and are much faster.
 |-------|--------|
 | Left stick | Move (forward/back/strafe) — also the menu cursor |
 | Right stick | Look / turn |
-| Front touchscreen | In menus acting like a pointer moving the cursor |
+| Front touchscreen | Menus: drag moves the cursor, tap clicks |
 
-In menus, Cross selects/clicks and Circle goes back/cancels. That face-button remap is in `cl_keys.cpp`. Navigate menus with the left stick plus those two buttons.
+In menus, Cross selects/clicks and Circle goes back/cancels. Navigate with the left stick plus those
+two buttons.
 
 ### Base layer (physical buttons)
 
@@ -79,49 +75,74 @@ The rear panel is split into four corner zones. A cross-shaped dead band down th
 
 The combo layer only fires instant commands. The modifier role is latched per button at the moment it is pressed, so releasing the rear modifier mid-press can't strand a held action. The combo layer is inactive while a menu is open.
 
+Defaults are applied on first launch only, so rebinds persist. Set `vita_defaultBinds 1` and relaunch to restore them.
+
 ### Console
 
 Open with **Start + Select** — the on-screen keyboard pops up. Type a command, press **Enter** to run it. Close with **Circle** or **Start + Select** again.
 
+## Performance & tuning
+
+Tune by editing `ux0:data/JAVITA/base/openjk_sp.cfg` on the card, or from the in-game console (**Start + Select**). *(latched)* renderer cvars need a `vid_restart`; the latched sound cvars need a relaunch.
+
+Presentation is vsync-locked to the Vita's 60 Hz panel. `com_maxfps` still applies, but its
+default of `125` sits above that ceiling.
+
+| Cvar | Default | What it does |
+|------|---------|--------------|
+| `r_renderThread` | `1` | Dedicated backend render thread; `0` = single-threaded *(latched)* |
+| `s_asyncLoad` | `1` | Read sound files on a worker thread; `0` = synchronous |
+| `s_mixThread` | `1` | Mix sound + decode music on a worker thread; `0` = on the main thread *(latched)* |
+| `r_picmip` | `1` | Texture detail — higher = lower-res, less VRAM; `1` is the floor *(latched)* |
+| `r_worldVBO` | `1` | Draw static world surfaces from GPU buffers; `0` = per-frame vertex upload *(latched)* |
+| `r_staticBatch` | `1` | Batch a map's static props so copies of one model share a draw; `0` = one draw each *(latched)* |
+| `r_mergeLightmaps` | `1` | Pack lightmaps into atlas pages so world surfaces batch; `0` = one texture each *(latched)* |
+| `r_subdivisions` | `4` | Curve tessellation — higher = coarser curves, fewer verts *(latched)* |
+| `r_lodbias` | `0` | Model LOD bias — higher drops to low-detail models sooner |
+| `r_surfaceSprites` | `0` | Foliage / grass sprites — `1` = on (stock default), `0` = off (Vita default) |
+| `r_distanceCull` | `5000` | Far draw-distance cap, in units |
+| `r_forceFog` | `0` | Force fog at this distance (`0` = off) — hides far geometry |
+| `r_ghoul2CrowdLod` | `0` | Above this many on-screen characters, extras drop LOD (`0` = off) |
+| `r_ghoul2CrowdLodStep` | `3` | How many LOD levels the crowd extras drop |
+| `r_g2Threaded` | `0` | Skin characters on a worker thread; `1` = on |
+| `cg_shadows` | `1` | Player/NPC shadows — `0` = off, `1` = blob |
+| `r_texCacheCompressed` | `1` | Cache textures as DXT (less VRAM; `0` = uncompressed) *(latched)* |
+| `r_dropTexturesOnLoad` | `1` | Free the old map's textures at map change (lower transition memory peak); `0` = keep until the new map's first frame |
+| `s_khz` | `22` | Mixer rate — 22 matches the source assets *(latched)* |
+| `vita_rearTouch` | `1` | Rear-touch panel controls — `0` disables them |
+
 ## Build (for developers)
 
-Needs [VitaSDK](https://vitasdk.org) and [vdpm](https://github.com/vitasdk/vdpm) on `PATH`, plus
-cmake and ninja. **On Windows, run from Git Bash.** SDL2 comes in as a git submodule — a
-[fork](https://github.com/NDRWhun/SDL/tree/jk2vita) with the Vita patches already committed — and
-is built in-tree by CMake, so nothing is installed over the copy VitaSDK ships.
+Needs [VitaSDK](https://vitasdk.org) and [vdpm](https://github.com/vitasdk/vdpm) on `PATH`, plus git,
+cmake and ninja. **On Windows, run from Git Bash.** `tools/env.sh` assumes the SDK is at
+`/usr/local/vitasdk` — export `VITASDK`, or drop it in `tools/env.local.sh`, if yours is elsewhere. SDL2 comes in as a git submodule
+([fork](https://github.com/NDRWhun/SDL/tree/jk2vita) with the Vita patches committed) and builds as a
+subproject, so nothing is installed over the copies VitaSDK ships.
 
 ```bash
 git clone --recursive https://github.com/NDRWhun/JAVITA && cd JAVITA
-bash tools/build.sh        # vdpm deps + port -> build/JAVITA.vpk
+bash tools/build.sh        # vdpm deps + SDL + port -> build/JAVITA.vpk
 ```
 
-`bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. Cloned
-without `--recursive`? The script runs `git submodule update --init` for you.
+`bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. Cloned without
+`--recursive`? The script runs `git submodule update --init` for you.
 
-`tools/env.sh` puts VitaSDK on `PATH` and defaults `VITASDK` to `/usr/local/vitasdk`. Override it
-by exporting `VITASDK` first, or by dropping host-specific settings in `tools/env.local.sh`
-(gitignored).
-
-### Renderer notes
-
-The GXM backend lives in [`src/code/rd-gxm/`](src/code/rd-gxm) and is reached from the stock
-OpenJK renderer through `tr_gxm_bridge.cpp`. Its shaders are Cg sources under
-`src/code/rd-gxm/shaders/`, compiled offline by `build_shaders.py` into `gxm_shaders.h` — if you
-change a `.cg` you need to re-run that script (it needs Sony's shader compiler, which is not
-redistributable, so the generated header is committed).
+The renderer backend lives in [`src/code/rd-gxm/`](src/code/rd-gxm). Its shaders are Cg sources under
+`shaders/`, compiled ahead of time into `gxm_shaders.h` — change a `.cg` and you need to re-run
+`build_shaders.py`, which needs Sony's shader compiler, so the generated header is committed.
 
 ## Credits
 
 - [OpenJK](https://github.com/JACoders/OpenJK) (JACoders) — the open-source JK2/JKA engine this builds on.
 - Raven Software / LucasArts — the original *Jedi Knight: Jedi Academy*.
-- [Rinnegatamante](https://github.com/Rinnegatamante) — vitaGL, which this port used before the
-  native GXM backend replaced it, and vitaQuakeIII as the reference id Tech 3 Vita port.
-- [Northfear](https://github.com/Northfear/SDL) — the SDL2 Vita fork this builds against.
+- [Rinnegatamante](https://github.com/Rinnegatamante) — vitaQuakeIII (the reference id Tech 3 Vita port) and [vitaRTCW](https://github.com/Rinnegatamante/vitaRTCW), the reference for the multi-threaded rendering.
+- [Northfear](https://github.com/Northfear/SDL) — the Vita SDL2 port this fork is based on.
 
 ## License
 
 GPLv2 (see [LICENSE](LICENSE)), matching OpenJK. Source under `src/` keeps its original
-OpenJK / id Software copyright headers.
+copyright headers; vendored third-party components and their licences are listed in
+[THIRD_PARTY.md](THIRD_PARTY.md).
 
 Unofficial, non-commercial fan port — not affiliated with or endorsed by Disney, Lucasfilm,
 LucasArts, Activision, or Raven. *Star Wars*, *Jedi Knight*, and *Jedi Academy* are trademarks of
