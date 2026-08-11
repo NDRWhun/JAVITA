@@ -91,8 +91,7 @@ void R_RenderShadowEdges( void ) {
 	c_rejected = 0;
 #endif
 
-	// the immediate buffer is finite, so the batch is closed and reopened before it fills
-	// rather than letting the far end drop vertices and shear the volume
+	// closed and reopened before the immediate buffer fills, or it would drop vertices
 	int batchVerts = 0;
 	qglBegin( GL_TRIANGLES );
 
@@ -108,8 +107,7 @@ void R_RenderShadowEdges( void ) {
 			//we are going to render all edges even though it is a tiny bit slower. -rww
 #if 1
 			i2 = edgeDefs[ i ][ j ].i2;
-			// One strip per edge is one draw per edge. The state never changes across them,
-			// so the quad is split into two triangles inside a single batch instead.
+			// split into triangles so every edge shares one batch instead of a draw each
 			qglVertex3fv( tess.xyz[ i ] );
 			qglVertex3fv( shadowXyz[ i ] );
 			qglVertex3fv( tess.xyz[ i2 ] );
@@ -255,9 +253,7 @@ void RB_DoShadowTessEnd( vec3_t lightPos )
 	vec3_t	entLight;
 	float	groundDist;
 
-	// The static light grid gives a fixed direction, so a saber or a blaster bolt lights
-	// the model without moving its shadow. Take the direction from the strongest dynamic
-	// light touching this surface instead, and keep the ground-plane projection below.
+	// Take the direction from the strongest dlight, so a saber or bolt moves the shadow.
 	VectorCopy( backEnd.currentEntity->lightDir, entLight );
 	if ( r_shadowDlight->integer && tess.dlightBits )
 	{
@@ -295,8 +291,7 @@ void RB_DoShadowTessEnd( vec3_t lightPos )
 		//out the ground pos for the vert to project the shadow volume to
 		VectorAdd(tess.xyz[i], backEnd.ori.origin, worldxyz);
 		groundDist = worldxyz[2] - backEnd.currentEntity->e.shadowPlane;
-		// The volume stops at the ground plane, so it never reaches a wall beside the
-		// model. r_shadowExtrude pushes it past that, far enough to hit nearby geometry.
+		// r_shadowExtrude pushes the volume past the ground plane so walls can catch it
 		groundDist += r_shadowExtrude->value;
 		VectorMA( tess.xyz[i], -groundDist, lightDir, shadowXyz[i] );
 	}

@@ -21,9 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// A map's static props never move, so each instance is baked once into world space and
-// drawn from a shared buffer. That drops the entity number from their sort key, which is
-// the only thing stopping hundreds of copies of one model from batching into one draw.
+// Static props are baked into world space so copies of one model share a sort key and batch.
 
 #include "../server/exe_headers.h"
 
@@ -47,8 +45,7 @@ extern cvar_t	*r_staticBatch;
 #define SB_MAXINSTANCES	1024
 #define SB_HASHSIZE		256
 
-// Props bake as they come into view, so a group is allocated at full size and written
-// in place. Only vertices no submitted index can reach yet are ever touched.
+// Allocated at full size and written in place; only vertices no live index reaches are touched.
 typedef struct {
 #ifdef USE_GXM_NATIVE
 	void	*data;
@@ -202,8 +199,7 @@ static qboolean R_StaticBatch_ShaderEligible( const shader_t *shader )
 	return qtrue;
 }
 
-// Vertex colour is baked exactly as RB_CalcDiffuseColor would compute it, using the
-// model-space normal and the entity-space light direction it is paired with.
+// Baked exactly as RB_CalcDiffuseColor computes it, from the model-space normal.
 static void R_StaticBatch_VertexColor( const trRefEntity_t *ent, const vec3_t normal,
 									   qboolean diffuse, byte *out )
 {
@@ -241,8 +237,7 @@ static int R_StaticBatch_GroupFor( int numVerts )
 		return -1;
 	}
 
-	// Props bake mid-frame from the frontend, so the render thread has to be parked before
-	// mapping gpu memory -- R_BuildWorldVBO takes the same precaution at load time.
+	// Baking runs mid-frame, so the render thread is parked before gpu memory is mapped.
 	R_IssuePendingRenderCommands();
 
 	sbGroup_t *g = &sb_groups[sb_numGroups];
@@ -302,9 +297,7 @@ static sbInstance_t *R_StaticBatch_Bake( trRefEntity_t *ent, md3Header_t *header
 	md3Surface_t	*surface;
 	int				i, v;
 
-	// Vet the whole model before writing anything: a bail-out halfway through would
-	// leave orphaned vertices in the group. Every surface also has to fit one group,
-	// or the instance would end up split across two buffers and two draws.
+	// Vetted whole before writing, or a bail-out would orphan vertices in the group.
 	int totalVerts = 0;
 	surface = (md3Surface_t *)( (byte *)header + header->ofsSurfaces );
 	for ( i = 0; i < header->numSurfaces; i++ ) {
@@ -432,8 +425,7 @@ qboolean R_StaticBatch_AddEntity( trRefEntity_t *ent, md3Header_t *header, int f
 	if ( !( ent->e.renderfx & RF_STATIC_BATCH ) ) {
 		return qfalse;
 	}
-	// LA goggles force a fog index onto every surface, and a batch surface that
-	// decomposes with fog would be skipped rather than drawn
+	// LA goggles force a fog index on, and a fogged batch surface would be skipped
 	if ( tr.refdef.doLAGoggles ) {
 		return qfalse;
 	}
@@ -515,8 +507,7 @@ qboolean R_StaticBatch_Surface( const srfStaticBatch_t *surf, shader_t *shader,
 		return qfalse;					// the frontend keeps these on the entity path
 	}
 
-	// The stock path for these surfaces is a skip, so nothing here may refuse the
-	// geometry: a boundary closes the current batch and starts a new one instead.
+	// The stock path is a skip, so a boundary flushes rather than refusing the geometry.
 	if ( sb_curGroup >= 0 && sb_curGroup != surf->group ) {
 		sb_statGroupSplit++;
 		R_StaticBatch_Flush( shader );

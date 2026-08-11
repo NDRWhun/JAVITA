@@ -6817,8 +6817,7 @@ extern qboolean G_RagDoll(gentity_t *ent, vec3_t forcedAngles);
 int	cg_saberOnSoundTime[MAX_GENTITIES] = {0};
 
 
-// A stencil caster costs two volume passes over its mesh, so characters past
-// cg_shadowCasterRange keep their blob instead. 0 means every character casts.
+// Characters past cg_shadowCasterRange keep a blob; a volume costs two passes. 0 = all cast.
 static qboolean CG_ShadowCasterInRange( const centity_t *cent )
 {
 	if ( cg_shadowCasterRange.value <= 0.0f ) {

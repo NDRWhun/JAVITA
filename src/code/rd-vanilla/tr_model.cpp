@@ -1007,8 +1007,7 @@ void RE_BeginRegistration( glconfig_t *glconfigOut ) {
 	tr.registered = qtrue;
 
 #ifdef USE_GXM_NATIVE
-	// RE_BeginFrame drops everything until tr.registered is set just above, so this is the
-	// first point a frame survives. Once only, or it would flash at every map load.
+	// first point a frame survives RE_BeginFrame; once only, or it flashes at every map load
 	{
 		static qboolean splashShown = qfalse;
 		if ( !splashShown ) {

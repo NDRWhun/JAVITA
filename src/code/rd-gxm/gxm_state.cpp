@@ -137,8 +137,7 @@ void GXM_TranslateState( unsigned int stateBits, gxmProgramKey_t *key, gxmDepthS
 	depth->wireframe = ( stateBits & GLS_POLYMODE_LINE ) != 0;
 }
 
-// A disabled test still has to be programmed: gxm keeps the last values across scenes,
-// so leaving a shadow pass' compare in place would filter everything drawn after it.
+// A disabled test is still programmed, or the last compare would filter later draws.
 void GXM_ApplyStencilState( const gxmStencilState_t *st )
 {
 	if ( !st->enabled ) {

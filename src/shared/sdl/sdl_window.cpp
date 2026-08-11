@@ -850,8 +850,7 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 		(qboolean)(!r_ignorehwgamma->integer && SDL_SetWindowBrightness( screen, 1.0f ) >= 0);
 
 #ifdef USE_GXM_NATIVE
-	// No GL context is created on this path, so the pixel format the SDL branch would have
-	// reported has to be stated instead; the device's depth/stencil surface is S8D24.
+	// No GL context here, so the pixel format is stated; the depth/stencil surface is S8D24.
 	glConfig->colorBits   = 32;
 	glConfig->depthBits   = 24;
 	glConfig->stencilBits = 8;
@@ -978,8 +977,7 @@ window_t WIN_CreateWindow( const windowDesc_t *windowDesc, glconfig_t *glConfig 
 		(qboolean)(!r_ignorehwgamma->integer && SDL_SetWindowBrightness( screen, 1.0f ) >= 0);
 
 #ifdef USE_GXM_NATIVE
-	// No GL context is created on this path, so the pixel format the SDL branch would have
-	// reported has to be stated instead; the device's depth/stencil surface is S8D24.
+	// No GL context here, so the pixel format is stated; the depth/stencil surface is S8D24.
 	glConfig->colorBits   = 32;
 	glConfig->depthBits   = 24;
 	glConfig->stencilBits = 8;
