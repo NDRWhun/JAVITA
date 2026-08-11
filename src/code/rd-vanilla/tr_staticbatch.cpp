@@ -241,6 +241,10 @@ static int R_StaticBatch_GroupFor( int numVerts )
 		return -1;
 	}
 
+	// Props bake mid-frame from the frontend, so the render thread has to be parked before
+	// mapping gpu memory -- R_BuildWorldVBO takes the same precaution at load time.
+	R_IssuePendingRenderCommands();
+
 	sbGroup_t *g = &sb_groups[sb_numGroups];
 	const int bytes = SB_GROUPVERTS * SB_STRIDE;
 #ifdef USE_GXM_NATIVE
