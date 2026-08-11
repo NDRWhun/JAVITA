@@ -80,6 +80,7 @@ int		time_frontend;		// renderer frontend time
 int		time_backend;		// renderer backend time
 #ifdef VITA
 extern int cg_msecEnts, cg_msecMarks, cg_msecFx, cg_msecLocalEnts;
+extern int cg_msecEntsPlayer, cg_numEntsPlayer, cg_numEnts;
 int cl_msecSnd, cl_msecScreen;
 #endif
 
@@ -1533,16 +1534,17 @@ void Com_Frame( void ) {
 
 			Com_Printf("fr:%i all:%3i sv:%3i ev:%3i cl:%3i gm:%3i tr:%3i pvs:%3i rf:%3i bk:%3i"
 #ifdef VITA
-						" | ents:%3i marks:%3i fx:%3i lents:%3i snd:%3i scr:%3i"
+						" | ents:%3i(p%3i n%3i/%3i) marks:%3i fx:%3i lents:%3i snd:%3i scr:%3i"
 #endif
 						"\n",
 						com_frameNumber, all, sv, ev, cl, time_game, timeInTrace, timeInPVSCheck, time_frontend, time_backend
 #ifdef VITA
-						, cg_msecEnts, cg_msecMarks, cg_msecFx, cg_msecLocalEnts, cl_msecSnd, cl_msecScreen
+						, cg_msecEnts, cg_msecEntsPlayer, cg_numEntsPlayer, cg_numEnts, cg_msecMarks, cg_msecFx, cg_msecLocalEnts, cl_msecSnd, cl_msecScreen
 #endif
 						);
 #ifdef VITA
 			cg_msecEnts = cg_msecMarks = cg_msecFx = cg_msecLocalEnts = 0;
+			cg_msecEntsPlayer = cg_numEntsPlayer = cg_numEnts = 0;
 			cl_msecSnd = cl_msecScreen = 0;
 #endif
 

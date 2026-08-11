@@ -2345,6 +2345,9 @@ CG_AddCEntity
 
 ===============
 */
+// cg_speeds: ghoul2 characters vs the rest of the entity list
+int cg_msecEntsPlayer, cg_numEntsPlayer, cg_numEnts;
+
 static void CG_AddCEntity( centity_t *cent )
 {
 	// event-only entities will have been dealt with already
@@ -2397,7 +2400,12 @@ Ghoul2 Insert End
 		CG_General( cent );
 		break;
 	case ET_PLAYER:
-		CG_Player( cent );
+		{
+			const int t0 = cgi_Milliseconds();
+			CG_Player( cent );
+			cg_msecEntsPlayer += cgi_Milliseconds() - t0;
+			cg_numEntsPlayer++;
+		}
 		break;
 	case ET_ITEM:
 		CG_Item( cent );
@@ -2501,6 +2509,7 @@ void CG_AddPacketEntities( qboolean isPortal ) {
 	for ( num = 0 ; num < cg.snap->numEntities ; num++ ) {
 		cent = &cg_entities[ cg.snap->entities[ num ].number ];
 
+		cg_numEnts++;
 		CG_AddCEntity( cent );
 	}
 
