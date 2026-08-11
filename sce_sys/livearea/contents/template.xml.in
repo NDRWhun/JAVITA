@@ -4,10 +4,10 @@
     <image>bg.png</image>
   </livearea-background>
 
-  <frame id="frame1" multi="o" autoflip="1">
+  <frame id="frame2" multi="o" autoflip="1">
     <liveitem>
       <target>psla:eboot</target>
-      <image y="0" width="560" height="297">startup.png</image>
+      <image valign="bottom" align="center" width="560" height="297">startup.png</image>
     </liveitem>
   </frame>
 
