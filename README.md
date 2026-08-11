@@ -2,7 +2,15 @@
 
 **Star Wars Jedi Knight: Jedi Academy — single-player, on the PS Vita**
 
+[![build](https://github.com/NDRWhun/JAVITA/actions/workflows/build.yml/badge.svg)](https://github.com/NDRWhun/JAVITA/actions/workflows/build.yml)
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
+[![platform](https://img.shields.io/badge/platform-PS%20Vita-4b6cb7)](https://vitasdk.org)
+[![renderer](https://img.shields.io/badge/renderer-native%20sceGxm-8a4fff)](src/code/rd-gxm)
+[![release](https://img.shields.io/github/v/release/NDRWhun/JAVITA?include_prereleases&sort=semver)](../../releases)
+[![downloads](https://img.shields.io/github/downloads/NDRWhun/JAVITA/total)](../../releases)
+[![issues](https://img.shields.io/github/issues/NDRWhun/JAVITA)](../../issues)
+[![last commit](https://img.shields.io/github/last-commit/NDRWhun/JAVITA)](../../commits/main)
+[![code size](https://img.shields.io/github/languages/code-size/NDRWhun/JAVITA)](../../)
 
 A port of Jedi Academy's single-player to the PS Vita, built on
 [OpenJK](https://github.com/JACoders/OpenJK) with a native sceGxm rendering backend.
