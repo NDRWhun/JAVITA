@@ -36,6 +36,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 */
 
+// stays under the backend's immediate-vertex ceiling with room for one more quad
+#define SHADOW_BATCH_VERTS	15000
+
 #define _STENCIL_REVERSE
 
 typedef struct {
@@ -88,6 +91,11 @@ void R_RenderShadowEdges( void ) {
 	c_rejected = 0;
 #endif
 
+	// the immediate buffer is finite, so the batch is closed and reopened before it fills
+	// rather than letting the far end drop vertices and shear the volume
+	int batchVerts = 0;
+	qglBegin( GL_TRIANGLES );
+
 	for ( i = 0 ; i < tess.numVertexes ; i++ ) {
 		c = numEdgeDefs[ i ];
 		for ( j = 0 ; j < c ; j++ ) {
@@ -100,12 +108,19 @@ void R_RenderShadowEdges( void ) {
 			//we are going to render all edges even though it is a tiny bit slower. -rww
 #if 1
 			i2 = edgeDefs[ i ][ j ].i2;
-			qglBegin( GL_TRIANGLE_STRIP );
-				qglVertex3fv( tess.xyz[ i ] );
-				qglVertex3fv( shadowXyz[ i ] );
-				qglVertex3fv( tess.xyz[ i2 ] );
-				qglVertex3fv( shadowXyz[ i2 ] );
-			qglEnd();
+			// One strip per edge is one draw per edge. The state never changes across them,
+			// so the quad is split into two triangles inside a single batch instead.
+			qglVertex3fv( tess.xyz[ i ] );
+			qglVertex3fv( shadowXyz[ i ] );
+			qglVertex3fv( tess.xyz[ i2 ] );
+			qglVertex3fv( shadowXyz[ i ] );
+			qglVertex3fv( shadowXyz[ i2 ] );
+			qglVertex3fv( tess.xyz[ i2 ] );
+			if ( ( batchVerts += 6 ) >= SHADOW_BATCH_VERTS ) {
+				qglEnd();
+				qglBegin( GL_TRIANGLES );
+				batchVerts = 0;
+			}
 #else
 			hit[0] = 0;
 			hit[1] = 0;
@@ -151,18 +166,21 @@ void R_RenderShadowEdges( void ) {
 		o2 = tess.indexes[ i*3 + 1 ];
 		o3 = tess.indexes[ i*3 + 2 ];
 
-		qglBegin(GL_TRIANGLES);
-			qglVertex3fv(tess.xyz[o1]);
-			qglVertex3fv(tess.xyz[o2]);
-			qglVertex3fv(tess.xyz[o3]);
-		qglEnd();
-		qglBegin(GL_TRIANGLES);
-			qglVertex3fv(shadowXyz[o3]);
-			qglVertex3fv(shadowXyz[o2]);
-			qglVertex3fv(shadowXyz[o1]);
-		qglEnd();
+		qglVertex3fv(tess.xyz[o1]);
+		qglVertex3fv(tess.xyz[o2]);
+		qglVertex3fv(tess.xyz[o3]);
+		qglVertex3fv(shadowXyz[o3]);
+		qglVertex3fv(shadowXyz[o2]);
+		qglVertex3fv(shadowXyz[o1]);
+		if ( ( batchVerts += 6 ) >= SHADOW_BATCH_VERTS ) {
+			qglEnd();
+			qglBegin( GL_TRIANGLES );
+			batchVerts = 0;
+		}
 	}
 #endif
+
+	qglEnd();
 }
 
 //#define _DEBUG_STENCIL_SHADOWS

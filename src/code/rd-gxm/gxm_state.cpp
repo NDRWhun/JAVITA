@@ -137,6 +137,25 @@ void GXM_TranslateState( unsigned int stateBits, gxmProgramKey_t *key, gxmDepthS
 	depth->wireframe = ( stateBits & GLS_POLYMODE_LINE ) != 0;
 }
 
+// A disabled test still has to be programmed: gxm keeps the last values across scenes,
+// so leaving a shadow pass' compare in place would filter everything drawn after it.
+void GXM_ApplyStencilState( const gxmStencilState_t *st )
+{
+	if ( !st->enabled ) {
+		sceGxmSetFrontStencilFunc( GXM_Context(), SCE_GXM_STENCIL_FUNC_ALWAYS,
+			SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xff, 0x00 );
+		sceGxmSetBackStencilFunc( GXM_Context(), SCE_GXM_STENCIL_FUNC_ALWAYS,
+			SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xff, 0x00 );
+		return;
+	}
+	sceGxmSetFrontStencilFunc( GXM_Context(), st->func,
+		st->frontFail, st->frontDepthFail, st->frontPass, st->compareMask, st->writeMask );
+	sceGxmSetBackStencilFunc( GXM_Context(), st->func,
+		st->backFail, st->backDepthFail, st->backPass, st->compareMask, st->writeMask );
+	sceGxmSetFrontStencilRef( GXM_Context(), st->ref );
+	sceGxmSetBackStencilRef( GXM_Context(), st->ref );
+}
+
 void GXM_ApplyDepthState( const gxmDepthState_t *depth )
 {
 	sceGxmSetFrontDepthFunc( GXM_Context(), depth->depthFunc );
@@ -156,7 +175,8 @@ void GXM_ApplyDepthState( const gxmDepthState_t *depth )
 unsigned int GXM_ProgramKeyHash( const gxmProgramKey_t *key )
 {
 	if ( !key->blended ) {
-		return (unsigned int)key->alphaTest;	// slot 0..4 are the unblended variants
+		return (unsigned int)key->alphaTest
+			 | ( key->colorMaskNone ? ( 1u << 24 ) : 0u );	// slot 0..4 are the unblended variants
 	}
 
 	// factors are 0..11, so four of them plus the alpha test pack into 23 bits
@@ -166,6 +186,9 @@ unsigned int GXM_ProgramKeyHash( const gxmProgramKey_t *key )
 	h |= (unsigned int)key->blend.alphaSrc << 10;
 	h |= (unsigned int)key->blend.alphaDst << 15;
 	h |= (unsigned int)key->alphaTest      << 20;
+	if ( key->colorMaskNone ) {
+		h |= 1u << 24;
+	}
 	return h;
 }
 
@@ -205,10 +228,10 @@ void GXM_GlGetIntegerv( unsigned int pname, int *params )
 	}
 }
 
-// GL_COLOR_BUFFER_BIT 0x4000, GL_DEPTH_BUFFER_BIT 0x100
+// GL_COLOR_BUFFER_BIT 0x4000, GL_DEPTH_BUFFER_BIT 0x100, GL_STENCIL_BUFFER_BIT 0x400
 void GXM_GlClear( unsigned int mask )
 {
-	GXM_ClearBuffers( ( mask & 0x4000 ) != 0, ( mask & 0x0100 ) != 0 );
+	GXM_ClearBuffers( ( mask & 0x4000 ) != 0, ( mask & 0x0100 ) != 0, ( mask & 0x0400 ) != 0 );
 }
 
 void GXM_GlGetFloatv( unsigned int pname, float *params )

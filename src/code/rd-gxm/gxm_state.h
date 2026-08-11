@@ -46,8 +46,18 @@ typedef enum {
 typedef struct {
 	SceGxmBlendInfo	blend;
 	bool			blended;		// false = pass NULL blendInfo, the opaque fast path
+	bool			colorMaskNone;	// shadow volumes write depth/stencil only
 	gxmAlphaTest_t	alphaTest;
 } gxmProgramKey_t;
+
+// stencil is real context state on gxm, unlike blending
+typedef struct {
+	bool				enabled;
+	SceGxmStencilFunc	func;
+	SceGxmStencilOp		frontFail, frontDepthFail, frontPass;
+	SceGxmStencilOp		backFail,  backDepthFail,  backPass;
+	unsigned char		ref, compareMask, writeMask;
+} gxmStencilState_t;
 
 // context state that really is state
 typedef struct {
@@ -61,6 +71,7 @@ void GXM_TranslateState( unsigned int stateBits, gxmProgramKey_t *key, gxmDepthS
 
 // apply the context half; the program half is resolved by the draw path
 void GXM_ApplyDepthState( const gxmDepthState_t *depth );
+void GXM_ApplyStencilState( const gxmStencilState_t *st );
 
 // qgl_gxm.h routes the qgl macros here; these give them C linkage
 const unsigned char *GXM_GlGetString( unsigned int name );

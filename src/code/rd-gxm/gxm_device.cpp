@@ -594,7 +594,7 @@ void GXM_BeginFrame( void )
 		NULL, NULL, gxm_buffers[gxm_backBuffer].sync,
 		&gxm_buffers[gxm_backBuffer].surface, &gxm_depthSurface );
 
-	GXM_ClearBuffers( 1, 1 );
+	GXM_ClearBuffers( 1, 1, 1 );
 }
 
 /*
@@ -604,9 +604,9 @@ GXM_ClearBuffers
 GXM has no clear, so a clear is a fullscreen triangle at z=1.
 ================
 */
-void GXM_ClearBuffers( int color, int depth )
+void GXM_ClearBuffers( int color, int depth, int stencil )
 {
-	if ( !gxm_deviceOk || !gxm_sceneOpen || ( !color && !depth ) ) {
+	if ( !gxm_deviceOk || !gxm_sceneOpen || ( !color && !depth && !stencil ) ) {
 		return;
 	}
 
@@ -620,6 +620,16 @@ void GXM_ClearBuffers( int color, int depth )
 	sceGxmSetCullMode( gxm_context, SCE_GXM_CULL_NONE );
 	sceGxmSetFrontPolygonMode( gxm_context, SCE_GXM_POLYGON_MODE_TRIANGLE_FILL );
 	sceGxmSetBackPolygonMode( gxm_context, SCE_GXM_POLYGON_MODE_TRIANGLE_FILL );
+
+	// gxm has no stencil clear either, so the same triangle writes the reference through
+	if ( stencil ) {
+		sceGxmSetFrontStencilFunc( gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS,
+			SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, 0xff, 0xff );
+		sceGxmSetBackStencilFunc( gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS,
+			SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, 0xff, 0xff );
+		sceGxmSetFrontStencilRef( gxm_context, 0 );
+		sceGxmSetBackStencilRef( gxm_context, 0 );
+	}
 
 	sceGxmSetVertexProgram( gxm_context, gxm_clearVertProgram );
 	sceGxmSetFragmentProgram( gxm_context,
@@ -636,6 +646,14 @@ void GXM_ClearBuffers( int color, int depth )
 	sceGxmSetVertexStream( gxm_context, 0, gxm_clearVerts );
 	sceGxmDraw( gxm_context, SCE_GXM_PRIMITIVE_TRIANGLES,
 		SCE_GXM_INDEX_FORMAT_U16, gxm_clearIndices, 3 );
+
+	// leave the test off, or every later draw is filtered by the clear's compare
+	if ( stencil ) {
+		sceGxmSetFrontStencilFunc( gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS,
+			SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xff, 0x00 );
+		sceGxmSetBackStencilFunc( gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS,
+			SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xff, 0x00 );
+	}
 
 	if ( gxm_stateReset ) {
 		gxm_stateReset();

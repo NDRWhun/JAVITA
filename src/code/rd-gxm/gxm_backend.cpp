@@ -470,6 +470,90 @@ void GXM_SetModelView( const float *m )
 }
 
 void GXM_SetStateBits( unsigned int stateBits )	{ gxm_stateBits = stateBits; }
+
+// --- stencil / colour mask, driven from tr_shadows through the qgl shim ---
+static gxmStencilState_t	gxm_stencil;
+static bool					gxm_stencilDirty = true;
+static bool					gxm_colorMaskNone;
+
+static SceGxmStencilFunc GXM_StencilFuncFromGL( unsigned int f )
+{
+	switch ( f ) {
+	case 0x0200: return SCE_GXM_STENCIL_FUNC_NEVER;			// GL_NEVER
+	case 0x0201: return SCE_GXM_STENCIL_FUNC_LESS;
+	case 0x0202: return SCE_GXM_STENCIL_FUNC_EQUAL;
+	case 0x0203: return SCE_GXM_STENCIL_FUNC_LESS_EQUAL;
+	case 0x0204: return SCE_GXM_STENCIL_FUNC_GREATER;
+	case 0x0205: return SCE_GXM_STENCIL_FUNC_NOT_EQUAL;
+	case 0x0206: return SCE_GXM_STENCIL_FUNC_GREATER_EQUAL;
+	default:     return SCE_GXM_STENCIL_FUNC_ALWAYS;		// GL_ALWAYS 0x0207
+	}
+}
+
+static SceGxmStencilOp GXM_StencilOpFromGL( unsigned int o )
+{
+	switch ( o ) {
+	case 0x0000: return SCE_GXM_STENCIL_OP_ZERO;			// GL_ZERO
+	case 0x1E01: return SCE_GXM_STENCIL_OP_REPLACE;
+	case 0x1E02: return SCE_GXM_STENCIL_OP_INCR;
+	case 0x1E03: return SCE_GXM_STENCIL_OP_DECR;
+	case 0x150A: return SCE_GXM_STENCIL_OP_INVERT;
+	case 0x8507: return SCE_GXM_STENCIL_OP_INCR_WRAP;
+	case 0x8508: return SCE_GXM_STENCIL_OP_DECR_WRAP;
+	default:     return SCE_GXM_STENCIL_OP_KEEP;			// GL_KEEP 0x1E00
+	}
+}
+
+void GXM_SetStencilTest( int enable )
+{
+	gxm_stencil.enabled = ( enable != 0 );
+	gxm_stencilDirty = true;
+}
+
+void GXM_SetStencilFunc( unsigned int func, int ref, unsigned int mask )
+{
+	gxm_stencil.func        = GXM_StencilFuncFromGL( func );
+	gxm_stencil.ref         = (unsigned char)ref;
+	gxm_stencil.compareMask = (unsigned char)mask;
+	gxm_stencilDirty = true;
+}
+
+void GXM_SetStencilMask( unsigned int mask )
+{
+	gxm_stencil.writeMask = (unsigned char)mask;
+	gxm_stencilDirty = true;
+}
+
+void GXM_SetStencilOp( unsigned int sfail, unsigned int dfail, unsigned int dpass )
+{
+	gxm_stencil.frontFail = gxm_stencil.backFail = GXM_StencilOpFromGL( sfail );
+	gxm_stencil.frontDepthFail = gxm_stencil.backDepthFail = GXM_StencilOpFromGL( dfail );
+	gxm_stencil.frontPass = gxm_stencil.backPass = GXM_StencilOpFromGL( dpass );
+	gxm_stencilDirty = true;
+}
+
+// GL_FRONT 0x0404, GL_BACK 0x0405, GL_FRONT_AND_BACK 0x0408
+void GXM_SetStencilOpSeparate( unsigned int face, unsigned int sfail, unsigned int dfail, unsigned int dpass )
+{
+	const SceGxmStencilOp sf = GXM_StencilOpFromGL( sfail );
+	const SceGxmStencilOp df = GXM_StencilOpFromGL( dfail );
+	const SceGxmStencilOp dp = GXM_StencilOpFromGL( dpass );
+
+	if ( face != 0x0405 ) {
+		gxm_stencil.frontFail = sf; gxm_stencil.frontDepthFail = df; gxm_stencil.frontPass = dp;
+	}
+	if ( face != 0x0404 ) {
+		gxm_stencil.backFail = sf; gxm_stencil.backDepthFail = df; gxm_stencil.backPass = dp;
+	}
+	gxm_stencilDirty = true;
+}
+
+void GXM_SetColorMask( int r, int g, int b, int a )
+{
+	gxm_colorMaskNone = !( r || g || b || a );
+}
+
+int GXM_ColorMaskIsNone( void ) { return gxm_colorMaskNone ? 1 : 0; }
 void GXM_SetTexUnitCount( int count )			{ gxm_texUnits = count; }
 void GXM_SetVertexColorEnabled( int enabled )	{ gxm_vertexColor = enabled; }
 // clamped: env indexes the fragment program table
@@ -673,6 +757,15 @@ void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexe
 	gxmDepthState_t depth;
 	GXM_TranslateState( gxm_stateBits, &key, &depth );
 
+	// a shadow volume writes stencil only, which on gxm means its own masked variant
+	if ( gxm_colorMaskNone ) {
+		key.colorMaskNone      = true;
+		key.blended            = true;
+		key.blend.colorMask    = SCE_GXM_COLOR_MASK_NONE;
+		key.blend.colorFunc    = SCE_GXM_BLEND_FUNC_NONE;
+		key.blend.alphaFunc    = SCE_GXM_BLEND_FUNC_NONE;
+	}
+
 	int ntex = gxm_texUnits;
 	if ( ntex > 2 ) ntex = 2;
 	if ( ntex < 0 ) ntex = 0;
@@ -750,6 +843,10 @@ void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexe
 		gxm_curDepth  = depth;
 		gxm_depthKnown = true;
 	}
+	if ( gxm_stencilDirty ) {
+		GXM_ApplyStencilState( &gxm_stencil );
+		gxm_stencilDirty = false;
+	}
 
 	// a new program drops the reservation, so the uniforms must be written again
 	if ( progChanged || gxm_uniformsDirty ) {
@@ -810,6 +907,15 @@ void GXM_DrawStaticBuffer( const void *vertexBuffer, const unsigned short *index
 	gxmDepthState_t depth;
 	GXM_TranslateState( gxm_stateBits, &key, &depth );
 
+	// a shadow volume writes stencil only, which on gxm means its own masked variant
+	if ( gxm_colorMaskNone ) {
+		key.colorMaskNone      = true;
+		key.blended            = true;
+		key.blend.colorMask    = SCE_GXM_COLOR_MASK_NONE;
+		key.blend.colorFunc    = SCE_GXM_BLEND_FUNC_NONE;
+		key.blend.alphaFunc    = SCE_GXM_BLEND_FUNC_NONE;
+	}
+
 	int ntex = gxm_texUnits;
 	if ( ntex > 2 ) ntex = 2;
 	if ( ntex < 0 ) ntex = 0;
@@ -862,6 +968,10 @@ void GXM_DrawStaticBuffer( const void *vertexBuffer, const unsigned short *index
 		GXM_ApplyDepthState( &depth );
 		gxm_curDepth  = depth;
 		gxm_depthKnown = true;
+	}
+	if ( gxm_stencilDirty ) {
+		GXM_ApplyStencilState( &gxm_stencil );
+		gxm_stencilDirty = false;
 	}
 
 	// a new program drops the reservation, so the uniforms must be written again

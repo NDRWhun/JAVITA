@@ -59,6 +59,13 @@ void GXM_TexFilter( unsigned int texnum, int linear, int clampToEdge );
 void GXM_SetProjection( const float *m );	// column-major, as glLoadMatrixf takes it
 void GXM_SetModelView( const float *m );
 void GXM_SetStateBits( unsigned int stateBits );
+void GXM_SetStencilTest( int enable );
+void GXM_SetStencilFunc( unsigned int func, int ref, unsigned int mask );
+void GXM_SetStencilMask( unsigned int mask );
+void GXM_SetStencilOp( unsigned int sfail, unsigned int dfail, unsigned int dpass );
+void GXM_SetStencilOpSeparate( unsigned int face, unsigned int sfail, unsigned int dfail, unsigned int dpass );
+void GXM_SetColorMask( int r, int g, int b, int a );
+int  GXM_ColorMaskIsNone( void );
 void GXM_SetTexUnitCount( int count );
 void GXM_SetVertexColorEnabled( int enabled );
 void GXM_SetTexEnv( int env );				// GXM_TEXENV_*

@@ -68,7 +68,7 @@ void	 GXM_DeviceShutdown( void );
 void	 GXM_BeginFrame( void );
 void	 GXM_EndFrame( void );
 void	 GXM_SetClearColor( float r, float g, float b, float a );
-void	 GXM_ClearBuffers( int color, int depth );	// a fullscreen triangle; GXM has no clear op
+void	 GXM_ClearBuffers( int color, int depth, int stencil );	// a fullscreen triangle; GXM has no clear op
 
 // the last presented frame, bottom row first; comps is 3 or 4
 void	 GXM_ReadPixels( int x, int y, int width, int height, int comps, int dstStride, void *dst );
