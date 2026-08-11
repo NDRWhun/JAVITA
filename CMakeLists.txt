@@ -108,8 +108,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SDL-vitagl EXCLUDE_FROM_ALL)
 
 include(${CMAKE_SOURCE_DIR}/cmake/ja_sources.cmake)
 
-# Native GXM backend. Compiled but inert until USE_GXM_NATIVE is defined and the
-# rd-vanilla bridge is wired in; nothing calls into it yet.
+# Native GXM renderer backend, plus the bridge that rd-vanilla issues its draws through.
 set(GXM_SOURCES
   ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_device.cpp
   ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
@@ -146,7 +145,6 @@ target_link_libraries(${PROJECT_NAME}.elf
   # C++ runtime
   stdc++
   # Sce stubs
-  taihen_stub
   SceGxm_stub
   SceDisplay_stub
   SceCtrl_stub
@@ -177,7 +175,6 @@ add_executable(companion.elf ${CMAKE_SOURCE_DIR}/src/vita/companion_main.cpp ${G
 target_link_libraries(companion.elf
   mathneon
   stdc++
-  taihen_stub
   SceGxm_stub
   SceDisplay_stub
   SceCtrl_stub

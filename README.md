@@ -5,9 +5,8 @@
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 
 A port of Jedi Academy's single-player to the PS Vita, built on
-[OpenJK](https://github.com/JACoders/OpenJK) and rendering through
-[vitaGL](https://github.com/Rinnegatamante/vitaGL), which translates the engine's OpenGL to the
-Vita's GXM.
+[OpenJK](https://github.com/JACoders/OpenJK) with a renderer backend written directly against
+the Vita's GXM graphics API — no OpenGL translation layer in between.
 
 Please report bugs if you find any -> Issues
 
@@ -15,13 +14,17 @@ Please report bugs if you find any -> Issues
 
 You need your own legally-owned copy of Jedi Academy (eg.: from Steam)
 
-- Install `libshacccg.suprx` (the runtime shader compiler vitaGL needs) at
-  `ur0:data/libshacccg.suprx` —
-  [guide](https://samilops2.gitbook.io/vita-troubleshooting-guide/shader-compiler/extract-libshacccg.suprx).
 - Install `JAVITA.vpk` (from [Releases](../../releases)) with VitaShell.
 - Copy your JKA `base/` PK3s — `assets0.pk3`, `assets1.pk3`, `assets2.pk3`, `assets3.pk3` — to
   `ux0:data/JAVITA/base/`.
 - Launch from the LiveArea. Settings live in `ux0:data/JAVITA/base/openjk_sp.cfg`.
+
+No `libshacccg.suprx` needed — the GXM shaders are compiled ahead of time and built into the
+binary, so there is no runtime shader compiler to install.
+
+**First run is slow.** Textures are re-compressed to DXT once and cached under
+`ux0:data/JAVITA/texcache_dxt/`; the first time you load a given area it will stall while that
+happens. Later loads read the cache and are much faster.
 
 ## Controls
 
@@ -82,26 +85,38 @@ Open with **Start + Select** — the on-screen keyboard pops up. Type a command,
 
 ## Build (for developers)
 
-Needs [VitaSDK](https://vitasdk.org) and [vdpm](https://github.com/vitasdk/vdpm) on `PATH`, plus cmake,
-ninja, and GNU make. **On Windows, run from Git Bash.** vitaGL and SDL2 come in as git submodules — forks
-with the Vita patches already committed ([vitaGL](https://github.com/NDRWhun/vitaGL/tree/jk2vita),
-[SDL](https://github.com/NDRWhun/SDL/tree/jk2vita)) — which the build script builds and installs over the
-stock copies VitaSDK ships.
+Needs [VitaSDK](https://vitasdk.org) and [vdpm](https://github.com/vitasdk/vdpm) on `PATH`, plus
+cmake and ninja. **On Windows, run from Git Bash.** SDL2 comes in as a git submodule — a
+[fork](https://github.com/NDRWhun/SDL/tree/jk2vita) with the Vita patches already committed — and
+is built in-tree by CMake, so nothing is installed over the copy VitaSDK ships.
 
 ```bash
 git clone --recursive https://github.com/NDRWhun/JAVITA && cd JAVITA
-bash tools/build.sh        # vdpm deps + vitaGL + SDL + port -> build/JAVITA.vpk
+bash tools/build.sh        # vdpm deps + port -> build/JAVITA.vpk
 ```
 
-`bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. Cloned without
-`--recursive`? The script runs `git submodule update --init` for you.
+`bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. Cloned
+without `--recursive`? The script runs `git submodule update --init` for you.
+
+`tools/env.sh` puts VitaSDK on `PATH` and defaults `VITASDK` to `/usr/local/vitasdk`. Override it
+by exporting `VITASDK` first, or by dropping host-specific settings in `tools/env.local.sh`
+(gitignored).
+
+### Renderer notes
+
+The GXM backend lives in [`src/code/rd-gxm/`](src/code/rd-gxm) and is reached from the stock
+OpenJK renderer through `tr_gxm_bridge.cpp`. Its shaders are Cg sources under
+`src/code/rd-gxm/shaders/`, compiled offline by `build_shaders.py` into `gxm_shaders.h` — if you
+change a `.cg` you need to re-run that script (it needs Sony's shader compiler, which is not
+redistributable, so the generated header is committed).
 
 ## Credits
 
 - [OpenJK](https://github.com/JACoders/OpenJK) (JACoders) — the open-source JK2/JKA engine this builds on.
 - Raven Software / LucasArts — the original *Jedi Knight: Jedi Academy*.
-- [Rinnegatamante](https://github.com/Rinnegatamante) — vitaGL, and vitaQuakeIII as the reference id Tech 3 Vita port.
-- [Northfear](https://github.com/Northfear/SDL) — SDL2 with the vitaGL backend.
+- [Rinnegatamante](https://github.com/Rinnegatamante) — vitaGL, which this port used before the
+  native GXM backend replaced it, and vitaQuakeIII as the reference id Tech 3 Vita port.
+- [Northfear](https://github.com/Northfear/SDL) — the SDL2 Vita fork this builds against.
 
 ## License
 
