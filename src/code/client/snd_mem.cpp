@@ -50,6 +50,7 @@ int 	iff_chunk_len;
 extern sfx_t		s_knownSfx[];
 extern	int			s_numSfx;
 
+extern cvar_t		*s_show;
 extern cvar_t		*s_lip_threshold_1;
 extern cvar_t		*s_lip_threshold_2;
 extern cvar_t		*s_lip_threshold_3;
@@ -1026,7 +1027,7 @@ qboolean S_LoadSound( sfx_t *sfx )
 		qboolean bReturn = S_LoadSound_Actual( sfx );
 #ifdef VITA
 		const int iLoadMs = Com_Milliseconds() - iLoadStart;
-		if ( iLoadMs >= 5 ) {
+		if ( s_show && s_show->integer == 2 && iLoadMs >= 5 ) {
 			Com_Printf( "^3[snd] %s: %dms load\n", sfx->sSoundName, iLoadMs );
 		}
 #endif
