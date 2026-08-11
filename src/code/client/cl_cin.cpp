@@ -2101,6 +2101,7 @@ void SCR_StopCinematic( qboolean bAllowRefusal /* = qfalse */ )
 	{
 		Com_DPrintf("Cinematic Stopped\n");
 		cls.state =  CA_DISCONNECTED;
+		Com_Printf( "[menutrace] cinematic stopped at %i\n", Sys_Milliseconds() );
 	}
 
 	if(sInGameCinematicStandingBy[0] &&
