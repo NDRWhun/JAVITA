@@ -1006,6 +1006,23 @@ void RE_BeginRegistration( glconfig_t *glconfigOut ) {
 
 	tr.registered = qtrue;
 
+#ifdef USE_GXM_NATIVE
+	// RE_BeginFrame drops everything until tr.registered is set just above, so this is the
+	// first point a frame survives. Once only, or it would flash at every map load.
+	{
+		static qboolean splashShown = qfalse;
+		if ( !splashShown ) {
+			splashShown = qtrue;
+			const qhandle_t hSplash = RE_RegisterShaderNoMip( "menu/splash" );
+			if ( hSplash ) {
+				RE_BeginFrame( STEREO_CENTER );
+				RE_StretchPic( 0, 0, 640, 480, 0, 0, 1, 1, hSplash );
+				RE_EndFrame( NULL, NULL );
+			}
+		}
+	}
+#endif
+
 }
 
 //=============================================================================
