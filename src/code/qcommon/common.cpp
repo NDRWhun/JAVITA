@@ -1154,9 +1154,8 @@ void Com_Init( char *commandLine ) {
 		com_developer = Cvar_Get ("developer", "0", CVAR_TEMP );
 		com_logfile = Cvar_Get ("logfile", "0", CVAR_TEMP );
 #ifdef VITA
-		// buffered qconsole.log (flush-per-line = an SD write per print); Com_Error
-		// flushes, hard crashes leave a psp2dmp. logfile 0 in the cfg disables.
-		Cvar_Set( "logfile", "1" );
+		// unbuffered + per-line card sync: a GPU crash needs the log to survive a hard power-off
+		Cvar_Set( "logfile", "2" );
 #endif
 		com_speedslog = Cvar_Get ("speedslog", "0", CVAR_TEMP );
 
