@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include <psp2/display.h>
 #include <psp2/kernel/sysmem.h>
+#include <psp2/kernel/threadmgr.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -173,6 +174,24 @@ typedef struct {
 
 static gxmRetired_t	gxm_retired[GXM_RETIRE_MAX];
 static int			gxm_retiredCount;
+static SceUID		gxm_retiredLock = -1;
+
+static void RetiredLock( void )
+{
+	if ( gxm_retiredLock < 0 ) {
+		gxm_retiredLock = sceKernelCreateMutex( "gxm_retired", 0, 0, NULL );
+	}
+	if ( gxm_retiredLock >= 0 ) {
+		sceKernelLockMutex( gxm_retiredLock, 1, NULL );
+	}
+}
+
+static void RetiredUnlock( void )
+{
+	if ( gxm_retiredLock >= 0 ) {
+		sceKernelUnlockMutex( gxm_retiredLock, 1 );
+	}
+}
 static unsigned int	gxm_framesSubmitted;
 
 // AddEntry blocks once maxPendingCount is reached, so a frame this far back has flipped
@@ -180,15 +199,24 @@ static unsigned int	gxm_framesSubmitted;
 
 void GXM_DrainRetired( bool all )
 {
+	SceUID	due[GXM_RETIRE_MAX];
+	int		numDue = 0;
+
+	RetiredLock();
 	int keep = 0;
 	for ( int i = 0; i < gxm_retiredCount; i++ ) {
 		if ( all || ( gxm_framesSubmitted - gxm_retired[i].frame ) >= GXM_RETIRE_LAG ) {
-			GXM_FreeNow( gxm_retired[i].uid );
+			due[numDue++] = gxm_retired[i].uid;
 		} else {
 			gxm_retired[keep++] = gxm_retired[i];
 		}
 	}
 	gxm_retiredCount = keep;
+	RetiredUnlock();
+
+	for ( int i = 0; i < numDue; i++ ) {
+		GXM_FreeNow( due[i] );
+	}
 }
 
 void GXM_Free( SceUID uid )
@@ -200,14 +228,29 @@ void GXM_Free( SceUID uid )
 		GXM_FreeNow( uid );	// no gpu to outrun
 		return;
 	}
-	if ( gxm_retiredCount >= GXM_RETIRE_MAX ) {
+	RetiredLock();
+	const bool full = ( gxm_retiredCount >= GXM_RETIRE_MAX );
+	RetiredUnlock();
+
+	if ( full ) {
 		// nothing is presenting (a load, typically); drain and release the backlog
 		GXM_Sync();
 		GXM_DrainRetired( true );
 	}
-	gxm_retired[gxm_retiredCount].uid   = uid;
-	gxm_retired[gxm_retiredCount].frame = gxm_framesSubmitted;
-	gxm_retiredCount++;
+
+	RetiredLock();
+	if ( gxm_retiredCount < GXM_RETIRE_MAX ) {
+		gxm_retired[gxm_retiredCount].uid   = uid;
+		gxm_retired[gxm_retiredCount].frame = gxm_framesSubmitted;
+		gxm_retiredCount++;
+		uid = -1;	// handed to the queue
+	}
+	RetiredUnlock();
+
+	if ( uid >= 0 ) {
+		GXM_Sync();			// queue still full: the gpu is the only thing that can free it
+		GXM_FreeNow( uid );
+	}
 }
 
 void *GXM_AllocVertexUsse( unsigned int size, SceUID *uid, unsigned int *usseOffset )
@@ -715,13 +758,16 @@ void GXM_DeviceShutdown( void )
 	sceGxmFinish( gxm_context );
 	sceGxmDisplayQueueFinish();
 
+	// gpu is idle and nothing more will present, so teardown frees go straight through
+	GXM_DrainRetired( true );
+	gxm_deviceOk = false;
+
 	sceGxmShaderPatcherReleaseVertexProgram( gxm_patcher, gxm_clearVertProgram );
 	sceGxmShaderPatcherReleaseFragmentProgram( gxm_patcher, gxm_clearFragProgram );
 	sceGxmShaderPatcherUnregisterProgram( gxm_patcher, gxm_clearVertId );
 	sceGxmShaderPatcherUnregisterProgram( gxm_patcher, gxm_clearFragId );
 	sceGxmShaderPatcherDestroy( gxm_patcher );
 
-	GXM_DrainRetired( true );
 	GXM_Free( gxm_clearVertsUid );
 	GXM_Free( gxm_clearIndicesUid );
 	GXM_Free( gxm_patcherBufUid );
@@ -743,7 +789,6 @@ void GXM_DeviceShutdown( void )
 	free( gxm_hostMem );
 
 	sceGxmTerminate();
-	gxm_deviceOk = false;
 }
 
 SceGxmContext *GXM_Context( void )

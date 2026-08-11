@@ -246,8 +246,13 @@ static unsigned int	 ring_frame;
 static unsigned int	 ring_lastUsed;
 static bool			 ring_overflowed;
 
+static bool	ring_notifyReady;
+
 bool GXM_RingInit( unsigned int bytesPerFrame )
 {
+	// sceGxmInitialize can hand back a different region, so re-derive it every time
+	ring_notifyReady = false;
+
 	// the ring outlives a vid_restart, which brings the render thread back up
 	if ( ring_base ) {
 		ring_offset = 0;
@@ -282,7 +287,6 @@ One slice per frame gives the GPU a frame of grace before reuse.
 // libgxm Overview 9/Fig.21: vertex/index data may be overwritten only once the vertex
 // pipeline notification for the scene that used it has landed
 static SceGxmNotification	ring_notify[GXM_RING_FRAMES];
-static bool					ring_notifyReady;
 
 static void RingNotifyInit( void )
 {
