@@ -825,6 +825,11 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 {
 	WIN_RegisterVideoCvars();
 
+#ifdef USE_GXM_NATIVE
+	// single-threaded path: nothing else brings the device up, and the first state call faults without it
+	WIN_LoadGL();
+#endif
+
 	// Create the window and set up the context
 	if(!GLimp_StartDriverAndSetMode( glConfig, windowDesc, r_mode->integer,
 										(qboolean)r_fullscreen->integer, (qboolean)r_noborder->integer ))
