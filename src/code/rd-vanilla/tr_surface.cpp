@@ -2186,5 +2186,8 @@ Ghoul2 Insert End
 
 	(void(*)(void*))RB_SurfaceFlare,		// SF_FLARE,
 	(void(*)(void*))RB_SurfaceEntity,		// SF_ENTITY
-	(void(*)(void*))RB_SurfaceDisplayList	// SF_DISPLAY_LIST
+	(void(*)(void*))RB_SurfaceDisplayList,	// SF_DISPLAY_LIST
+#ifdef VITA
+	(void(*)(void*))RB_SurfaceSkip			// SF_STATICBATCH, drawn by R_StaticBatch_Flush
+#endif
 };

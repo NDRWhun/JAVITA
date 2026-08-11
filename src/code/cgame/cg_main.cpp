@@ -2037,7 +2037,7 @@ void CG_DrawMiscEnts(void)
 	memset (&refEnt, 0, sizeof(refEnt));
 	refEnt.reType = RT_MODEL;
 	refEnt.frame = 0;
-	refEnt.renderfx = RF_LIGHTING_ORIGIN;
+	refEnt.renderfx = RF_LIGHTING_ORIGIN | RF_STATIC_BATCH;
 	for(i=0;i<NumMiscEnts;i++)
 	{
 		VectorCopy(MiscEnt->origin, cullOrigin);

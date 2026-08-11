@@ -117,6 +117,7 @@ cvar_t	*r_primitives;
 #ifdef VITA
 cvar_t	*r_renderThread;
 cvar_t	*r_worldVBO;
+cvar_t	*r_staticBatch;
 cvar_t *r_gxmCullFlip;
 cvar_t *r_gxmStats;
 cvar_t *r_gxmSync;
@@ -1793,6 +1794,7 @@ void R_Register( void )
 	r_gxmStats = ri.Cvar_Get( "r_gxmStats", "0", CVAR_ARCHIVE );
 	r_gxmSync = ri.Cvar_Get( "r_gxmSync", "0", CVAR_ARCHIVE );	// frames per stat line, 0 = off
 	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	r_staticBatch = ri.Cvar_Get( "r_staticBatch", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE );
 #endif
 	ri.Cvar_CheckRange( r_primitives, MIN_PRIMITIVES, MAX_PRIMITIVES, qtrue );
@@ -2117,6 +2119,7 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 #ifdef VITA
 		// map change: the hunk the VBO's surface keys point into is about to be cleared
 		R_WorldVBO_Clear();
+		R_StaticBatch_Clear();
 
 		// map change: drop old-map textures now, not at the new map's first frame
 		// (drained above so main owns GL; builtins re-create in R_Init)

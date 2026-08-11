@@ -611,6 +611,9 @@ Ghoul2 Insert End
 	SF_FLARE,
 	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
 	SF_DISPLAY_LIST,
+#ifdef VITA
+	SF_STATICBATCH,			// world-space baked static prop, drawn from a shared buffer
+#endif
 
 	SF_NUM_SURFACE_TYPES,
 	SF_MAX = 0xffffffff			// ensures that sizeof( surfaceType_t ) == sizeof( int )
@@ -698,6 +701,16 @@ typedef struct {
 	float		points[1][VERTEXSIZE];	// variable sized
 										// there is a variable length list of indices here also
 } srfSurfaceFace_t;
+
+#ifdef VITA
+// one baked static prop surface; the indices already point into its group
+typedef struct {
+	surfaceType_t	surfaceType;
+	int				group;
+	int				numIndexes;
+	glIndex_t		*indexes;
+} srfStaticBatch_t;
+#endif
 
 
 // misc_models in maps are turned into direct geometry by q3map
@@ -1717,6 +1730,13 @@ void		R_WorldVBO_ContextReset( void );
 qboolean	R_WorldVBO_Surface( const srfSurfaceFace_t *face, int fogNum, int dlighted );
 void		R_WorldVBO_Flush( shader_t *shader );
 void		R_WorldVBO_Stats( char *out, int outSize );
+// baked static props (tr_staticbatch.cpp)
+void		R_StaticBatch_Clear( void );
+void		R_StaticBatch_ContextReset( void );
+qboolean	R_StaticBatch_AddEntity( trRefEntity_t *ent, md3Header_t *header, int fogNum );
+qboolean	R_StaticBatch_Surface( const srfStaticBatch_t *surf, shader_t *shader, int fogNum, int dlighted );
+void		R_StaticBatch_Flush( shader_t *shader );
+void		R_StaticBatch_Stats( char *out, int outSize );
 // static MD3 vertex cache (tr_surface.cpp)
 void R_MD3VertCacheClear( void );
 #endif

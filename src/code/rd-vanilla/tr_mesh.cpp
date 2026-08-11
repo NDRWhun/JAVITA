@@ -371,6 +371,13 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	//
 	fogNum = R_ComputeFogNum( header, ent );
 
+#ifdef VITA
+	// a baked instance draws with the world, so it never reaches the loop below
+	if ( !personalModel && R_StaticBatch_AddEntity( ent, header, fogNum ) ) {
+		return;
+	}
+#endif
+
 	//
 	// draw all surfaces
 	//

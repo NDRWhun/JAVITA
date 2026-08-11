@@ -774,6 +774,10 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 				&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, fogNum, dlighted ) ) {
 				continue;
 			}
+			if ( *drawSurf->surface == SF_STATICBATCH
+				&& R_StaticBatch_Surface( (const srfStaticBatch_t *)drawSurf->surface, shader, fogNum, dlighted ) ) {
+				continue;
+			}
 #endif
 			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 			continue;
@@ -851,6 +855,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			if (oldShader != NULL) {
 #ifdef VITA
 				R_WorldVBO_Flush( oldShader );
+				R_StaticBatch_Flush( oldShader );
 #endif
 				RB_EndSurface();
 
@@ -901,6 +906,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 #ifdef VITA
 			R_WorldVBO_Flush( oldShader );	// leaving world surfaces: flush before the matrix swap
+			R_StaticBatch_Flush( oldShader );
 #endif
 			qglLoadMatrixf( backEnd.ori.modelMatrix );
 			#ifdef USE_GXM_NATIVE
@@ -938,6 +944,10 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, fogNum, dlighted ) ) {
 			continue;
 		}
+		if ( *drawSurf->surface == SF_STATICBATCH
+			&& R_StaticBatch_Surface( (const srfStaticBatch_t *)drawSurf->surface, shader, fogNum, dlighted ) ) {
+			continue;
+		}
 #endif
 		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 	}
@@ -946,6 +956,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	if (oldShader != NULL) {
 #ifdef VITA
 		R_WorldVBO_Flush( oldShader );
+		R_StaticBatch_Flush( oldShader );
 #endif
 		RB_EndSurface();
 	}
@@ -1974,6 +1985,9 @@ const void	*RB_SwapBuffers( const void *data ) {
 			GXM_ReportStats( line, sizeof( line ) );
 			ri.Printf( PRINT_ALL, "%s", line );
 			R_WorldVBO_Stats( line, sizeof( line ) );
+			ri.Printf( PRINT_ALL, "%s", line );
+			GXM_LogStatsLine( line );
+			R_StaticBatch_Stats( line, sizeof( line ) );
 			ri.Printf( PRINT_ALL, "%s", line );
 			GXM_LogStatsLine( line );
 		}

@@ -99,6 +99,7 @@ set(JA_SOURCES
     src/code/rd-vanilla/tr_shade_calc.cpp
     src/code/rd-vanilla/tr_shader.cpp
     src/code/rd-vanilla/tr_shadows.cpp
+    src/code/rd-vanilla/tr_staticbatch.cpp
     src/code/rd-vanilla/tr_skin.cpp
     src/code/rd-vanilla/tr_sky.cpp
     src/code/rd-vanilla/tr_stl.cpp
