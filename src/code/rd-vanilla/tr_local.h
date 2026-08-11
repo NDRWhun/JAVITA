@@ -45,6 +45,7 @@ extern SceUID rend_init_done;	// init-only handshake (vglInit-done, ctx-init-don
 extern volatile qboolean pendingCtxInit;	// one-shot: run ctx init on render thread's first wake
 extern cvar_t *r_renderThread;
 extern cvar_t *r_worldVBO;		// bake eligible static world surfaces into gpu buffers
+extern cvar_t *r_gxmSync;		// 1 = drain the gpu every frame (debug)
 extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
 extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
 extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not first frame

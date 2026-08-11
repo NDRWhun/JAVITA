@@ -24,6 +24,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 
 #include "tr_local.h"
+#ifdef USE_GXM_NATIVE
+#include "../rd-gxm/gxm_device.h"
+#endif
 #include "tr_common.h"
 
 backEndData_t	*backEndData;
@@ -1978,6 +1981,12 @@ const void	*RB_SwapBuffers( const void *data ) {
 #endif
 
 	ri.WIN_Present(&window);
+#ifdef USE_GXM_NATIVE
+	// r_gxmSync 1: block until the gpu has drained, to tell a lifetime bug from a bad scene
+	if ( r_gxmSync && r_gxmSync->integer ) {
+		GXM_Sync();
+	}
+#endif
 
 	backEnd.projection2D = qfalse;
 

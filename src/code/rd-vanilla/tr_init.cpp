@@ -119,6 +119,7 @@ cvar_t	*r_renderThread;
 cvar_t	*r_worldVBO;
 cvar_t *r_gxmCullFlip;
 cvar_t *r_gxmStats;
+cvar_t *r_gxmSync;
 cvar_t	*r_dropTexturesOnLoad;
 #endif
 cvar_t	*r_texturebits;
@@ -1789,7 +1790,8 @@ void R_Register( void )
 	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
 	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
 	r_gxmCullFlip = ri.Cvar_Get( "r_gxmCullFlip", "1", CVAR_ARCHIVE );
-	r_gxmStats = ri.Cvar_Get( "r_gxmStats", "0", CVAR_ARCHIVE );	// frames per stat line, 0 = off
+	r_gxmStats = ri.Cvar_Get( "r_gxmStats", "0", CVAR_ARCHIVE );
+	r_gxmSync = ri.Cvar_Get( "r_gxmSync", "0", CVAR_ARCHIVE );	// frames per stat line, 0 = off
 	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE );
 #endif
