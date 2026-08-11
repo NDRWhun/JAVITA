@@ -211,11 +211,17 @@ void R_BuildWorldVBO( world_t &worldData )
 	wvboEntry_t *list = (wvboEntry_t *)R_Malloc( numSurfaces * sizeof( wvboEntry_t ),
 												TAG_TEMP_WORKSPACE, qfalse );
 	int numEligible = 0;
+	int rejNotFace = 0, rejShader = 0;
 
 	for ( int i = 0; i < numSurfaces; i++ )
 	{
 		msurface_t *surf = &worldData.surfaces[i];
-		if ( *surf->data != SF_FACE || !R_WorldVBO_ShaderEligible( surf->shader ) ) {
+		if ( *surf->data != SF_FACE ) {
+			rejNotFace++;			// patch or trisoup: a surface type thing, not a shader thing
+			continue;
+		}
+		if ( !R_WorldVBO_ShaderEligible( surf->shader ) ) {
+			rejShader++;
 			continue;
 		}
 		list[numEligible].face  = (srfSurfaceFace_t *)surf->data;
@@ -314,6 +320,7 @@ void R_BuildWorldVBO( world_t &worldData )
 	R_Free( verts );
 	R_Free( list );
 
+	ri.Printf( PRINT_ALL, "world VBO: rejected %i non-planar, %i by shader\n", rejNotFace, rejShader );
 	ri.Printf( PRINT_ALL, "world VBO: %i/%i surfaces resident, %i verts %i tris, %i groups, %i split, %.2f MB\n",
 		resident, numSurfaces, totalVerts, totalIdx / 3, wvbo_numGroups, splitShaders,
 		wvbo_bytes / (1024.0f * 1024.0f) );
