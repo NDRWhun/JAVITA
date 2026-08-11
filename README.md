@@ -115,7 +115,9 @@ default of `125` sits above that ceiling.
 | `r_ghoul2CrowdLod` | `0` | Above this many on-screen characters, extras drop LOD (`0` = off) |
 | `r_ghoul2CrowdLodStep` | `3` | How many LOD levels the crowd extras drop |
 | `r_g2Threaded` | `0` | Skin characters on a worker thread; `1` = on |
-| `cg_shadows` | `1` | Player/NPC shadows — `0` = off, `1` = blob |
+| `cg_shadows` | `1` | Player/NPC shadows — `0` = off, `1` = blob, `2` = stencil volumes, `3` = projected |
+| `r_shadowAlpha` | `0.35` | How dark a stencil shadow lands — `0` invisible, `1` solid black |
+| `cg_shadowCasterRange` | `1024` | Characters past this distance keep a blob instead of casting a volume (`0` = all cast) |
 | `r_texCacheCompressed` | `1` | Cache textures as DXT (less VRAM; `0` = uncompressed) *(latched)* |
 | `r_dropTexturesOnLoad` | `1` | Free the old map's textures at map change (lower transition memory peak); `0` = keep until the new map's first frame |
 | `s_khz` | `22` | Mixer rate — 22 matches the source assets *(latched)* |

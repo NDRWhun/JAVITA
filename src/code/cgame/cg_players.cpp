@@ -6816,6 +6816,21 @@ extern qboolean G_ControlledByPlayer( gentity_t *self );
 extern qboolean G_RagDoll(gentity_t *ent, vec3_t forcedAngles);
 int	cg_saberOnSoundTime[MAX_GENTITIES] = {0};
 
+
+// A stencil caster costs two volume passes over its mesh, so characters past
+// cg_shadowCasterRange keep their blob instead. 0 means every character casts.
+static qboolean CG_ShadowCasterInRange( const centity_t *cent )
+{
+	if ( cg_shadowCasterRange.value <= 0.0f ) {
+		return qtrue;
+	}
+	if ( cent->currentState.number == cg.snap->ps.clientNum ) {
+		return qtrue;			// the player always casts
+	}
+	return (qboolean)( DistanceSquared( cent->lerpOrigin, cg.refdef.vieworg )
+		<= cg_shadowCasterRange.value * cg_shadowCasterRange.value );
+}
+
 void CG_Player( centity_t *cent ) {
 	clientInfo_t	*ci;
 	qboolean		shadow, staticScale = qfalse;
@@ -8016,7 +8031,8 @@ Ghoul2 Insert End
 		}
 	}
 
-	if ( (cg_shadows.integer == 2) || (cg_shadows.integer == 3 && shadow) )
+	if ( ( cg_shadows.integer == 2 && CG_ShadowCasterInRange( cent ) )
+		|| (cg_shadows.integer == 3 && shadow) )
 	{
 		renderfx |= RF_SHADOW_PLANE;
 	}

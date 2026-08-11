@@ -472,7 +472,8 @@ void RB_ShadowFinish( void ) {
 //	qglColor3f( 1, 0, 0 );
 //	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
 
-	qglColor4f( 0.0f, 0.0f, 0.0f, 0.5f );
+	// r_shadowAlpha picks how dark the volume lands; 0 is invisible, 1 is solid black
+	qglColor4f( 0.0f, 0.0f, 0.0f, r_shadowAlpha->value );
 	//GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
 	GL_State( GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
 

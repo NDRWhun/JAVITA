@@ -242,6 +242,7 @@ vmCvar_t	cg_bobup;
 vmCvar_t	cg_bobpitch;
 vmCvar_t	cg_bobroll;
 vmCvar_t	cg_shadows;
+vmCvar_t	cg_shadowCasterRange;
 vmCvar_t	cg_renderToTextureFX;
 vmCvar_t	cg_shadowCullDistance;
 vmCvar_t	cg_footsteps;
@@ -355,6 +356,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_fovAspectAdjust, "cg_fovAspectAdjust", "0", CVAR_ARCHIVE },
 	{ &cg_stereoSeparation, "cg_stereoSeparation", "0.4", CVAR_ARCHIVE  },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
+	{ &cg_shadowCasterRange, "cg_shadowCasterRange", "1024", CVAR_ARCHIVE },
 	{ &cg_renderToTextureFX, "cg_renderToTextureFX", "1", CVAR_ARCHIVE  },
 	{ &cg_shadowCullDistance, "r_shadowRange", "1000", CVAR_ARCHIVE },
 	{ &cg_footsteps, "cg_footsteps", "3", CVAR_ARCHIVE  },//1 = sounds, 2 = sounds & effects, 3 = sounds, effects & marks, 4 = always
