@@ -152,7 +152,7 @@ void *GXM_Alloc( SceKernelMemBlockType type, unsigned int size, unsigned int ali
 	return mem;
 }
 
-void GXM_Free( SceUID uid )
+static void GXM_FreeNow( SceUID uid )
 {
 	void *mem = NULL;
 	if ( uid < 0 || sceKernelGetMemBlockBase( uid, &mem ) < 0 ) {
@@ -160,6 +160,54 @@ void GXM_Free( SceUID uid )
 	}
 	sceGxmUnmapMemory( mem );
 	sceKernelFreeMemBlock( uid );
+}
+
+// Unmapping a page a scene in flight still samples is a gpu mmu fault, so blocks are
+// retired here and released once the frames that could reference them have completed.
+#define GXM_RETIRE_MAX	512
+
+typedef struct {
+	SceUID			uid;
+	unsigned int	frame;
+} gxmRetired_t;
+
+static gxmRetired_t	gxm_retired[GXM_RETIRE_MAX];
+static int			gxm_retiredCount;
+static unsigned int	gxm_framesSubmitted;
+
+// AddEntry blocks once maxPendingCount is reached, so a frame this far back has flipped
+#define GXM_RETIRE_LAG	( GXM_DISPLAY_BUFFERS + 1 )
+
+void GXM_DrainRetired( bool all )
+{
+	int keep = 0;
+	for ( int i = 0; i < gxm_retiredCount; i++ ) {
+		if ( all || ( gxm_framesSubmitted - gxm_retired[i].frame ) >= GXM_RETIRE_LAG ) {
+			GXM_FreeNow( gxm_retired[i].uid );
+		} else {
+			gxm_retired[keep++] = gxm_retired[i];
+		}
+	}
+	gxm_retiredCount = keep;
+}
+
+void GXM_Free( SceUID uid )
+{
+	if ( uid < 0 ) {
+		return;
+	}
+	if ( !gxm_deviceOk ) {
+		GXM_FreeNow( uid );	// no gpu to outrun
+		return;
+	}
+	if ( gxm_retiredCount >= GXM_RETIRE_MAX ) {
+		// nothing is presenting (a load, typically); drain and release the backlog
+		GXM_Sync();
+		GXM_DrainRetired( true );
+	}
+	gxm_retired[gxm_retiredCount].uid   = uid;
+	gxm_retired[gxm_retiredCount].frame = gxm_framesSubmitted;
+	gxm_retiredCount++;
 }
 
 void *GXM_AllocVertexUsse( unsigned int size, SceUID *uid, unsigned int *usseOffset )
@@ -586,6 +634,9 @@ void GXM_EndFrame( void )
 
 	gxm_frontBuffer = gxm_backBuffer;
 	gxm_backBuffer  = ( gxm_backBuffer + 1 ) % GXM_DISPLAY_BUFFERS;
+
+	gxm_framesSubmitted++;
+	GXM_DrainRetired( false );
 }
 
 /*
@@ -601,6 +652,7 @@ void GXM_Sync( void )
 		return;
 	}
 	sceGxmFinish( gxm_context );
+	GXM_DrainRetired( true );	// the gpu is idle, so nothing can still reference these
 }
 
 /*
@@ -669,6 +721,7 @@ void GXM_DeviceShutdown( void )
 	sceGxmShaderPatcherUnregisterProgram( gxm_patcher, gxm_clearFragId );
 	sceGxmShaderPatcherDestroy( gxm_patcher );
 
+	GXM_DrainRetired( true );
 	GXM_Free( gxm_clearVertsUid );
 	GXM_Free( gxm_clearIndicesUid );
 	GXM_Free( gxm_patcherBufUid );
