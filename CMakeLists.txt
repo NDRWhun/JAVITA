@@ -117,14 +117,6 @@ set(GXM_SOURCES
   ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla/tr_gxm_bridge.cpp
 )
 
-# same backend without the rd-vanilla bridge, for the standalone companion app
-set(GXM_SOURCES_NOBRIDGE
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_device.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_state.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_backend.cpp
-)
-
 add_executable(${PROJECT_NAME}.elf ${JA_SOURCES} ${GXM_SOURCES})
 target_compile_definitions(${PROJECT_NAME}.elf PRIVATE USE_GXM_NATIVE)
 
@@ -157,37 +149,12 @@ target_link_libraries(${PROJECT_NAME}.elf
   SceIme_stub
   SceSysmodule_stub
   SceKernelDmacMgr_stub
-  SceAppMgr_stub
-  SceAppUtil_stub
   ScePower_stub
   SceNet_stub
   SceNetCtl_stub
   c
   m
 )
-
-#----------------------------------------------------------------------------
-# Companion: standalone "Configuration" app launched by the LiveArea -config gate.
-# Separate ELF/SELF (its own GXM context) bundled into the same VPK as
-# companion.bin; the engine eboot sceAppMgrLoadExec's it when launched with -config.
-#----------------------------------------------------------------------------
-add_executable(companion.elf ${CMAKE_SOURCE_DIR}/src/vita/companion_main.cpp ${GXM_SOURCES_NOBRIDGE})
-target_link_libraries(companion.elf
-  mathneon
-  stdc++
-  SceGxm_stub
-  SceDisplay_stub
-  SceCtrl_stub
-  SceCommonDialog_stub
-  SceSysmodule_stub
-  SceKernelDmacMgr_stub
-  SceAppMgr_stub
-  SceAppUtil_stub
-  ScePower_stub
-  c
-  m
-)
-vita_create_self(companion.bin companion.elf UNSAFE)
 
 #----------------------------------------------------------------------------
 # Package: ELF -> SELF -> VPK
@@ -202,6 +169,4 @@ vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
   FILE ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
   FILE ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
   FILE ${CMAKE_BINARY_DIR}/generated/livearea/template.xml sce_sys/livearea/contents/template.xml
-  FILE ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/config.png sce_sys/livearea/contents/config.png
-  FILE ${CMAKE_BINARY_DIR}/companion.bin companion.bin
 )
