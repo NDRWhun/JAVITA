@@ -295,7 +295,9 @@ void RB_DoShadowTessEnd( vec3_t lightPos )
 		//out the ground pos for the vert to project the shadow volume to
 		VectorAdd(tess.xyz[i], backEnd.ori.origin, worldxyz);
 		groundDist = worldxyz[2] - backEnd.currentEntity->e.shadowPlane;
-		groundDist += 16.0f; //fudge factor
+		// The volume stops at the ground plane, so it never reaches a wall beside the
+		// model. r_shadowExtrude pushes it past that, far enough to hit nearby geometry.
+		groundDist += r_shadowExtrude->value;
 		VectorMA( tess.xyz[i], -groundDist, lightDir, shadowXyz[i] );
 	}
 #else
