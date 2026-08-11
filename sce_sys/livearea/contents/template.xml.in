@@ -4,18 +4,18 @@
     <image>bg.png</image>
   </livearea-background>
 
-  <frame id="frame2" multi="o" autoflip="1">
+  <frame id="frame1">
     <liveitem>
-      <target>psla:eboot</target>
-      <image valign="bottom" align="center" width="560" height="297">startup.png</image>
+      <text valign="top" align="left" text-align="left" text-valign="top" word-wrap="off" ellipsis="on">
+        <str size="22" color="#9fd8ff" shadow="on">v@PORT_VERSION@</str>
+      </text>
     </liveitem>
   </frame>
 
-  <frame id="frame3">
+  <frame id="frame3" multi="o" autoflip="1">
     <liveitem>
-      <text valign="bottom" align="left" text-align="left" text-valign="bottom" word-wrap="off" ellipsis="on">
-        <str size="22" color="#9fd8ff" shadow="on">v@PORT_VERSION@</str>
-      </text>
+      <target>psla:eboot</target>
+      <image valign="bottom" align="center" width="560" height="297">startup.png</image>
     </liveitem>
   </frame>
 
