@@ -184,6 +184,7 @@ static bool						gxm_fragUniformsDirty = true;
 static int	gxm_statUploads, gxm_statDraws, gxm_statTextured, gxm_statNoTex, gxm_statRingFail;
 static int	gxm_statDxtUploads;	// how many took the compressed path
 static int	gxm_statSlotFail;	// textures refused because the pool is full
+static int	gxm_statTexFrees;	// gpu texture memory handed back while frames may still read it
 static int	gxm_statImmDraws;	// draws that came from a glBegin/glEnd block
 static int	gxm_statProgFail;	// draws dropped because no fragment program resolved
 
@@ -412,6 +413,7 @@ int GXM_TexUploadDxt( unsigned int texnum, const void *blob, unsigned int size,
 
 void GXM_TexFree( unsigned int texnum )
 {
+	gxm_statTexFrees++;
 	const int slot = TexFind( texnum );
 	if ( slot >= 0 ) {
 		ForgetTexture( slot );
@@ -1039,9 +1041,9 @@ void GXM_ReportStats( char *out, int outSize )
 	extern int gxm_texAllocFail, gxm_texInitFail;
 	extern unsigned int gxm_texBytes;
 	snprintf( out, outSize,
-		"GXM: uploads=%d dxt=%d allocfail=%d initfail=%d slotfail=%d texmem=%uMB | draws=%d imm=%d textured=%d notex=%d ringfail=%d ring=%uKB/%uKB | progs=%d/%d progfail=%d fragusse=%uKB\n",
+		"GXM: uploads=%d dxt=%d allocfail=%d initfail=%d slotfail=%d texfrees=%d texmem=%uMB | draws=%d imm=%d textured=%d notex=%d ringfail=%d ring=%uKB/%uKB | progs=%d/%d progfail=%d fragusse=%uKB\n",
 		gxm_statUploads, gxm_statDxtUploads, gxm_texAllocFail, gxm_texInitFail,
-		gxm_statSlotFail, gxm_texBytes / ( 1024 * 1024 ),
+		gxm_statSlotFail, gxm_statTexFrees, gxm_texBytes / ( 1024 * 1024 ),
 		gxm_statDraws, gxm_statImmDraws, gxm_statTextured, gxm_statNoTex,
 		gxm_statRingFail, GXM_RingUsedLastFrame() / 1024, GXM_RingBytesPerFrame() / 1024,
 		gxm_progCount, GXM_MAX_PROGRAMS, gxm_statProgFail,
