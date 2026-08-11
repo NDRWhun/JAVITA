@@ -24,9 +24,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // gxm_device.cpp -- native GXM device: context, memory, swap chain, frame.
 
 #include "gxm_device.h"
+#include "gxm_texture.h"
 #include "shaders/gxm_shaders.h"
 
-#include <psp2/common_dialog.h>
+#include <psp2/common_dialog.h>
+
 #include <psp2/display.h>
 #include <psp2/kernel/sysmem.h>
 #include <stdlib.h>
@@ -92,7 +94,8 @@ static SceGxmRenderTarget	*gxm_renderTarget;
 static gxmDisplayBuffer_t	 gxm_buffers[GXM_DISPLAY_BUFFERS];
 static unsigned int			 gxm_backBuffer, gxm_frontBuffer;
 
-static SceUID				 gxm_depthUid;
+static SceUID				 gxm_depthUid;
+
 static void					*gxm_depthData;
 static SceGxmDepthStencilSurface gxm_depthSurface;
 
@@ -101,7 +104,8 @@ static SceUID				 gxm_patcherBufUid, gxm_patcherVertUsseUid, gxm_patcherFragUsse
 
 static SceGxmShaderPatcherId gxm_clearVertId, gxm_clearFragId;
 static SceGxmVertexProgram	*gxm_clearVertProgram;
-static SceGxmFragmentProgram *gxm_clearFragProgram;
+static SceGxmFragmentProgram *gxm_clearFragProgram;
+
 static SceGxmFragmentProgram	*gxm_clearDepthProgram;	// colour writes masked off
 static const SceGxmProgramParameter *gxm_clearColorParam;
 static SceUID				 gxm_clearVertsUid, gxm_clearIndicesUid;
@@ -342,7 +346,8 @@ static bool GXM_InitSwapChain( void )
 	void *depthData = GXM_Alloc( SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
 		4 * alignedW * alignedH, SCE_GXM_DEPTHSTENCIL_SURFACE_ALIGNMENT,
 		SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE, &gxm_depthUid );
-	gxm_depthData = depthData;
+	gxm_depthData = depthData;
+
 	if ( !depthData ) {
 		return false;
 	}
@@ -553,7 +558,9 @@ void GXM_EndFrame( void )
 	}
 	gxm_sceneOpen = false;
 
-	sceGxmEndScene( gxm_context, NULL, NULL );
+	// tell the gpu to stamp this slice's notification when its vertex work completes,
+	// so GXM_RingBeginFrame knows when the slice is safe to overwrite
+	sceGxmEndScene( gxm_context, GXM_RingSceneNotification(), NULL );
 
 	// hand the back buffer over after the scene ends, so the console IME composites into this flip
 	{

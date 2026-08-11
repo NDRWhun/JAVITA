@@ -56,6 +56,7 @@ void	GXM_TextureSetFilter( gxmTexture_t *t, bool linear, bool clamp );
 bool	GXM_RingInit( unsigned int bytesPerFrame );
 void	GXM_RingShutdown( void );
 void	GXM_RingBeginFrame( void );
+const SceGxmNotification *GXM_RingSceneNotification( void );
 void   *GXM_RingAlloc( unsigned int size, unsigned int alignment );
 unsigned int GXM_RingUsedLastFrame( void );
 unsigned int GXM_RingBytesPerFrame( void );

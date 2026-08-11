@@ -279,6 +279,37 @@ GXM_RingBeginFrame
 One slice per frame gives the GPU a frame of grace before reuse.
 ================
 */
+// libgxm Overview 9/Fig.21: vertex/index data may be overwritten only once the vertex
+// pipeline notification for the scene that used it has landed
+static SceGxmNotification	ring_notify[GXM_RING_FRAMES];
+static bool					ring_notifyReady;
+
+static void RingNotifyInit( void )
+{
+	volatile unsigned int *base = sceGxmGetNotificationRegion();
+	if ( !base ) {
+		return;
+	}
+	for ( int i = 0; i < GXM_RING_FRAMES; i++ ) {
+		ring_notify[i].address = base + i;
+		ring_notify[i].value   = 0;
+		*ring_notify[i].address = 0;
+	}
+	ring_notifyReady = true;
+}
+
+const SceGxmNotification *GXM_RingSceneNotification( void )
+{
+	if ( !ring_notifyReady ) {
+		RingNotifyInit();
+		if ( !ring_notifyReady ) {
+			return NULL;
+		}
+	}
+	ring_notify[ring_frame].value++;
+	return &ring_notify[ring_frame];
+}
+
 void GXM_RingBeginFrame( void )
 {
 	// a high-water mark, so a heavy frame still shows in an occasional report
@@ -286,6 +317,11 @@ void GXM_RingBeginFrame( void )
 		ring_lastUsed = ring_offset;
 	}
 	ring_frame  = ( ring_frame + 1 ) % GXM_RING_FRAMES;
+
+	// the gpu may still be fetching from this slice; wait for its scene's vertex work
+	if ( ring_notifyReady && ring_notify[ring_frame].value ) {
+		sceGxmNotificationWait( &ring_notify[ring_frame] );
+	}
 	ring_offset = 0;
 
 	if ( ring_overflowed ) {
