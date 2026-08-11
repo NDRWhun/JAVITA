@@ -281,9 +281,27 @@ void RE_SetLightStyle(int style, int color);
 void R_Splash()
 {
 #ifdef USE_GXM_NATIVE
-	// clear-only first scene: no scene is open yet, and gxm state calls outside one fault
+	// A scene has to be open before any gxm state call, so one is begun here and the
+	// stock splash draws into it; a missing image just leaves the clear behind.
+	GXM_BeginFrame();
 	qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 	qglClear( GL_COLOR_BUFFER_BIT );
+	{
+		image_t *splash = R_FindImageFile( "menu/splash", qfalse, qfalse, qfalse, GL_CLAMP );
+		if ( splash ) {
+			extern void RB_SetGL2D( void );
+			RB_SetGL2D();
+			GL_Bind( splash );
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+			qglBegin( GL_TRIANGLE_STRIP );
+				qglTexCoord2f( 0, 0 );	qglVertex2f( 0,   0   );
+				qglTexCoord2f( 1, 0 );	qglVertex2f( 640, 0   );
+				qglTexCoord2f( 0, 1 );	qglVertex2f( 0,   480 );
+				qglTexCoord2f( 1, 1 );	qglVertex2f( 640, 480 );
+			qglEnd();
+		}
+	}
+	GXM_EndFrame();
 	ri.WIN_Present( &window );
 	return;
 #elif defined(VITA)
