@@ -1158,8 +1158,8 @@ void Com_Init( char *commandLine ) {
 		com_developer = Cvar_Get ("developer", "0", CVAR_TEMP );
 		com_logfile = Cvar_Get ("logfile", "0", CVAR_TEMP );
 #ifdef VITA
-		// unbuffered + per-line card sync: a GPU crash needs the log to survive a hard power-off
-		Cvar_Set( "logfile", "2" );
+		// buffered; logfile 2 in the cfg adds the per-line card sync a hard power-off needs
+		Cvar_Set( "logfile", "1" );
 #endif
 		com_speedslog = Cvar_Get ("speedslog", "0", CVAR_TEMP );
 
