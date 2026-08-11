@@ -1256,7 +1256,8 @@ extern	cvar_t	*r_showsky;						// forces sky in front of all surfaces
 extern	cvar_t	*r_shownormals;					// draws wireframe normals
 extern	cvar_t	*r_clear;						// force screen clear every frame
 
-extern	cvar_t	*r_shadowAlpha;					// how dark a stencil shadow lands, 0..1
+extern	cvar_t	*r_shadowAlpha;
+extern	cvar_t	*r_shadowDlight;					// dynamic lights steer the shadow direction					// how dark a stencil shadow lands, 0..1
 extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection
 extern	cvar_t	*r_flares;						// light flares
 

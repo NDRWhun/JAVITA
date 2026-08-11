@@ -118,6 +118,7 @@ default of `125` sits above that ceiling.
 | `cg_shadows` | `1` | Player/NPC shadows — `0` = off, `1` = blob, `2` = stencil volumes, `3` = projected |
 | `r_shadowAlpha` | `0.35` | How dark a stencil shadow lands — `0` invisible, `1` solid black |
 | `cg_shadowCasterRange` | `1024` | Characters past this distance keep a blob instead of casting a volume (`0` = all cast) |
+| `r_shadowDlight` | `1` | Sabers and shots steer the shadow direction; `0` = static light grid only |
 | `r_texCacheCompressed` | `1` | Cache textures as DXT (less VRAM; `0` = uncompressed) *(latched)* |
 | `r_dropTexturesOnLoad` | `1` | Free the old map's textures at map change (lower transition memory peak); `0` = keep until the new map's first frame |
 | `s_khz` | `22` | Mixer rate — 22 matches the source assets *(latched)* |

@@ -255,7 +255,33 @@ void RB_DoShadowTessEnd( vec3_t lightPos )
 	vec3_t	entLight;
 	float	groundDist;
 
+	// The static light grid gives a fixed direction, so a saber or a blaster bolt lights
+	// the model without moving its shadow. Take the direction from the strongest dynamic
+	// light touching this surface instead, and keep the ground-plane projection below.
 	VectorCopy( backEnd.currentEntity->lightDir, entLight );
+	if ( r_shadowDlight->integer && tess.dlightBits )
+	{
+		const vec3_t *entOrg = &backEnd.currentEntity->e.origin;
+		float best = 0.0f;
+		for ( i = 0; i < backEnd.refdef.num_dlights; i++ )
+		{
+			if ( !( tess.dlightBits & ( 1 << i ) ) ) {
+				continue;
+			}
+			const dlight_t *dl = &backEnd.refdef.dlights[i];
+			vec3_t dir;
+			VectorSubtract( *entOrg, dl->origin, dir );		// light -> model
+			const float dist = VectorLength( dir );
+			if ( dist < 1.0f || dl->radius <= dist ) {
+				continue;								// inside it, or out of its reach
+			}
+			const float strength = dl->radius / dist;
+			if ( strength > best ) {
+				best = strength;
+				VectorScale( dir, 1.0f / dist, entLight );
+			}
+		}
+	}
 	entLight[2] = 0.0f;
 	VectorNormalize(entLight);
 

@@ -130,6 +130,7 @@ cvar_t	*r_lightmap;
 cvar_t	*r_vertexLight;
 cvar_t	*r_shadows;
 cvar_t	*r_shadowAlpha;
+cvar_t	*r_shadowDlight;
 cvar_t	*r_shadowRange;
 cvar_t	*r_flares;
 cvar_t	*r_nobind;
@@ -1856,6 +1857,7 @@ void R_Register( void )
 	r_noportals = ri.Cvar_Get ("r_noportals", "0", CVAR_CHEAT);
 	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
 	r_shadowAlpha = ri.Cvar_Get( "r_shadowAlpha", "0.35", CVAR_ARCHIVE );
+	r_shadowDlight = ri.Cvar_Get( "r_shadowDlight", "1", CVAR_ARCHIVE );
 #ifdef VITA
 	// One-shot graphics baseline upgrade (versioned so later menu tweaks stick):
 	// the MT renderer + DXT freed the budget the old "fastest" configs assumed gone.
