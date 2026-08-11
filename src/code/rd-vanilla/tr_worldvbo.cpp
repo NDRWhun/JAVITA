@@ -114,6 +114,15 @@ void R_WorldVBO_ContextReset( void )
 // A stage can be drawn from the buffer when both its coordinates and its colour
 // are already in it: uv0 for the diffuse, uv1 for a collapsed lightmap, and
 // either a constant tint or the stream colour.
+// why a shader was turned away, tallied over one map build
+enum { WVR_SKY, WVR_POLYOFFSET, WVR_SORT, WVR_DEFORM, WVR_PASSES,
+       WVR_LMVERTEX, WVR_NOLIGHTMAP, WVR_STAGE, WVR_COUNT };
+static int wvbo_reason[WVR_COUNT];
+static const char *wvbo_reasonName[WVR_COUNT] = {
+	"sky", "polygonOffset", "sort>opaque", "deform", "passes",
+	"lightmapByVertex", "noLightmap", "stage"
+};
+
 static qboolean R_WorldVBO_StageEligible( const shaderStage_t *st )
 {
 	if ( !st->active ) {
@@ -144,29 +153,37 @@ static qboolean R_WorldVBO_StageEligible( const shaderStage_t *st )
 static qboolean R_WorldVBO_ShaderEligible( const shader_t *shader )
 {
 	if ( shader->sky ) {
+		wvbo_reason[WVR_SKY]++;
 		return qfalse;					// sky runs its own stage iterator, not the generic one
 	}
 	if ( shader->polygonOffset ) {
+		wvbo_reason[WVR_POLYOFFSET]++;
 		return qfalse;					// this path never sets GL_POLYGON_OFFSET_FILL
 	}
 	if ( shader->sort > SS_OPAQUE ) {
+		wvbo_reason[WVR_SORT]++;
 		return qfalse;					// blended surfaces need their draw order kept
 	}
 	if ( shader->numDeforms ) {
+		wvbo_reason[WVR_DEFORM]++;
 		return qfalse;					// deformVertexes rewrites xyz every frame
 	}
 	if ( shader->numUnfoggedPasses < 1 || shader->numUnfoggedPasses > MAX_SHADER_STAGES ) {
+		wvbo_reason[WVR_PASSES]++;
 		return qfalse;
 	}
 	if ( shader->lightmapIndex[0] == LIGHTMAP_BY_VERTEX ) {
 		// resident verts carry the raw colour and would ignore r_fullbright and RE_SetLightStyle
+		wvbo_reason[WVR_LMVERTEX]++;
 		return qfalse;
 	} else if ( shader->lightmapIndex[0] < 0 ) {
+		wvbo_reason[WVR_NOLIGHTMAP]++;
 		return qfalse;
 	}
 
 	for ( int i = 0; i < shader->numUnfoggedPasses; i++ ) {
 		if ( !R_WorldVBO_StageEligible( &shader->stages[i] ) ) {
+			wvbo_reason[WVR_STAGE]++;
 			return qfalse;
 		}
 	}
@@ -212,6 +229,7 @@ void R_BuildWorldVBO( world_t &worldData )
 												TAG_TEMP_WORKSPACE, qfalse );
 	int numEligible = 0;
 	int rejNotFace = 0, rejShader = 0;
+	memset( wvbo_reason, 0, sizeof( wvbo_reason ) );
 
 	for ( int i = 0; i < numSurfaces; i++ )
 	{
@@ -320,6 +338,11 @@ void R_BuildWorldVBO( world_t &worldData )
 	R_Free( verts );
 	R_Free( list );
 
+	for ( int r = 0; r < WVR_COUNT; r++ ) {
+		if ( wvbo_reason[r] ) {
+			ri.Printf( PRINT_ALL, "world VBO: reject %-16s %i\n", wvbo_reasonName[r], wvbo_reason[r] );
+		}
+	}
 	ri.Printf( PRINT_ALL, "world VBO: rejected %i non-planar, %i by shader\n", rejNotFace, rejShader );
 	ri.Printf( PRINT_ALL, "world VBO: %i/%i surfaces resident, %i verts %i tris, %i groups, %i split, %.2f MB\n",
 		resident, numSurfaces, totalVerts, totalIdx / 3, wvbo_numGroups, splitShaders,
