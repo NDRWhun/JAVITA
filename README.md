@@ -117,11 +117,13 @@ default of `125` sits above that ceiling.
 | `r_ghoul2CrowdLod` | `0` | Above this many on-screen characters, extras drop LOD (`0` = off) |
 | `r_ghoul2CrowdLodStep` | `3` | How many LOD levels the crowd extras drop |
 | `r_g2Threaded` | `0` | Skin characters on a worker thread; `1` = on |
-| `cg_shadows` | `1` | Player/NPC shadows — `0` = off, `1` = blob, `2` = stencil volumes, `3` = projected |
+| `cg_shadows` | `1` | Player/NPC shadows — `0` off, `1` blob, `2` stencil volumes *(experimental)*, `3` projected *(experimental)* |
 | `r_shadowAlpha` | `0.22` | How dark a stencil shadow lands — `0` invisible, `1` solid black |
 | `cg_shadowCasterRange` | `1024` | Characters past this distance keep a blob instead of casting a volume (`0` = all cast) |
 | `r_shadowDlight` | `1` | Sabers and shots steer the shadow direction; `0` = static light grid only |
 | `r_shadowExtrude` | `96` | How far a shadow volume reaches past the ground plane — raise it to catch nearby walls |
+
+The stencil and projected modes are new and not finished — `2` casts onto the ground plane and only reaches walls as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry. `1` is the default for a reason.
 | `r_texCacheCompressed` | `1` | Cache textures as DXT (less VRAM; `0` = uncompressed) *(latched)* |
 | `r_dropTexturesOnLoad` | `1` | Free the old map's textures at map change (lower transition memory peak); `0` = keep until the new map's first frame |
 | `s_khz` | `22` | Mixer rate — 22 matches the source assets *(latched)* |
