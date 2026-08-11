@@ -2261,6 +2261,9 @@ void RB_StageIteratorGeneric( void )
 	if ( input->shader->polygonOffset )
 	{
 		qglDisable( GL_POLYGON_OFFSET_FILL );
+#ifdef USE_GXM_NATIVE
+		GXM_SetDepthBias( 0.0f, 0.0f );	// GXM has no enable, so zero is the off state
+#endif
 	}
 
 	// Now check for surfacesprites.
