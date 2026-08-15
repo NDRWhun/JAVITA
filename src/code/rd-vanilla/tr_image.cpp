@@ -1821,6 +1821,13 @@ void R_CreateBuiltinImages( void ) {
 
 	tr.identityLightImage = R_CreateImage("*identityLight", (byte *)data, 8, 8, GL_RGBA, qfalse, qfalse, qtrue, GL_REPEAT);
 
+	// scratch starts black rather than the identityLight white left in the buffer above
+	for (x=0 ; x<DEFAULT_SIZE ; x++) {
+		for (y=0 ; y<DEFAULT_SIZE ; y++) {
+			data[y][x][0] = data[y][x][1] = data[y][x][2] = 0;
+		}
+	}
+
 	// scratchimage is usually used for cinematic drawing
 	for(x=0;x<NUM_SCRATCH_IMAGES;x++) {
 		// scratchimage is usually used for cinematic drawing

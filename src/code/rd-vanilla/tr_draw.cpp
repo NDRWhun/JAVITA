@@ -55,9 +55,16 @@ static void R_StageCinematic( int x, int y, int w, int h, int cols, int rows,
 	const int use = w ? 0 : 1;
 	static byte *stage[2][2][NUM_SCRATCH_IMAGES];
 	static int   stageSize[2][2][NUM_SCRATCH_IMAGES];
+	static int   stagedCols[NUM_SCRATCH_IMAGES];
+	static int   stagedRows[NUM_SCRATCH_IMAGES];
 	const int bytes = cols * rows * 4;
 
 	if ( client < 0 || client >= NUM_SCRATCH_IMAGES || bytes <= 0 ) {
+		return;
+	}
+
+	// an upload-only frame with unchanged pixels at an unchanged size is a backend no-op
+	if ( !w && !dirty && cols == stagedCols[client] && rows == stagedRows[client] ) {
 		return;
 	}
 
@@ -65,10 +72,13 @@ static void R_StageCinematic( int x, int y, int w, int h, int cols, int rows,
 		if ( stage[activeBackEnd][use][client] ) {
 			R_Free( stage[activeBackEnd][use][client] );
 		}
-		stage[activeBackEnd][use][client] = (byte *)R_Malloc( bytes, TAG_TEMP_WORKSPACE, qfalse );
+		// permanent buffers, so keep them out of the strictly-transient arena
+		stage[activeBackEnd][use][client] = (byte *)R_Malloc( bytes, TAG_IMAGE_T, qfalse );
 		stageSize[activeBackEnd][use][client] = bytes;
 	}
 	memcpy( stage[activeBackEnd][use][client], data, bytes );
+	stagedCols[client] = cols;
+	stagedRows[client] = rows;
 
 	cinematicCommand_t *cmd = (cinematicCommand_t *)R_GetCommandBuffer( sizeof( *cmd ) );
 	if ( !cmd ) {
