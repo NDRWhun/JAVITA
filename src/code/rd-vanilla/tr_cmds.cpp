@@ -566,8 +566,7 @@ If running in stereo, RE_BeginFrame will be called twice
 for each RE_EndFrame
 ====================
 */
-// Decode the videoMaps the backend bound recently. Main thread only, and never inside
-// the parked window in R_IssueRenderCommands.
+// Main thread only, and never inside the parked window in R_IssueRenderCommands.
 static void R_PumpVideoMaps( void ) {
 	for ( int i = 0; i < NUM_SCRATCH_IMAGES; i++ ) {
 		const int stamp = tr.videoMapBoundFrame[i];

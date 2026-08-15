@@ -489,15 +489,6 @@ void _UI_Refresh( int realtime )
 		return;
 	}
 
-	// one line the first time the menu is actually painted, to bound the gap the
-	// player sees between hearing the menu and seeing it
-	{
-		static qboolean reported = qfalse;
-		if ( !reported ) {
-			reported = qtrue;
-			Com_Printf( "[menutrace] first UI refresh at %i\n", Sys_Milliseconds() );
-		}
-	}
 
 	extern void SE_CheckForLanguageUpdates(void);
 	SE_CheckForLanguageUpdates();
@@ -4206,10 +4197,7 @@ void UI_MainMenu(void)
 
 	ui.Key_SetCatcher( KEYCATCH_UI );
 
-	const int menuActivateStart = Sys_Milliseconds();
-	Com_Printf( "[menutrace] UI_MainMenu enter at %i\n", menuActivateStart );
 	menuDef_t *m = Menus_ActivateByName("mainMenu");
-	Com_Printf( "[menutrace] Menus_ActivateByName took %i ms\n", Sys_Milliseconds() - menuActivateStart );
 	if (!m)
 	{	//wha? try again
 		UI_LoadMenus("ui/menus.txt",qfalse);

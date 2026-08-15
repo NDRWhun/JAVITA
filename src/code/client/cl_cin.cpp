@@ -2101,7 +2101,6 @@ void SCR_StopCinematic( qboolean bAllowRefusal /* = qfalse */ )
 	{
 		Com_DPrintf("Cinematic Stopped\n");
 		cls.state =  CA_DISCONNECTED;
-		Com_Printf( "[menutrace] cinematic stopped at %i\n", Sys_Milliseconds() );
 	}
 
 	if(sInGameCinematicStandingBy[0] &&
@@ -2182,8 +2181,7 @@ void CIN_UploadCinematic(int handle) {
 }
 
 
-// Decode one videoMap handle on the main thread; the renderer calls this for handles
-// the backend bound recently.
+// Decode one videoMap handle on the main thread, for a handle the backend bound.
 void CIN_PumpVideoMap( int handle )
 {
 	// a fullscreen cinematic owns the one shared decode context, so leave videoMaps on
