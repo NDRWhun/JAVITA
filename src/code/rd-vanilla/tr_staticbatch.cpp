@@ -62,7 +62,6 @@ typedef struct sbInstance_s {
 	qhandle_t			hModel;
 	vec3_t				origin;
 	vec3_t				axis[3];
-	vec3_t				scale;
 	int					numSurfs;
 	srfStaticBatch_t	*surfs;
 	shader_t			**shaders;
@@ -335,7 +334,6 @@ static sbInstance_t *R_StaticBatch_Bake( trRefEntity_t *ent, md3Header_t *header
 	VectorCopy( ent->e.axis[0], inst->axis[0] );
 	VectorCopy( ent->e.axis[1], inst->axis[1] );
 	VectorCopy( ent->e.axis[2], inst->axis[2] );
-	VectorCopy( ent->e.modelScale, inst->scale );
 
 	sbGroup_t *g = &sb_groups[group];
 	byte *groupVerts = R_StaticBatch_GroupVerts( g );
@@ -360,9 +358,10 @@ static sbInstance_t *R_StaticBatch_Bake( trRefEntity_t *ent, md3Header_t *header
 			vec3_t	local, normal;
 			byte	*dst = groupVerts + ( base + v ) * SB_STRIDE;
 
-			local[0] = xyz->xyz[0] * MD3_XYZ_SCALE * inst->scale[0];
-			local[1] = xyz->xyz[1] * MD3_XYZ_SCALE * inst->scale[1];
-			local[2] = xyz->xyz[2] * MD3_XYZ_SCALE * inst->scale[2];
+			// ScaleModelAxis folded modelScale into the axis, so applying it here would square it
+			local[0] = xyz->xyz[0] * MD3_XYZ_SCALE;
+			local[1] = xyz->xyz[1] * MD3_XYZ_SCALE;
+			local[2] = xyz->xyz[2] * MD3_XYZ_SCALE;
 
 			const float lat = ( xyz->normal >> 8 ) & 0xff;
 			const float lng = ( xyz->normal & 0xff );
