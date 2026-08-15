@@ -91,6 +91,7 @@ typedef struct {
 	int					(*CIN_PlayCinematic)				( const char *arg0, int xpos, int ypos, int width, int height,
 															int bits, const char *psAudioFile /* = NULL */ );
 	void				(*CIN_UploadCinematic)				( int handle );
+	void				(*CIN_PumpVideoMap)					( int handle );
 
 	// window handling
 	window_t		(*WIN_Init)                         ( const windowDesc_t *desc, glconfig_t *glConfig );

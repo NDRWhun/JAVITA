@@ -2067,17 +2067,6 @@ void SCR_RunCinematic (void)
 			SCR_StopCinematic();	// change ROQ from FMV_IDLE to FMV_EOF, and clear some other vars
 		}
 	}
-
-	// videoMap shaders used to decode from whichever thread bound them; drive them here
-	// so every filesystem and zone call in the decoder stays on the main thread
-	for ( int i = 0; i < MAX_VIDEO_HANDLES; i++ )
-	{
-		if ( i != CL_handle && cinTable[i].shader && cinTable[i].status != FMV_EOF )
-		{
-			CIN_RunCinematic( i );
-			CIN_UploadCinematic( i );
-		}
-	}
 }
 
 void SCR_StopCinematic( qboolean bAllowRefusal /* = qfalse */ )
@@ -2192,6 +2181,26 @@ void CIN_UploadCinematic(int handle) {
 	}
 }
 
+
+// Decode one videoMap handle on the main thread; the renderer calls this for handles
+// the backend bound recently.
+void CIN_PumpVideoMap( int handle )
+{
+	// a fullscreen cinematic owns the one shared decode context, so leave videoMaps on
+	// their last uploaded frame rather than forcing a reset on both streams
+	if ( CL_handle >= 0 ) {
+		return;
+	}
+	if ( handle < 0 || handle >= MAX_VIDEO_HANDLES ) {
+		return;
+	}
+	// .shader survives a stop, so fileName is the liveness test both stop paths clear
+	if ( !cinTable[handle].fileName[0] || cinTable[handle].status == FMV_EOF ) {
+		return;
+	}
+	CIN_RunCinematic( handle );
+	CIN_UploadCinematic( handle );
+}
 
 qboolean CL_IsRunningInGameCinematic(void)
 {

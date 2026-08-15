@@ -207,6 +207,10 @@ void RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *
 
 void RE_UploadCinematic (int cols, int rows, const byte *data, int client, qboolean dirty) {
 
+	if ( !tr.registered ) {
+		return;
+	}
+
 #ifdef VITA
 	// the render thread owns the backend, so hand it the frame rather than
 	// binding and uploading from here

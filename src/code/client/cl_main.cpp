@@ -1135,6 +1135,7 @@ void CL_InitRef( void ) {
 #define RIT(y)	rit.y = y
 	RIT(CIN_PlayCinematic);
 	RIT(CIN_RunCinematic);
+	RIT(CIN_PumpVideoMap);
 	RIT(CIN_UploadCinematic);
 	RIT(CL_IsRunningInGameCinematic);
 	RIT(Cmd_AddCommand);

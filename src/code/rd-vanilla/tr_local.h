@@ -1032,6 +1032,8 @@ typedef struct {
 
 	image_t					*defaultImage;
 	image_t					*scratchImage[NUM_SCRATCH_IMAGES];
+	// videoMap bind stamp: written by the backend, read by the frontend pump, never cleared
+	volatile int			videoMapBoundFrame[NUM_SCRATCH_IMAGES];
 	image_t					*fogImage;
 	image_t					*dlightImage;	// inverse-quare highlight for projective adding
 	image_t					*whiteImage;			// full of 0xff

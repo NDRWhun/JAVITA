@@ -566,6 +566,22 @@ If running in stereo, RE_BeginFrame will be called twice
 for each RE_EndFrame
 ====================
 */
+// Decode the videoMaps the backend bound recently. Main thread only, and never inside
+// the parked window in R_IssueRenderCommands.
+static void R_PumpVideoMaps( void ) {
+	for ( int i = 0; i < NUM_SCRATCH_IMAGES; i++ ) {
+		const int stamp = tr.videoMapBoundFrame[i];
+		if ( !stamp ) {
+			continue;
+		}
+		// the window absorbs the frame the backend lags by; an unbound handle ages out
+		const int age = tr.frameCount - stamp;
+		if ( age >= 0 && age <= 3 ) {
+			ri.CIN_PumpVideoMap( i );
+		}
+	}
+}
+
 void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	drawBufferCommand_t	*cmd = NULL;
 
@@ -673,6 +689,8 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 			cmd->buffer = (int)GL_BACK;
 		}
 	}
+
+	R_PumpVideoMaps();
 }
 
 
