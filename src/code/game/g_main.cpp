@@ -762,6 +762,10 @@ void InitGame(  const char *mapname, const char *spawntarget, int checkSum, cons
 	// roff cache holds pool pointers G_InitMemory just freed; G_FreeRoffs had no callers
 	G_FreeRoffs();
 
+	// no game dll reload in a static elf, so these would outlive a death-reload
+	stop_icarus = qfalse;
+	killPlayerTimer = 0;
+
 	// set some level globals
 	memset( &level, 0, sizeof( level ) );
 	level.time = levelTime;
