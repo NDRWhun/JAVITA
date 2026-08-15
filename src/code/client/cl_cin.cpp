@@ -2067,6 +2067,17 @@ void SCR_RunCinematic (void)
 			SCR_StopCinematic();	// change ROQ from FMV_IDLE to FMV_EOF, and clear some other vars
 		}
 	}
+
+	// videoMap shaders used to decode from whichever thread bound them; drive them here
+	// so every filesystem and zone call in the decoder stays on the main thread
+	for ( int i = 0; i < MAX_VIDEO_HANDLES; i++ )
+	{
+		if ( i != CL_handle && cinTable[i].shader && cinTable[i].status != FMV_EOF )
+		{
+			CIN_RunCinematic( i );
+			CIN_UploadCinematic( i );
+		}
+	}
 }
 
 void SCR_StopCinematic( qboolean bAllowRefusal /* = qfalse */ )

@@ -254,8 +254,12 @@ void R_BindAnimatedImage( const textureBundle_t *bundle) {
 	int		index;
 
 	if ( bundle->isVideoMap ) {
-		ri.CIN_RunCinematic(bundle->videoMapHandle);
-		ri.CIN_UploadCinematic(bundle->videoMapHandle);
+		// The decoder does filesystem and zone work that neither is thread safe, so the
+		// frontend pumps it (SCR_RunCinematic) and the backend only binds the result.
+		if ( !Sys_InRenderThread() ) {
+			ri.CIN_RunCinematic(bundle->videoMapHandle);
+			ri.CIN_UploadCinematic(bundle->videoMapHandle);
+		}
 		// the upload binds as a side effect, and it can return before reaching it
 		GL_Bind( tr.scratchImage[bundle->videoMapHandle] );
 		return;

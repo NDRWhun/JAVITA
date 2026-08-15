@@ -210,7 +210,8 @@ void RE_UploadCinematic (int cols, int rows, const byte *data, int client, qbool
 #ifdef VITA
 	// the render thread owns the backend, so hand it the frame rather than
 	// binding and uploading from here
-	if ( r_renderThread && r_renderThread->integer ) {
+	// staging appends to the command buffer, which only the frontend may write
+	if ( r_renderThread && r_renderThread->integer && !Sys_InRenderThread() ) {
 		R_StageCinematic( 0, 0, 0, 0, cols, rows, data, client, dirty );
 		return;
 	}
