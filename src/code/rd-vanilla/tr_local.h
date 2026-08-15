@@ -1732,7 +1732,7 @@ void R_FreeGhoulSkinArena( void );
 void		R_BuildWorldVBO( world_t &worldData );
 void		R_WorldVBO_Clear( void );
 void		R_WorldVBO_ContextReset( void );
-qboolean	R_WorldVBO_Surface( const srfSurfaceFace_t *face, int fogNum, int dlighted );
+qboolean	R_WorldVBO_Surface( const srfSurfaceFace_t *face, const shader_t *shader, int fogNum, int dlighted );
 void		R_WorldVBO_Flush( shader_t *shader );
 void		R_WorldVBO_Stats( char *out, int outSize );
 // baked static props (tr_staticbatch.cpp)

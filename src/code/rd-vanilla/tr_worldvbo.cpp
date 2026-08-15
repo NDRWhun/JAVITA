@@ -72,6 +72,7 @@ static int			wvbo_curGroup = -1;
 // per-frame, so the fallback reasons can be told apart
 static int	wvbo_statBatches, wvbo_statSurfs, wvbo_statTris;
 static int	wvbo_statNotResident, wvbo_statLit, wvbo_statGroupSplit, wvbo_statFull;
+static int	wvbo_statStyle;
 
 /*
 ===============
@@ -116,11 +117,11 @@ void R_WorldVBO_ContextReset( void )
 // either a constant tint or the stream colour.
 // why a shader was turned away, tallied over one map build
 enum { WVR_SKY, WVR_POLYOFFSET, WVR_SORT, WVR_DEFORM, WVR_PASSES,
-       WVR_LMVERTEX, WVR_NOLIGHTMAP, WVR_STAGE, WVR_COUNT };
+       WVR_LMSTYLE, WVR_NOLIGHTMAP, WVR_STAGE, WVR_COUNT };
 static int wvbo_reason[WVR_COUNT];
 static const char *wvbo_reasonName[WVR_COUNT] = {
 	"sky", "polygonOffset", "sort>opaque", "deform", "passes",
-	"lightmapByVertex", "noLightmap", "stage"
+	"vertexStyle", "noLightmap", "stage"
 };
 
 static qboolean R_WorldVBO_StageEligible( const shaderStage_t *st )
@@ -173,9 +174,11 @@ static qboolean R_WorldVBO_ShaderEligible( const shader_t *shader )
 		return qfalse;
 	}
 	if ( shader->lightmapIndex[0] == LIGHTMAP_BY_VERTEX ) {
-		// resident verts carry the raw colour and would ignore r_fullbright and RE_SetLightStyle
-		wvbo_reason[WVR_LMVERTEX]++;
-		return qfalse;
+		// the bake folds style 0 in; a second style stays dynamic and has no stage to reject
+		if ( shader->styles[0] != LS_NORMAL || shader->styles[1] < LS_UNUSED ) {
+			wvbo_reason[WVR_LMSTYLE]++;
+			return qfalse;
+		}
 	} else if ( shader->lightmapIndex[0] < 0 ) {
 		wvbo_reason[WVR_NOLIGHTMAP]++;
 		return qfalse;
@@ -193,6 +196,7 @@ static qboolean R_WorldVBO_ShaderEligible( const shader_t *shader )
 typedef struct {
 	srfSurfaceFace_t	*face;
 	int					shader;			// tr.shaders[] index; only adjacency matters
+	qboolean			vertexLit;		// tess runs ComputeFinalVertexColor on these
 } wvboEntry_t;
 
 static int R_WorldVBO_CompareEntry( const void *a, const void *b )
@@ -244,6 +248,7 @@ void R_BuildWorldVBO( world_t &worldData )
 		}
 		list[numEligible].face  = (srfSurfaceFace_t *)surf->data;
 		list[numEligible].shader = surf->shader->index;
+		list[numEligible].vertexLit = (qboolean)( surf->shader->lightmapIndex[0] == LIGHTMAP_BY_VERTEX );
 		numEligible++;
 	}
 
@@ -309,6 +314,7 @@ void R_BuildWorldVBO( world_t &worldData )
 		}
 
 		const int base = groupVerts;
+		const qboolean vertexLit = list[i].vertexLit;
 		for ( int v = 0; v < face->numPoints; v++ )
 		{
 			const float	*p = face->points[v];
@@ -317,7 +323,21 @@ void R_BuildWorldVBO( world_t &worldData )
 			memcpy( dst, p, 3 * sizeof( float ) );					// xyz
 			memcpy( dst + WVBO_OFS_ST, &p[3], 2 * sizeof( float ) );	// diffuse st
 			memcpy( dst + WVBO_OFS_LM, &p[VERTEX_LM], 2 * sizeof( float ) );
-			*(unsigned int *)( dst + WVBO_OFS_RGBA ) = *(const unsigned int *)&p[VERTEX_COLOR];
+			// reproduce ComputeFinalVertexColor: style 0 is white and r_fullbright is latched
+			if ( vertexLit ) {
+				const byte	*c = (const byte *)&p[VERTEX_COLOR];
+				byte		*o = dst + WVBO_OFS_RGBA;
+				if ( r_fullbright->integer ) {
+					o[0] = o[1] = o[2] = 255;
+				} else {
+					o[0] = (byte)( ( c[0] * 255 ) >> 8 );
+					o[1] = (byte)( ( c[1] * 255 ) >> 8 );
+					o[2] = (byte)( ( c[2] * 255 ) >> 8 );
+				}
+				o[3] = c[3];
+			} else {
+				*(unsigned int *)( dst + WVBO_OFS_RGBA ) = *(const unsigned int *)&p[VERTEX_COLOR];
+			}
 		}
 		groupVerts += face->numPoints;
 
@@ -353,12 +373,12 @@ void R_BuildWorldVBO( world_t &worldData )
 void R_WorldVBO_Stats( char *out, int outSize )
 {
 	Com_sprintf( out, outSize,
-		"WVBO: draws=%d surfs=%d tris=%d | tess: noresident=%d lit=%d split=%d full=%d\n",
+		"WVBO: draws=%d surfs=%d tris=%d | tess: noresident=%d lit=%d split=%d full=%d style=%d\n",
 		wvbo_statBatches, wvbo_statSurfs, wvbo_statTris,
-		wvbo_statNotResident, wvbo_statLit, wvbo_statGroupSplit, wvbo_statFull );
+		wvbo_statNotResident, wvbo_statLit, wvbo_statGroupSplit, wvbo_statFull, wvbo_statStyle );
 
 	wvbo_statBatches = wvbo_statSurfs = wvbo_statTris = 0;
-	wvbo_statNotResident = wvbo_statLit = wvbo_statGroupSplit = wvbo_statFull = 0;
+	wvbo_statNotResident = wvbo_statLit = wvbo_statGroupSplit = wvbo_statFull = wvbo_statStyle = 0;
 }
 
 /*
@@ -368,13 +388,20 @@ R_WorldVBO_Surface
 Appends a resident surface's indices. False means it has to go through tess.
 ===============
 */
-qboolean R_WorldVBO_Surface( const srfSurfaceFace_t *face, int fogNum, int dlighted )
+qboolean R_WorldVBO_Surface( const srfSurfaceFace_t *face, const shader_t *shader, int fogNum, int dlighted )
 {
 	if ( !r_worldVBO || !r_worldVBO->integer || wvbo_failed ) {
 		return qfalse;
 	}
 	if ( !face->vboIndexes ) {
 		wvbo_statNotResident++;
+		return qfalse;
+	}
+	// style 0 is white in every shipped map, but bail rather than draw a stale bake
+	if ( shader && shader->lightmapIndex[0] == LIGHTMAP_BY_VERTEX
+		&& ( styleColors[LS_NORMAL][0] != 255 || styleColors[LS_NORMAL][1] != 255
+			|| styleColors[LS_NORMAL][2] != 255 ) ) {
+		wvbo_statStyle++;
 		return qfalse;
 	}
 	if ( fogNum || dlighted || face->dlightBits[backEnd.smpFrame] ) {

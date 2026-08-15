@@ -771,7 +771,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			// fast path, same as previous sort
 #ifdef VITA
 			if ( *drawSurf->surface == SF_FACE
-				&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, fogNum, dlighted ) ) {
+				&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, shader, fogNum, dlighted ) ) {
 				continue;
 			}
 			if ( *drawSurf->surface == SF_STATICBATCH
@@ -941,7 +941,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		// add the triangles for this surface
 #ifdef VITA
 		if ( *drawSurf->surface == SF_FACE
-			&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, fogNum, dlighted ) ) {
+			&& R_WorldVBO_Surface( (const srfSurfaceFace_t *)drawSurf->surface, shader, fogNum, dlighted ) ) {
 			continue;
 		}
 		if ( *drawSurf->surface == SF_STATICBATCH
