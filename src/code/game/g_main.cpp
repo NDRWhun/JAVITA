@@ -765,6 +765,7 @@ void InitGame(  const char *mapname, const char *spawntarget, int checkSum, cons
 	// no game dll reload in a static elf, so these would outlive a death-reload
 	stop_icarus = qfalse;
 	killPlayerTimer = 0;
+	cinematicSkipScript[0] = 0;
 
 	// set some level globals
 	memset( &level, 0, sizeof( level ) );
