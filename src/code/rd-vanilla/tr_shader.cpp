@@ -1352,8 +1352,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 			if (stage->bundle[0].videoMapHandle != -1) {
 				stage->bundle[0].isVideoMap = true;
 				stage->bundle[0].image = tr.scratchImage[stage->bundle[0].videoMapHandle];
-				// registration is main thread, so decode one frame now rather than let
-				// the first bind sample an untouched scratch image
+				// registration is main thread, so prime a frame for the first bind
 				ri.CIN_PumpVideoMap( stage->bundle[0].videoMapHandle );
 			}
 		}

@@ -2184,8 +2184,7 @@ void CIN_UploadCinematic(int handle) {
 // Decode one videoMap handle on the main thread, for a handle the backend bound.
 void CIN_PumpVideoMap( int handle )
 {
-	// a fullscreen cinematic owns the one shared decode context, so leave videoMaps on
-	// their last uploaded frame rather than forcing a reset on both streams
+	// a fullscreen cinematic owns the one shared decode context, so leave videoMaps alone
 	if ( CL_handle >= 0 ) {
 		return;
 	}
