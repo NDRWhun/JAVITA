@@ -243,6 +243,7 @@ vmCvar_t	cg_bobpitch;
 vmCvar_t	cg_bobroll;
 vmCvar_t	cg_shadows;
 vmCvar_t	cg_shadowCasterRange;
+vmCvar_t	cg_distanceCull;
 vmCvar_t	cg_renderToTextureFX;
 vmCvar_t	cg_shadowCullDistance;
 vmCvar_t	cg_footsteps;
@@ -357,6 +358,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_stereoSeparation, "cg_stereoSeparation", "0.4", CVAR_ARCHIVE  },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_shadowCasterRange, "cg_shadowCasterRange", "1024", CVAR_ARCHIVE },
+	{ &cg_distanceCull, "r_distanceCull", "5000", CVAR_ARCHIVE_ND },
 	{ &cg_renderToTextureFX, "cg_renderToTextureFX", "1", CVAR_ARCHIVE  },
 	{ &cg_shadowCullDistance, "r_shadowRange", "1000", CVAR_ARCHIVE },
 	{ &cg_footsteps, "cg_footsteps", "3", CVAR_ARCHIVE  },//1 = sounds, 2 = sounds & effects, 3 = sounds, effects & marks, 4 = always
@@ -1968,6 +1970,8 @@ typedef struct cgMiscEntData_s
 	vec3_t		scale;
 	float		radius;
 	float		zOffset; //some models need a z offset for culling, because of stupid wrong model origins
+	vec3_t		axis[3];		// baked at load; a static prop never re-orients
+	vec3_t		cullOrigin;		// origin + zOffset, likewise constant
 } cgMiscEntData_t;
 
 static cgMiscEntData_t	MiscEnts[MAX_MISC_ENTS]; //statically allocated for now.
@@ -2020,6 +2024,19 @@ void CG_CreateMiscEnts(void)
 			continue;
 		}
 
+		{
+			refEntity_t tmp;
+			memset( &tmp, 0, sizeof( tmp ) );
+			AnglesToAxis( MiscEnt->angles, tmp.axis );
+			VectorCopy( MiscEnt->scale, tmp.modelScale );
+			ScaleModelAxis( &tmp );
+			VectorCopy( tmp.axis[0], MiscEnt->axis[0] );
+			VectorCopy( tmp.axis[1], MiscEnt->axis[1] );
+			VectorCopy( tmp.axis[2], MiscEnt->axis[2] );
+		}
+		VectorCopy( MiscEnt->origin, MiscEnt->cullOrigin );
+		MiscEnt->cullOrigin[2] += MiscEnt->zOffset + 1.0f;
+
 		cgi_R_ModelBounds(MiscEnt->hModel, mins, maxs);
 
 		VectorScaleVector(mins, MiscEnt->scale, mins);
@@ -2034,30 +2051,36 @@ void CG_DrawMiscEnts(void)
 	cgMiscEntData_t	*MiscEnt = MiscEnts;
 	refEntity_t	refEnt;
 	vec3_t		difference;
-	vec3_t		cullOrigin;
+
+	// the renderer's far cap, which is what the old 8192*8192 fixme was asking for
+	const float cullDist = cg_distanceCull.value;
+	const float cullDistSq = ( cullDist > 0.0f ) ? cullDist * cullDist : 0.0f;
 
 	memset (&refEnt, 0, sizeof(refEnt));
 	refEnt.reType = RT_MODEL;
 	refEnt.frame = 0;
 	refEnt.renderfx = RF_LIGHTING_ORIGIN | RF_STATIC_BATCH;
+	refEnt.nonNormalizedAxes = qtrue;
 	for(i=0;i<NumMiscEnts;i++)
 	{
-		VectorCopy(MiscEnt->origin, cullOrigin);
-		cullOrigin[2] += MiscEnt->zOffset+1.0f;
-
-		if (gi.inPVS(cg.refdef.vieworg, cullOrigin))
+		// distance is a few ops and inPVS is a tree walk, so reject on distance first
+		VectorSubtract(MiscEnt->origin, cg.refdef.vieworg, difference);
+		if ( cullDistSq && VectorLengthSquared(difference)-(MiscEnt->radius) > cullDistSq )
 		{
-			VectorSubtract(MiscEnt->origin, cg.refdef.vieworg, difference);
-			if (VectorLengthSquared(difference)-(MiscEnt->radius) <= 8192*8192/*RMG_distancecull.value*/)
-			{ //fixme: need access to the real cull dist here
-				refEnt.hModel = MiscEnt->hModel;
-				AnglesToAxis( MiscEnt->angles, refEnt.axis );
-				VectorCopy(MiscEnt->scale, refEnt.modelScale);
-				VectorCopy(MiscEnt->origin, refEnt.origin);
-				VectorCopy(cullOrigin, refEnt.lightingOrigin);
-				ScaleModelAxis(&refEnt);
-				cgi_R_AddRefEntityToScene(&refEnt);
-			}
+			MiscEnt++;
+			continue;
+		}
+
+		if (gi.inPVS(cg.refdef.vieworg, MiscEnt->cullOrigin))
+		{
+			refEnt.hModel = MiscEnt->hModel;
+			VectorCopy(MiscEnt->axis[0], refEnt.axis[0]);
+			VectorCopy(MiscEnt->axis[1], refEnt.axis[1]);
+			VectorCopy(MiscEnt->axis[2], refEnt.axis[2]);
+			VectorCopy(MiscEnt->scale, refEnt.modelScale);
+			VectorCopy(MiscEnt->origin, refEnt.origin);
+			VectorCopy(MiscEnt->cullOrigin, refEnt.lightingOrigin);
+			cgi_R_AddRefEntityToScene(&refEnt);
 		}
 		MiscEnt++;
 	}
