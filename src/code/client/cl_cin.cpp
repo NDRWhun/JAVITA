@@ -1417,13 +1417,15 @@ e_status CIN_RunCinematic (int handle)
 		cin.currentHandle = currentHandle;
 		cinTable[currentHandle].status = FMV_EOF;
 		RoQReset();
-		// RoQReset leaves FMV_LOOPED, which gates the decode loop below out, so run
-		// on here until a frame lands or the stream gives up
+		// RoQReset leaves FMV_LOOPED, which gates the decode loop below out
 		if (cinTable[currentHandle].status == FMV_LOOPED) {
 			cinTable[currentHandle].status = FMV_PLAY;
 		}
+		// a first frame lands in a few chunks; unbounded, this decodes the whole file
+		int iGuard = 32;
 		while (cinTable[currentHandle].buf == NULL
-			&& cinTable[currentHandle].status == FMV_PLAY) {
+			&& cinTable[currentHandle].status == FMV_PLAY
+			&& iGuard-- > 0) {
 			RoQInterrupt();
 		}
 	}
