@@ -335,8 +335,9 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits, qboolean noView
 	}
 
 #ifdef USE_GXM_NATIVE
-	// gxm cannot read depth back, so occlude flares here where collision is the main thread's
-	if ( *surf->data == SF_FLARE && r_flares->integer && ri.CM_BoxTrace ) {
+	// gxm cannot read depth back; only the world pass can trace, bmodel origins are entity-local
+	if ( *surf->data == SF_FLARE && tr.currentEntityNum == REFENTITYNUM_WORLD
+		&& r_flares->integer && ri.CM_BoxTrace ) {
 		const srfFlare_t *fl = (const srfFlare_t *)surf->data;
 		vec3_t	end;
 		trace_t	trace;
