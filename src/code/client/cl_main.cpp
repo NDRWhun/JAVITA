@@ -1149,6 +1149,7 @@ void CL_InitRef( void ) {
 	RIT(CM_DeleteCachedMap);
 	RIT(CM_DrawDebugSurface);
 	RIT(CM_PointContents);
+	RIT(CM_BoxTrace);
 	RIT(Cvar_Get);
 	RIT(Cvar_Set);
 	RIT(Cvar_SetValue);

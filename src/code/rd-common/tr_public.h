@@ -84,6 +84,8 @@ typedef struct {
 	bool				(*CM_CullWorldBox)					( const cplane_t *frustrum, const vec3pair_t bounds );
 	byte*				(*CM_ClusterPVS)					( int cluster );
 	int					(*CM_PointContents)					( const vec3_t p, clipHandle_t model );
+	// flares need an occlusion test and gxm cannot read the depth buffer back
+	void				(*CM_BoxTrace)						( trace_t *results, const vec3_t start, const vec3_t end, const vec3_t mins, const vec3_t maxs, clipHandle_t model, int brushmask );
 	void				(*S_RestartMusic)					( void );
 	qboolean			(*SND_RegisterAudio_LevelLoadEnd)	( qboolean bDeleteEverythingNotUsedThisLevel );
 

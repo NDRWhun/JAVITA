@@ -334,6 +334,21 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits, qboolean noView
 		dlightBits = ( dlightBits != 0 );
 	}
 
+#ifdef USE_GXM_NATIVE
+	// gxm cannot read depth back, so occlude flares here where collision is the main thread's
+	if ( *surf->data == SF_FLARE && r_flares->integer && ri.CM_BoxTrace ) {
+		const srfFlare_t *fl = (const srfFlare_t *)surf->data;
+		vec3_t	end;
+		trace_t	trace;
+		// lift off the surface it is mounted on, or the trace ends inside that wall
+		VectorMA( fl->origin, 3.0f, fl->normal, end );
+		ri.CM_BoxTrace( &trace, tr.viewParms.ori.origin, end, vec3_origin, vec3_origin, 0, CONTENTS_SOLID );
+		if ( trace.fraction < 1.0f ) {
+			return;
+		}
+	}
+#endif
+
 	R_AddDrawSurf( surf->data, surf->shader, surf->fogIndex, dlightBits );
 }
 
