@@ -616,6 +616,8 @@ qboolean RE_ProcessDissolve(void)
 		if (iDissolvePercentage <= 100)
 		{
 			extern void	RB_SetGL2D (void);
+			// the state and clear below run on the main thread, so park the backend like RE_Blit does
+			R_IssuePendingRenderCommands();
 			RB_SetGL2D();
 
 //			GLdouble glD;
@@ -876,13 +878,6 @@ qboolean RE_ProcessDissolve(void)
 //
 qboolean RE_InitDissolve(qboolean bForceCircularExtroWipe)
 {
-#ifdef VITA
-	// the melt captures and redraws the screen from the main thread; skip it in
-	// render-thread mode (ProcessDissolve self-skips when never started)
-	if ( r_renderThread && r_renderThread->integer ) {
-		return qfalse;
-	}
-#endif
 	R_IssuePendingRenderCommands();
 
 //	ri.Printf( PRINT_ALL, "RE_InitDissolve()\n");
