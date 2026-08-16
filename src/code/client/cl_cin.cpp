@@ -1137,6 +1137,10 @@ static void RoQInterrupt(void)
 
 	if (currentHandle < 0) return;
 
+	// a skip runs at timescale 100 with the screen frozen, so nothing decoded here is ever seen
+	extern cvar_t *cl_skippingcin;
+	const qboolean bSkipping = (qboolean)( cl_skippingcin && cl_skippingcin->integer );
+
 	FS_Read( cin.file, cinTable[currentHandle].RoQFrameSize+8, cinTable[currentHandle].iFile );
 	if ( cinTable[currentHandle].RoQPlayed >= cinTable[currentHandle].ROQSize ) {
 		if (cinTable[currentHandle].holdAtEnd==qfalse) {
@@ -1161,32 +1165,37 @@ redump:
 		case	ROQ_QUAD_VQ:
 			if ((cinTable[currentHandle].numQuads&1)) {
 				cinTable[currentHandle].normalBuffer0 = cinTable[currentHandle].t[1];
-				RoQPrepMcomp( cinTable[currentHandle].roqF0, cinTable[currentHandle].roqF1 );
-				cinTable[currentHandle].VQ1( (byte *)cin.qStatus[1], framedata);
+				if ( !bSkipping ) {
+					RoQPrepMcomp( cinTable[currentHandle].roqF0, cinTable[currentHandle].roqF1 );
+					cinTable[currentHandle].VQ1( (byte *)cin.qStatus[1], framedata);
+				}
 				cinTable[currentHandle].buf = 	cin.linbuf + cinTable[currentHandle].screenDelta;
 			} else {
 				cinTable[currentHandle].normalBuffer0 = cinTable[currentHandle].t[0];
-				RoQPrepMcomp( cinTable[currentHandle].roqF0, cinTable[currentHandle].roqF1 );
-				cinTable[currentHandle].VQ0( (byte *)cin.qStatus[0], framedata );
+				if ( !bSkipping ) {
+					RoQPrepMcomp( cinTable[currentHandle].roqF0, cinTable[currentHandle].roqF1 );
+					cinTable[currentHandle].VQ0( (byte *)cin.qStatus[0], framedata );
+				}
 				cinTable[currentHandle].buf = 	cin.linbuf;
 			}
-			if (cinTable[currentHandle].numQuads == 0) {		// first frame
+			if (cinTable[currentHandle].numQuads == 0 && !bSkipping) {		// first frame
 				Com_Memcpy(cin.linbuf+cinTable[currentHandle].screenDelta, cin.linbuf, cinTable[currentHandle].samplesPerLine*cinTable[currentHandle].ysize);
 			}
 			cinTable[currentHandle].numQuads++;
-			cinTable[currentHandle].dirty = qtrue;
+			// a frame that was never decoded must not be uploaded when the skip ends
+			cinTable[currentHandle].dirty = (qboolean)!bSkipping;
 			break;
 		case	ROQ_CODEBOOK:
 			decodeCodeBook( framedata, (unsigned short)cinTable[currentHandle].roq_flags );
 			break;
 		case	ZA_SOUND_MONO:
-			if (!cinTable[currentHandle].silent) {
+			if (!cinTable[currentHandle].silent && !bSkipping) {
 				ssize = RllDecodeMonoToStereo( framedata, sbuf, cinTable[currentHandle].RoQFrameSize, 0, (unsigned short)cinTable[currentHandle].roq_flags);
                 S_RawSamples( ssize, 22050, 2, 1, (byte *)sbuf, s_volume->value, qtrue );
 			}
 			break;
 		case	ZA_SOUND_STEREO:
-			if (!cinTable[currentHandle].silent) {
+			if (!cinTable[currentHandle].silent && !bSkipping) {
 				if (cinTable[currentHandle].numQuads == -1) {
 					S_Update();
 					{ SMIX_SCOPE(); s_rawend = s_soundtime; }
