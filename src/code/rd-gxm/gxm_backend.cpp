@@ -1135,8 +1135,13 @@ void GXM_ImmEnd( void )
 void GXM_LogStatsLine( const char *line )
 {
 	static int opened;	// one run per file, or it grows without bound
-	sceIoMkdir( "ux0:data/JK2VITA", 0777 );
-	SceUID f = sceIoOpen( "ux0:data/JK2VITA/gxm_stats.log",
+#ifdef JK2_MODE
+	#define GXM_STATS_DIR	"ux0:data/JK2VITA"
+#else
+	#define GXM_STATS_DIR	"ux0:data/JAVITA"
+#endif
+	sceIoMkdir( GXM_STATS_DIR, 0777 );
+	SceUID f = sceIoOpen( GXM_STATS_DIR "/gxm_stats.log",
 		SCE_O_WRONLY | SCE_O_CREAT | ( opened ? SCE_O_APPEND : SCE_O_TRUNC ), 0777 );
 	opened = 1;
 	if ( f >= 0 ) {
