@@ -1,15 +1,57 @@
-# JAVITA
+<a id="readme-top"></a>
 
-**Star Wars Jedi Knight: Jedi Academy — single-player, on the PS Vita**
+<div align="center">
 
-[![build](https://github.com/NDRWhun/JAVITA/actions/workflows/build.yml/badge.svg)](../../actions/workflows/build.yml)&nbsp;[![release](https://img.shields.io/github/v/release/NDRWhun/JAVITA?include_prereleases&sort=semver&label=release)](../../releases)&nbsp;[![downloads](https://img.shields.io/github/downloads/NDRWhun/JAVITA/total?label=downloads)](../../releases)&nbsp;[![issues](https://img.shields.io/github/issues/NDRWhun/JAVITA?label=issues)](../../issues)&nbsp;[![last commit](https://img.shields.io/github/last-commit/NDRWhun/JAVITA?label=updated)](../../commits/main)
+<img src="sce_sys/icon0.png" alt="JAVITA" width="128" height="128">
 
-[![platform](https://img.shields.io/badge/platform-PS%20Vita-4b6cb7)](https://vitasdk.org)&nbsp;[![renderer](https://img.shields.io/badge/renderer-native%20sceGxm-8a4fff)](src/code/rd-gxm)&nbsp;[![engine](https://img.shields.io/badge/engine-OpenJK-555)](https://github.com/JACoders/OpenJK)&nbsp;[![license](https://img.shields.io/badge/license-GPLv2-blue)](LICENSE)
+<h3 align="center">JAVITA</h3>
 
-A port of Jedi Academy's single-player to the PS Vita, built on
-[OpenJK](https://github.com/JACoders/OpenJK) with a native sceGxm rendering backend.
+<p align="center">
+  <b>Star Wars Jedi Knight: Jedi Academy — single-player, on the PS Vita</b>
+  <br />
+  <br />
+  A port of Jedi Academy's single-player to the PS Vita,
+  <br />
+  built on <a href="https://github.com/JACoders/OpenJK">OpenJK</a> with a native sceGxm rendering backend.
+  <br />
+  <br />
+  <a href="../../releases"><b>Download the latest build »</b></a>
+  <br />
+  <br />
+  <a href="#setup-for-players">Setup</a>
+  &nbsp;·&nbsp;
+  <a href="#controls">Controls</a>
+  &nbsp;·&nbsp;
+  <a href="../../issues">Report Bug</a>
+</p>
 
-Please report bugs if you find any -> Issues
+[![build][build-shield]][build-url]&nbsp;[![release][release-shield]][release-url]&nbsp;[![downloads][downloads-shield]][downloads-url]&nbsp;[![issues][issues-shield]][issues-url]&nbsp;[![last commit][commit-shield]][commit-url]
+
+[![platform][platform-shield]][platform-url]&nbsp;[![renderer][renderer-shield]][renderer-url]&nbsp;[![engine][engine-shield]][engine-url]&nbsp;[![license][license-shield]][license-url]
+
+</div>
+
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li><a href="#setup-for-players">Setup (for players)</a></li>
+    <li>
+      <a href="#controls">Controls</a>
+      <ul>
+        <li><a href="#sticks">Sticks</a></li>
+        <li><a href="#base-layer-physical-buttons">Base layer</a></li>
+        <li><a href="#rear-touch-panel">Rear touch panel</a></li>
+        <li><a href="#combo-layer--hold-rear-top-left-then-press">Combo layer</a></li>
+        <li><a href="#console">Console</a></li>
+        <li><a href="#aim-assist-optional">Aim assist</a></li>
+      </ul>
+    </li>
+    <li><a href="#performance--tuning">Performance &amp; tuning</a></li>
+    <li><a href="#build-for-developers">Build (for developers)</a></li>
+    <li><a href="#credits">Credits</a></li>
+    <li><a href="#license">License</a></li>
+  </ol>
+</details>
 
 ## Setup (for players)
 
@@ -22,6 +64,8 @@ You need your own legally-owned copy of Jedi Academy (eg.: from Steam)
 
 The first time you visit a level it loads slower, because each texture is compressed once and cached
 to `ux0:data/JAVITA/texcache_dxt`. Later loads of that level read the cache instead and are quicker.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Controls
 
@@ -93,6 +137,8 @@ On by default. When an enemy is near your crosshair it gently steers your view t
 | `g_aimAssistPull` | `3` | Pull strength toward the target — higher = snappier |
 | `g_aimAssistSpeed` | `0.5` | Look-speed scale near a target — lower = more slowdown |
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 ## Performance & tuning
 
 Tune by editing `ux0:data/JAVITA/base/openjk_sp.cfg` on the card, or from the in-game console (**Start + Select**). *(latched)* renderer cvars need a `vid_restart`; the latched sound cvars need a relaunch.
@@ -122,12 +168,14 @@ default of `125` sits above that ceiling.
 | `cg_shadowCasterRange` | `1024` | Characters past this distance keep a blob instead of casting a volume (`0` = all cast) |
 | `r_shadowDlight` | `1` | Sabers and shots steer the shadow direction; `0` = static light grid only |
 | `r_shadowExtrude` | `96` | How far a shadow volume reaches past the ground plane — raise it to catch nearby walls |
-
-The stencil and projected modes are new and not finished — `2` casts onto the ground plane and only reaches walls as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry. `1` is the default for a reason.
 | `r_texCacheCompressed` | `1` | Cache textures as DXT (less VRAM; `0` = uncompressed) *(latched)* |
 | `r_dropTexturesOnLoad` | `1` | Free the old map's textures at map change (lower transition memory peak); `0` = keep until the new map's first frame |
 | `s_khz` | `22` | Mixer rate — 22 matches the source assets *(latched)* |
 | `vita_rearTouch` | `1` | Rear-touch panel controls — `0` disables them |
+
+The stencil and projected modes are new and not finished — `2` casts onto the ground plane and only reaches walls as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry. `1` is the default for a reason.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Build (for developers)
 
@@ -149,12 +197,16 @@ The renderer backend lives in [`src/code/rd-gxm/`](src/code/rd-gxm). Its shaders
 `shaders/`, compiled ahead of time into `gxm_shaders.h` — change a `.cg` and you need to re-run
 `build_shaders.py`, which needs Sony's shader compiler, so the generated header is committed.
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 ## Credits
 
 - [OpenJK](https://github.com/JACoders/OpenJK) (JACoders) — the open-source JK2/JKA engine this builds on.
 - Raven Software / LucasArts — the original *Jedi Knight: Jedi Academy*.
 - [Rinnegatamante](https://github.com/Rinnegatamante) — vitaQuakeIII (the reference id Tech 3 Vita port) and [vitaRTCW](https://github.com/Rinnegatamante/vitaRTCW), the reference for the multi-threaded rendering.
 - [Northfear](https://github.com/Northfear/SDL) — the Vita SDL2 port this fork is based on.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## License
 
@@ -165,3 +217,26 @@ copyright headers; vendored third-party components and their licences are listed
 Unofficial, non-commercial fan port — not affiliated with or endorsed by Disney, Lucasfilm,
 LucasArts, Activision, or Raven. *Star Wars*, *Jedi Knight*, and *Jedi Academy* are trademarks of
 their owners; you must own a legal copy to play.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- BADGES -->
+
+[build-shield]: https://img.shields.io/github/actions/workflow/status/NDRWhun/JAVITA/build.yml?branch=main&label=build&style=flat-square
+[build-url]: ../../actions/workflows/build.yml
+[release-shield]: https://img.shields.io/github/v/release/NDRWhun/JAVITA?include_prereleases&sort=semver&label=release&style=flat-square
+[release-url]: ../../releases
+[downloads-shield]: https://img.shields.io/github/downloads/NDRWhun/JAVITA/total?label=downloads&style=flat-square
+[downloads-url]: ../../releases
+[issues-shield]: https://img.shields.io/github/issues/NDRWhun/JAVITA?label=issues&style=flat-square
+[issues-url]: ../../issues
+[commit-shield]: https://img.shields.io/github/last-commit/NDRWhun/JAVITA?label=updated&style=flat-square
+[commit-url]: ../../commits/main
+[platform-shield]: https://img.shields.io/badge/platform-PS%20Vita-4b6cb7?style=flat-square
+[platform-url]: https://vitasdk.org
+[renderer-shield]: https://img.shields.io/badge/renderer-native%20sceGxm-8a4fff?style=flat-square
+[renderer-url]: src/code/rd-gxm
+[engine-shield]: https://img.shields.io/badge/engine-OpenJK-555?style=flat-square
+[engine-url]: https://github.com/JACoders/OpenJK
+[license-shield]: https://img.shields.io/badge/license-GPLv2-blue?style=flat-square
+[license-url]: LICENSE

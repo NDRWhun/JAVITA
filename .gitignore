@@ -23,4 +23,3 @@ tools/env.local.sh
 
 # release notes are paste material for the Releases page, not repo content
 RELEASE-*.md
-README.template.md
