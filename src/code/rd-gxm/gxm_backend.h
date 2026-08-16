@@ -81,7 +81,7 @@ void GXM_SetDepthRange( float zNear, float zFar );
 void GXM_SetDepthBias( float factor, float units );	// zero is the off state
 
 // one line describing what the backend actually did; also appended to
-// ux0:data/<game>/gxm_stats.log
+// ux0:data/JK2VITA/gxm_stats.log
 void GXM_ReportStats( char *out, int outSize );
 
 // append a caller's own stats line to the same file
