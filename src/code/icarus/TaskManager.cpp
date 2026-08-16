@@ -1138,7 +1138,9 @@ int CTaskManager::Wait( CTask *task, bool &completed , CIcarus* icarus )
 			icarus->GetGame()->DebugPrint(IGameInterface::WL_DEBUG, "%4d wait( %d ); [%d]", m_ownerID, (int) dwtime, task->GetTimeStamp() );
 		}
 
-		if ( (task->GetTimeStamp() + dwtime) < (icarus->GetGame()->GetTime()) )
+		// a skip discards the presentation, so a pure delay has nothing left to wait for
+		if ( (task->GetTimeStamp() + dwtime) < (icarus->GetGame()->GetTime())
+			|| icarus->GetGame()->IsSkippingCinematic() )
 		{
 			completed = true;
 			memberNum = 0;

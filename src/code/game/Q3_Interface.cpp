@@ -7916,6 +7916,11 @@ unsigned int CQuake3GameInterface::GetTime( void )
 	return level.time;
 }
 
+bool CQuake3GameInterface::IsSkippingCinematic( void )
+{
+	return ( g_skippingcin && g_skippingcin->integer != 0 );
+}
+
 //	 DWORD	CQuake3GameInterface::GetTimeScale(void ) {}
 
 // NOTE: This extern does not really fit here, fix later please...

@@ -105,6 +105,7 @@ public:
 	virtual void	CenterPrint( const char *format, ... ) = 0;
 	virtual void	DebugPrint( e_DebugPrintLevel, const char *, ... ) = 0;
 	virtual unsigned int GetTime( void ) = 0;							//Gets the current time
+	virtual bool	IsSkippingCinematic( void ) = 0;					//A skip elapses timed waits at once
 	virtual int 	PlayIcarusSound( int taskID, int gameID, const char *name, const char *channel ) = 0;
 	virtual void	Lerp2Pos( int taskID, int gameID, float origin[3], float angles[3], float duration ) = 0;
 	virtual void	Lerp2Angles( int taskID, int gameID, float angles[3], float duration ) = 0;

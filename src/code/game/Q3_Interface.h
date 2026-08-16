@@ -663,7 +663,8 @@ public:
 	int		LoadFile( const char *name, void **buf ) OVERRIDE;
 	void	CenterPrint( const char *format, ... ) OVERRIDE;
 	void	DebugPrint( e_DebugPrintLevel, const char *, ... ) OVERRIDE;
-	unsigned int GetTime( void ) OVERRIDE;							//Gets the current time
+	unsigned int GetTime( void ) OVERRIDE;
+	bool IsSkippingCinematic( void ) OVERRIDE;							//Gets the current time
 	//DWORD	GetTimeScale(void );
 	int 	PlayIcarusSound( int taskID, int entID, const char *name, const char *channel ) OVERRIDE;
 	void	Lerp2Pos( int taskID, int entID, vec3_t origin, vec3_t angles, float duration ) OVERRIDE;
