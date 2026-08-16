@@ -1320,7 +1320,9 @@ static void R_TexCacheDxt_Path( const char *name, char *out, int outSize )
 {
 	unsigned long long h = 14695981039346656037ULL;	// FNV-1a 64-bit of the asset name
 	for ( const char *p = name; *p; ++p ) { h ^= (unsigned char)*p; h *= 1099511628211ULL; }
-	Com_sprintf( out, outSize, "ux0:data/JAVITA/texcache_dxt/%016llx.bin", h );
+	// the home path already resolves per game, so no game name belongs here
+	Com_sprintf( out, outSize, "%s/texcache_dxt/%016llx.bin",
+		ri.Cvar_VariableString( "fs_homepath" ), h );
 }
 
 // Build an image_t straight from a cached DXT mip chain, no decode or encode. Returns NULL on a
@@ -1464,8 +1466,11 @@ static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 	static qboolean s_dxtDirReady = qfalse;
 	if ( !s_dxtDirReady )
 	{
-		sceIoMkdir( "ux0:data/JAVITA", 0777 );
-		sceIoMkdir( "ux0:data/JAVITA/texcache_dxt", 0777 );
+		const char *home = ri.Cvar_VariableString( "fs_homepath" );
+		char dir[256];
+		sceIoMkdir( home, 0777 );
+		Com_sprintf( dir, sizeof( dir ), "%s/texcache_dxt", home );
+		sceIoMkdir( dir, 0777 );
 		s_dxtDirReady = qtrue;
 	}
 	char path[256];

@@ -2013,6 +2013,11 @@ void R_Init( void ) {
 	R_NoiseInit();
 	R_Register();
 
+#ifdef USE_GXM_NATIVE
+	// rd-gxm has no idea which game it is linked into, so hand it the resolved home path
+	GXM_SetStatsLogPath( ri.Cvar_VariableString( "fs_homepath" ) );
+#endif
+
 #ifdef VITA
 	// Only allocate the second command buffer when the render thread is actually
 	// enabled (it doubles ~1MB of zone, which OOMs tight maps like yavin1b). When

@@ -1131,12 +1131,25 @@ void GXM_ImmEnd( void )
 	gxm_texUnits = gxm_immSavedUnits;
 }
 
+// the owner sets this; this layer must not know which game it is linked into
+static char gxm_statsLogDir[192];
+
+void GXM_SetStatsLogPath( const char *dir )
+{
+	if ( !dir || !dir[0] ) { gxm_statsLogDir[0] = '\0'; return; }
+	snprintf( gxm_statsLogDir, sizeof( gxm_statsLogDir ), "%s", dir );
+}
+
 // the engine log is not flushed on an abrupt exit, so stats get their own file
 void GXM_LogStatsLine( const char *line )
 {
 	static int opened;	// one run per file, or it grows without bound
-	sceIoMkdir( "ux0:data/JK2VITA", 0777 );
-	SceUID f = sceIoOpen( "ux0:data/JK2VITA/gxm_stats.log",
+	if ( !gxm_statsLogDir[0] ) return;	// no owner path, so nowhere correct to write
+
+	char path[256];
+	snprintf( path, sizeof( path ), "%s/gxm_stats.log", gxm_statsLogDir );
+	sceIoMkdir( gxm_statsLogDir, 0777 );
+	SceUID f = sceIoOpen( path,
 		SCE_O_WRONLY | SCE_O_CREAT | ( opened ? SCE_O_APPEND : SCE_O_TRUNC ), 0777 );
 	opened = 1;
 	if ( f >= 0 ) {
