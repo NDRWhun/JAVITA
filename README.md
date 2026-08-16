@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="sce_sys/icon0.png" alt="JAVITA" width="128" height="128">
+<img src="docs/logo-circle.png" alt="JAVITA" width="128" height="128">
 
 <h3 align="center">JAVITA</h3>
 
