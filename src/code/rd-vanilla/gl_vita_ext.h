@@ -21,7 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 /*
 ============================================================================
-JK2VITA — Vita GL extension compatibility shim (rd-vanilla).
+JAVITA — Vita GL extension compatibility shim (rd-vanilla).
 
 The OpenJK vanilla renderer references a handful of legacy desktop-GL
 extensions that the PS Vita's GXM / vitaGL does not implement:
@@ -43,8 +43,8 @@ form; the only use is GL_TEXTURE_BORDER_COLOR, irrelevant on GXM).
 Included only from qgl.h's VITA branch. Storage is defined in gl_vita_ext.cpp.
 ============================================================================
 */
-#ifndef JK2VITA_GL_VITA_EXT_H
-#define JK2VITA_GL_VITA_EXT_H
+#ifndef JAVITA_GL_VITA_EXT_H
+#define JAVITA_GL_VITA_EXT_H
 
 #ifdef VITA
 
@@ -210,4 +210,4 @@ extern PFNGLGETFINALCOMBINERINPUTPARAMETERIVNVPROC   qglGetFinalCombinerInputPar
 #endif
 
 #endif /* VITA */
-#endif /* JK2VITA_GL_VITA_EXT_H */
+#endif /* JAVITA_GL_VITA_EXT_H */

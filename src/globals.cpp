@@ -20,7 +20,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
 //============================================================================
-// JK2VITA — static-build glue translation unit.
+// JAVITA — static-build glue translation unit.
 //
 // JK2 SP is built here as a SINGLE statically-linked executable (the Vita has
 // no dlopen, and SP has no QVM). On desktop, OpenJK builds three separate

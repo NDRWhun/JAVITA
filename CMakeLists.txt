@@ -80,13 +80,13 @@ add_compile_definitions(
 #----------------------------------------------------------------------------
 # Flags (StaticJK-proven ARM/NEON hard-float set).
 #----------------------------------------------------------------------------
-set(JK2VITA_ARCH_FLAGS
+set(JAVITA_ARCH_FLAGS
   -g -O3
   -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
   -ffast-math -fsigned-char -fno-short-enums
   -fsingle-precision-constant -fno-optimize-sibling-calls
 )
-add_compile_options(${JK2VITA_ARCH_FLAGS})
+add_compile_options(${JAVITA_ARCH_FLAGS})
 # C++ needs permissive (legacy id-Tech-3 era code) + GNU visibility.
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fpermissive>)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-D__GNU_VISIBLE>)

@@ -1,5 +1,5 @@
 /*
- * JK2VITA compatibility <endian.h>.
+ * JAVITA compatibility <endian.h>.
  *
  * We build with -D__linux__ so OpenJK and SDL take the unix code paths, but
  * VitaSDK's newlib ships only <machine/endian.h>, not glibc's <endian.h>.
@@ -7,8 +7,8 @@
  * then uses __BYTE_ORDER. This shim provides the glibc-style byte-order macros
  * (the Vita is always armv7 little-endian) on top of newlib's machine header.
  */
-#ifndef JK2VITA_COMPAT_ENDIAN_H
-#define JK2VITA_COMPAT_ENDIAN_H
+#ifndef JAVITA_COMPAT_ENDIAN_H
+#define JAVITA_COMPAT_ENDIAN_H
 
 #include <machine/endian.h>
 
@@ -35,4 +35,4 @@
 #define BYTE_ORDER __BYTE_ORDER
 #endif
 
-#endif /* JK2VITA_COMPAT_ENDIAN_H */
+#endif /* JAVITA_COMPAT_ENDIAN_H */

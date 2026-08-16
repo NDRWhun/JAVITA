@@ -21,7 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 /*
 ============================================================================
-JK2VITA — Vita GL extension compatibility shim, storage + stubs.
+JAVITA — Vita GL extension compatibility shim, storage + stubs.
 See gl_vita_ext.h. These unsupported-extension function pointers stay NULL so
 the renderer's runtime gates (`if (qgl... )`) skip the corresponding paths.
 ============================================================================
