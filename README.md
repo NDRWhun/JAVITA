@@ -72,10 +72,10 @@ to `ux0:data/JAVITA/texcache_dxt`. Later loads of that level read the cache inst
 ### Sticks
 
 | Input | Action |
-|-------|--------|
-| Left stick | Move (forward/back/strafe) — also the menu cursor |
-| Right stick | Look / turn |
-| Front touchscreen | Menus: drag moves the cursor, tap clicks |
+|:--:|--------|
+| <img src="docs/icons/lstick.svg" width="18" alt="Left stick"> Left stick | Move (forward/back/strafe) — also the menu cursor |
+| <img src="docs/icons/rstick.svg" width="18" alt="Right stick"> Right stick | Look / turn |
+| <img src="docs/icons/touch-front.svg" width="22" alt="Front touchscreen"> Front touch | Menus: drag moves the cursor, tap clicks |
 
 In menus, Cross selects/clicks and Circle goes back/cancels. Navigate with the left stick plus those
 two buttons.
@@ -83,41 +83,41 @@ two buttons.
 ### Base layer (physical buttons)
 
 | Button | Action |
-|--------|--------|
-| R | Attack / saber swing (`+attack`) |
-| L | Alt-attack / saber special (`+altattack`) |
-| ✕ Cross | Jump (`+moveup`) |
-| ◻ Square | Crouch (`+movedown`) |
-| ○ Circle | Use / activate (`+use`) |
-| △ Triangle | Use selected force power (`+useforce`) |
-| D-pad Up / Down | Next / previous weapon |
-| D-pad Left / Right | Select previous / next force power |
-| Select | Mission objectives — datapad (`datapad`) |
-| Start | In-game menu (`togglemenu`) |
+|:--:|--------|
+| <img src="docs/icons/r.svg" width="20" alt="R"> | Attack / saber swing (`+attack`) |
+| <img src="docs/icons/l.svg" width="20" alt="L"> | Alt-attack / saber special (`+altattack`) |
+| <img src="docs/icons/cross.svg" width="18" alt="Cross"> Cross | Jump (`+moveup`) |
+| <img src="docs/icons/square.svg" width="18" alt="Square"> Square | Crouch (`+movedown`) |
+| <img src="docs/icons/circle.svg" width="18" alt="Circle"> Circle | Use / activate (`+use`) |
+| <img src="docs/icons/triangle.svg" width="18" alt="Triangle"> Triangle | Use selected force power (`+useforce`) |
+| <img src="docs/icons/dpad-up.svg" width="18" alt="D-pad Up"> <img src="docs/icons/dpad-down.svg" width="18" alt="D-pad Down"> | Next / previous weapon |
+| <img src="docs/icons/dpad-left.svg" width="18" alt="D-pad Left"> <img src="docs/icons/dpad-right.svg" width="18" alt="D-pad Right"> | Select previous / next force power |
+| <img src="docs/icons/select.svg" height="18" alt="Select"> | Mission objectives — datapad (`datapad`) |
+| <img src="docs/icons/start.svg" height="18" alt="Start"> | In-game menu (`togglemenu`) |
 
 ### Rear touch panel
 
 The rear panel is split into four corner zones. A cross-shaped dead band down the middle ignores the fingers that grip the console. Set `vita_rearTouch 0` to disable all of it.
 
 | Rear zone | Action |
-|-----------|--------|
-| Top-left (HOLD) | Combo modifier — see below |
-| Top-right | Binocular zoom (`zoom`) |
-| Bottom-left | Secondary force fire (`+useforce`) |
-| Bottom-right | Run / walk (`+speed`) |
+|:--:|--------|
+| <img src="docs/icons/rear-tl.svg" width="26" alt="Rear top-left"> Top-left (HOLD) | Combo modifier — see below |
+| <img src="docs/icons/rear-tr.svg" width="26" alt="Rear top-right"> Top-right | Binocular zoom (`zoom`) |
+| <img src="docs/icons/rear-bl.svg" width="26" alt="Rear bottom-left"> Bottom-left | Secondary force fire (`+useforce`) |
+| <img src="docs/icons/rear-br.svg" width="26" alt="Rear bottom-right"> Bottom-right | Run / walk (`+speed`) |
 
 ### Combo layer — hold rear top-left, then press:
 
 | Combo | Action |
-|-------|--------|
-| + △ Triangle | Force Speed |
-| + ○ Circle | Force Heal |
-| + ✕ Cross | Force Push (`force_throw`) |
-| + ◻ Square | Force Pull |
-| + R | Cycle saber stance (`saberAttackCycle`) |
-| + D-pad Up / Down | Inventory next / previous |
-| + D-pad Left | Use inventory item (`invuse`) |
-| + D-pad Right | Quick-select lightsaber (`weapon 1`) |
+|:--:|--------|
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/triangle.svg" width="18" alt="Triangle"> | Force Speed |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/circle.svg" width="18" alt="Circle"> | Force Heal |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/cross.svg" width="18" alt="Cross"> | Force Push (`force_throw`) |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/square.svg" width="18" alt="Square"> | Force Pull |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/r.svg" width="20" alt="R"> | Cycle saber stance (`saberAttackCycle`) |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-up.svg" width="18" alt="D-pad Up"> <img src="docs/icons/dpad-down.svg" width="18" alt="D-pad Down"> | Inventory next / previous |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-left.svg" width="18" alt="D-pad Left"> | Use inventory item (`invuse`) |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-right.svg" width="18" alt="D-pad Right"> | Quick-select lightsaber (`weapon 1`) |
 
 The combo layer only fires instant commands. The modifier role is latched per button at the moment it is pressed, so releasing the rear modifier mid-press can't strand a held action. The combo layer is inactive while a menu is open.
 
