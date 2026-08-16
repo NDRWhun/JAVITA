@@ -196,6 +196,15 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 	else
 	{
 		// just pick a sane default.
+#ifdef VITA
+		// a level load starves the mixer long enough to underrun a 23ms buffer, so double it
+		if (desired.freq <= 11025)
+			desired.samples = 512;
+		else if (desired.freq <= 22050)
+			desired.samples = 1024;
+		else
+			desired.samples = 2048;
+#else
 		if (desired.freq <= 11025)
 			desired.samples = 256;
 		else if (desired.freq <= 22050)
@@ -204,6 +213,7 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 			desired.samples = 1024;
 		else
 			desired.samples = 2048;  // (*shrug*)
+#endif
 	}
 
 	desired.channels = (int) s_sdlChannels->value;
