@@ -86,10 +86,10 @@ two buttons.
 |:--:|--------|
 | <img src="docs/icons/r.svg" width="20" alt="R"> | Attack / saber swing (`+attack`) |
 | <img src="docs/icons/l.svg" width="20" alt="L"> | Alt-attack / saber special (`+altattack`) |
-| <img src="docs/icons/cross.svg" width="18" alt="Cross"> Cross | Jump (`+moveup`) |
-| <img src="docs/icons/square.svg" width="18" alt="Square"> Square | Crouch (`+movedown`) |
-| <img src="docs/icons/circle.svg" width="18" alt="Circle"> Circle | Use / activate (`+use`) |
-| <img src="docs/icons/triangle.svg" width="18" alt="Triangle"> Triangle | Use selected force power (`+useforce`) |
+| <img src="docs/icons/cross.svg" width="18" alt="Cross"> | Jump (`+moveup`) |
+| <img src="docs/icons/square.svg" width="18" alt="Square"> | Crouch (`+movedown`) |
+| <img src="docs/icons/circle.svg" width="18" alt="Circle"> | Use / activate (`+use`) |
+| <img src="docs/icons/triangle.svg" width="18" alt="Triangle"> | Use selected force power (`+useforce`) |
 | <img src="docs/icons/dpad-up.svg" width="18" alt="D-pad Up"> <img src="docs/icons/dpad-down.svg" width="18" alt="D-pad Down"> | Next / previous weapon |
 | <img src="docs/icons/dpad-left.svg" width="18" alt="D-pad Left"> <img src="docs/icons/dpad-right.svg" width="18" alt="D-pad Right"> | Select previous / next force power |
 | <img src="docs/icons/select.svg" height="18" alt="Select"> | Mission objectives — datapad (`datapad`) |
