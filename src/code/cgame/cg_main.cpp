@@ -2123,6 +2123,8 @@ void CG_PreInit() {
 
 	memset( &cgs, 0, sizeof( cgs ) );
 	iCGResetCount = 0;
+	// no cgame dll reload in a static elf, so the last map's props would outlive it
+	NumMiscEnts = 0;
 
 	CG_RegisterCvars();
 
