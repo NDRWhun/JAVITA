@@ -782,6 +782,8 @@ typedef struct mnode_s {
 
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
+
+	qboolean	hasSky;			// this subtree holds a sky surface, so the far plane must not cull it
 } mnode_t;
 
 typedef struct {

@@ -560,7 +560,13 @@ static void R_RecursiveWorldNode( mnode_t *node, int planeBits, int dlightBits )
 				}
 			}
 
+#ifdef VITA
+			// the render-distance cap must not take the sky with it. The bit stays set,
+			// so only the branches actually holding sky skip the test, not their siblings.
+			if ( ( planeBits & 16 ) && !node->hasSky ) {
+#else
 			if ( planeBits & 16 ) {
+#endif
 				r = BoxOnPlaneSide(node->mins, node->maxs, &tr.viewParms.frustum[4]);
 				if (r == 2) {
 					return;						// culled

@@ -905,6 +905,37 @@ static	void R_SetParent (mnode_t *node, mnode_t *parent)
 
 /*
 =================
+R_MarkSkyNodes
+
+The sky is a box drawn around the viewer, so a sky brush past the render-distance
+cap still has to reach the backend. Flag the subtrees that hold one.
+=================
+*/
+static qboolean R_MarkSkyNodes (mnode_t *node)
+{
+	if (node->contents != -1)
+	{	// leaf: look for a sky surface among its marks
+		node->hasSky = qfalse;
+		for (int i = 0; i < node->nummarksurfaces; i++)
+		{
+			const msurface_t *surf = node->firstmarksurface[i];
+			if (surf->shader && surf->shader->sky)
+			{
+				node->hasSky = qtrue;
+				break;
+			}
+		}
+		return node->hasSky;
+	}
+
+	const qboolean a = R_MarkSkyNodes (node->children[0]);
+	const qboolean b = R_MarkSkyNodes (node->children[1]);
+	node->hasSky = (qboolean)(a || b);
+	return node->hasSky;
+}
+
+/*
+=================
 R_LoadNodesAndLeafs
 =================
 */
@@ -977,6 +1008,7 @@ static	void R_LoadNodesAndLeafs (lump_t *nodeLump, lump_t *leafLump, world_t &wo
 
 	// chain decendants
 	R_SetParent (worldData.nodes, NULL);
+	R_MarkSkyNodes (worldData.nodes);
 }
 
 //=============================================================================
