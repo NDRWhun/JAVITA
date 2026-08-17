@@ -1036,7 +1036,15 @@ void target_level_change_use(gentity_t *self, gentity_t *other, gentity_t *activ
 		if (self->noise_index)
 		{
 			cgi_S_StopSounds();
-			cgi_S_StartSound( NULL, 0, CHAN_VOICE, cgs.sound_precache[ self->noise_index ] );
+			// the menu this queued blocks while it registers, so queue the line behind it
+			if ( VALIDSTRING( self->soundSet ) )
+			{
+				gi.SendConsoleCommand( va("play %s\n", self->soundSet) );
+			}
+			else
+			{
+				cgi_S_StartSound( NULL, 0, CHAN_VOICE, cgs.sound_precache[ self->noise_index ] );
+			}
 		}
 	}
 
@@ -1069,6 +1077,7 @@ void SP_target_level_change( gentity_t *self )
 		if (*s == '+')
 		{
 			self->noise_index = G_SoundIndex(va("sound/chars/tiervictory/%s.mp3",level.mapname) );
+			self->soundSet = G_NewString( va("sound/chars/tiervictory/%s.mp3",level.mapname) );
 			self->count = gi.Cvar_VariableIntegerValue("tier_storyinfo")+1;
 								G_SoundIndex(va("sound/chars/storyinfo/%d.mp3",self->count));	//cache for menu
 		}
@@ -1078,6 +1087,7 @@ void SP_target_level_change( gentity_t *self )
 			if( !(self->spawnflags & 2) )
 			{
 				self->noise_index = G_SoundIndex(va("sound/chars/storyinfo/%d.mp3",self->count) );
+				self->soundSet = G_NewString( va("sound/chars/storyinfo/%d.mp3",self->count) );
 			}
 		}
 
