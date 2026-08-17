@@ -331,10 +331,7 @@ void CL_GenericMenu_f(void)
 
 	if (cls.uiStarted) {
 		// this runs from the command buffer, not inside a draw, so one paint here is safe
-		extern qboolean scr_transitionSplash;
-		scr_transitionSplash = qtrue;
-		SCR_UpdateScreen();
-		scr_transitionSplash = qfalse;
+		SCR_TransitionSplash();
 
 		UI_SetActiveMenu("ingame",arg);
 	}

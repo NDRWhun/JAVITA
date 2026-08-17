@@ -410,7 +410,8 @@ SCR_DrawScreenField
 This will be called twice if rendering in stereo mode
 ==================
 */
-qboolean scr_transitionSplash = qfalse;
+static qboolean		scr_transitionSplash = qfalse;
+static qhandle_t	scr_transitionShader = 0;
 
 void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
@@ -418,11 +419,12 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
 	// a menu that blocks while it registers assets leaves the last frame up, so stand in for it
 	if ( scr_transitionSplash ) {
-		const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-		const char *msg = "LOADING";
-		SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, black );
-		SCR_DrawBigString( ( SCREEN_WIDTH - (int)strlen( msg ) * BIGCHAR_WIDTH ) / 2,
-			( SCREEN_HEIGHT - BIGCHAR_HEIGHT ) / 2, msg, 1.0f, qfalse );
+		if ( scr_transitionShader ) {
+			SCR_DrawPic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, scr_transitionShader );
+		} else {
+			const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+			SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, black );
+		}
 		return;
 	}
 
@@ -525,6 +527,24 @@ void SCR_UpdateScreen( void ) {
 	}
 
 	recursive = 0;
+}
+
+/*
+==================
+SCR_TransitionSplash
+
+Paints the stock load backdrop over a menu that blocks while it registers assets.
+==================
+*/
+void SCR_TransitionSplash( void ) {
+	if ( !scr_transitionShader ) {
+		// register outside the frame: an upload between Begin/EndFrame parks the render thread
+		scr_transitionShader = re.RegisterShaderNoMip( "gfx/menus/load_back" );
+	}
+
+	scr_transitionSplash = qtrue;
+	SCR_UpdateScreen();
+	scr_transitionSplash = qfalse;
 }
 
 // this stuff is only used by the savegame (SG) code for screenshots...
