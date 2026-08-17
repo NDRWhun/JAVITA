@@ -5679,21 +5679,31 @@ static void	UI_LoadMissionSelectMenu( const char *cvarName )
 	int holdLevel = (int)trap_Cvar_VariableValue(cvarName);
 
 	// Figure out which tier menu to load
+	// a reparse rebuilds every ghoul2 model and never frees the pool it allocates from
 	if ((holdLevel > 0) && (holdLevel < 5))
 	{
-		UI_LoadMenus("ui/tier1.txt",qfalse);
+		if ( !Menus_FindByName( "ingameMissionSelect1" ) )
+		{
+			UI_LoadMenus("ui/tier1.txt",qfalse);
+		}
 
 		Menus_CloseByName("ingameMissionSelect1");
 	}
 	else if ((holdLevel > 6) && (holdLevel < 10))
 	{
-		UI_LoadMenus("ui/tier2.txt",qfalse);
+		if ( !Menus_FindByName( "ingameMissionSelect2" ) )
+		{
+			UI_LoadMenus("ui/tier2.txt",qfalse);
+		}
 
 		Menus_CloseByName("ingameMissionSelect2");
 	}
 	else if ((holdLevel > 11) && (holdLevel < 15))
 	{
-		UI_LoadMenus("ui/tier3.txt",qfalse);
+		if ( !Menus_FindByName( "ingameMissionSelect3" ) )
+		{
+			UI_LoadMenus("ui/tier3.txt",qfalse);
+		}
 
 		Menus_CloseByName("ingameMissionSelect3");
 	}
