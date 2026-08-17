@@ -57,12 +57,9 @@ cvar_t	*r_dynamiclight;
 
 cvar_t	*r_lodbias;
 cvar_t	*r_lodscale;
-cvar_t	*r_ghoul2CrowdLod;
-cvar_t	*r_ghoul2CrowdLodStep;
 cvar_t	*r_distanceCull;
 cvar_t	*r_forceFog;
 cvar_t	*r_forceFogColor;
-cvar_t	*r_g2Threaded;
 cvar_t	*r_texCacheCompressed;
 cvar_t	*r_dxtFast;
 
@@ -1741,11 +1738,6 @@ void R_Register( void )
 	r_flares = ri.Cvar_Get ("r_flares", "1", CVAR_ARCHIVE_ND );
 	r_lodscale = ri.Cvar_Get( "r_lodscale", "10", CVAR_ARCHIVE_ND );
 #ifdef VITA
-	// Crowd LOD: past r_ghoul2CrowdLod visible ghoul2 characters, push the distant
-	// non-player ones to a lower LOD to cut skinning cost in big fights. 0 = off.
-	// Step = visible characters per extra LOD level.
-	r_ghoul2CrowdLod     = ri.Cvar_Get( "r_ghoul2CrowdLod",     "0", CVAR_ARCHIVE_ND );
-	r_ghoul2CrowdLodStep = ri.Cvar_Get( "r_ghoul2CrowdLodStep", "3", CVAR_ARCHIVE_ND );
 	// Render-distance cap: >0 clamps the map's distanceCull, pulling in both the far
 	// frustum plane (CPU cull) and the zFar clip so long sightlines don't drag the whole
 	// PVS into view and overdraw. 0 = use the map value. Sane range ~4000-8000.
@@ -1755,11 +1747,6 @@ void R_Register( void )
 	// builds over the last half. r_forceFogColor = "r g b" 0..1.
 	r_forceFog           = ri.Cvar_Get( "r_forceFog",           "0", CVAR_ARCHIVE_ND );
 	r_forceFogColor      = ri.Cvar_Get( "r_forceFogColor", "0.55 0.6 0.7", CVAR_ARCHIVE_ND );
-
-	// Thread ghoul2 skinning across the worker pool (cores 1/2 + main work-steal), one
-	// job per character, main barriers before the draw list. Off by default until it's
-	// validated on device; serial skinning is the fallback.
-	r_g2Threaded         = ri.Cvar_Get( "r_g2Threaded",         "0", CVAR_ARCHIVE_ND );
 #endif
 
 	r_znear = ri.Cvar_Get( "r_znear", "4", CVAR_ARCHIVE_ND );	//if set any lower, you lose a lot of precision in the distance

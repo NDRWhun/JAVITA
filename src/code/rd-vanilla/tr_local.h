@@ -1167,12 +1167,9 @@ extern cvar_t	*r_measureOverdraw;		// enables stencil buffer overdraw measuremen
 
 extern cvar_t	*r_lodbias;				// push/pull LOD transitions
 extern cvar_t	*r_lodscale;
-extern cvar_t	*r_ghoul2CrowdLod;		// crowd LOD: visible ghoul2 char count to start dropping LOD (0 = off)
-extern cvar_t	*r_ghoul2CrowdLodStep;	// extra visible chars per +1 LOD step
 extern cvar_t	*r_distanceCull;		// render-distance cap, clamps the map's distanceCull (0 = off)
 extern cvar_t	*r_forceFog;			// forced global fog END distance in units (0 = off)
 extern cvar_t	*r_forceFogColor;		// forced fog colour "r g b"
-extern cvar_t	*r_g2Threaded;			// skin ghoul2 verts on the worker pool (0 = off)
 extern cvar_t	*r_texCacheCompressed;	// DXT mip-chain texture cache on ux0 (0 = off)
 extern cvar_t	*r_dxtFast;				// DXT encode quality (1 = fast/STB_DXT_NORMAL, 0 = high)
 

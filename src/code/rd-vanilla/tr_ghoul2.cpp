@@ -853,13 +853,6 @@ static int R_GComputeFogNum( trRefEntity_t *ent ) {
 }
 
 // work out lod for this entity.
-#ifdef VITA
-// Crowd LOD: count of visible ghoul2 chars. We bias on last frame's count, not this
-// one, otherwise it's chicken-and-egg within a frame. Counted after the cull in
-// R_AddGhoulSurfaces, read in G2_ComputeLOD.
-int g_g2VisibleCount = 0, g_g2VisibleCountPrev = 0, g_g2VisFrame = -1;
-#endif
-
 static int G2_ComputeLOD( trRefEntity_t *ent, const model_t *currentModel, int lodBias )
 {
 	float flod, lodscale;
@@ -925,21 +918,6 @@ static int G2_ComputeLOD( trRefEntity_t *ent, const model_t *currentModel, int l
 
 
 	lod += lodBias;
-
-#ifdef VITA
-	// Crowd LOD: with a lot of characters on screen, drop the far ones a LOD to cut
-	// skinning cost. The distance LOD above keeps near ones detailed. Skip the
-	// third-person player so it stays crisp.
-	if ( r_ghoul2CrowdLod && r_ghoul2CrowdLod->integer > 0 && !( ent->e.renderfx & RF_THIRD_PERSON ) )
-	{
-		const int over = g_g2VisibleCountPrev - r_ghoul2CrowdLod->integer;
-		if ( over > 0 )
-		{
-			int step = ( r_ghoul2CrowdLodStep && r_ghoul2CrowdLodStep->integer > 0 ) ? r_ghoul2CrowdLodStep->integer : 3;
-			lod += ( over + step - 1 ) / step;	// +1 past the threshold, then +1 per `step` over
-		}
-	}
-#endif
 
 	if ( lod >= currentModel->numLods )
 		lod = currentModel->numLods - 1;
@@ -1649,7 +1627,7 @@ void G2_TransformBone (int child,CBoneCache &BC)
 			// this is crazy, we are gonna drive the animation to ID while we are doing post mults to compensate.
 			Multiply_3x4Matrix(&temp,&firstPass, &skel->BasePoseMat);
 			float	matrixScale = VectorLength((float*)&temp);
-			mdxaBone_t		toMatrix =	// was static; the shared static raced under r_g2Threaded
+			mdxaBone_t		toMatrix =	// was static; the shared static raced the threaded skin jobs
 			{
 				{
 					{ 1.0f, 0.0f, 0.0f, 0.0f },
@@ -2665,16 +2643,6 @@ void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 	{
 		return;
 	}
-#ifdef VITA
-	// Crowd LOD: count this visible character; the total feeds next frame's bias.
-	if ( tr.frameCount != g_g2VisFrame )
-	{
-		g_g2VisibleCountPrev = g_g2VisibleCount;
-		g_g2VisibleCount     = 0;
-		g_g2VisFrame         = tr.frameCount;
-	}
-	g_g2VisibleCount++;
-#endif
 	HackadelicOnClient=true;
 	// are any of these models setting a new origin?
 	RootMatrix(ghoul2,currentTime, ent->e.modelScale,rootMatrix);
