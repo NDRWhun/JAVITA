@@ -5860,6 +5860,11 @@ void Menu_New(char *buffer)
 		if (Menu_Parse(buffer, menu))
 		{
 			Menu_PostParse(menu);
+			// a tier menu reloads on every debrief, and lookups only ever find the first copy
+			if (menu->window.name && Menus_FindByName(menu->window.name))
+			{
+				return;
+			}
 			menuCount++;
 		}
 	}
