@@ -410,9 +410,21 @@ SCR_DrawScreenField
 This will be called twice if rendering in stereo mode
 ==================
 */
+qboolean scr_transitionSplash = qfalse;
+
 void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
 	re.BeginFrame( stereoFrame );
+
+	// a menu that blocks while it registers assets leaves the last frame up, so stand in for it
+	if ( scr_transitionSplash ) {
+		const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+		const char *msg = "LOADING";
+		SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, black );
+		SCR_DrawBigString( ( SCREEN_WIDTH - (int)strlen( msg ) * BIGCHAR_WIDTH ) / 2,
+			( SCREEN_HEIGHT - BIGCHAR_HEIGHT ) / 2, msg, 1.0f, qfalse );
+		return;
+	}
 
 	qboolean uiFullscreen = _UI_IsFullscreen();
 
