@@ -539,7 +539,7 @@ Paints the stock load backdrop over a menu that blocks while it registers assets
 void SCR_TransitionSplash( void ) {
 	if ( !scr_transitionShader ) {
 		// register outside the frame: an upload between Begin/EndFrame parks the render thread
-		scr_transitionShader = re.RegisterShaderNoMip( "gfx/menus/load_back" );
+		scr_transitionShader = re.RegisterShaderNoMip( "menu/art/unknownmap" );
 	}
 
 	scr_transitionSplash = qtrue;
