@@ -5496,6 +5496,13 @@ void  Menus_Activate(menuDef_t *menu)
 	menu->appearanceTime = 0;
 	menu->appearanceCnt = 0;
 
+	for (int i = 0; i < menu->itemCount; i++)
+	{	// a model parsed behind a blocking load has already burned its anim off-screen
+		if (menu->items[i]->type == ITEM_TYPE_MODEL)
+		{
+			menu->items[i]->flags |= ITF_G2ANIMPENDING;
+		}
+	}
 }
 
 static const char *g_bindCommands[] = {
@@ -7321,6 +7328,12 @@ void Item_Model_Paint(itemDef_t *item)
 	refdef.y = y * DC->yscale;
 	refdef.width = w * DC->xscale;
 	refdef.height = h * DC->yscale;
+
+	if ((item->flags&ITF_G2ANIMPENDING) && (item->flags&ITF_G2VALID) && modelPtr->g2anim)
+	{	// realTime is live here, unlike at parse time behind a blocking load
+		item->flags &= ~ITF_G2ANIMPENDING;
+		DC->g2hilev_SetAnim(&item->ghoul2[0], "model_root", modelPtr->g2anim, qfalse);
+	}
 
 	if (item->flags&ITF_G2VALID)
 	{ //ghoul2 models don't have bounds, so we have to parse them.

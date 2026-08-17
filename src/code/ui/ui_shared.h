@@ -353,6 +353,7 @@ typedef struct modelDef_s {
 #define ITF_ISCHARACTER		0x0002					// a character item, uses customRGBA
 #define ITF_ISSABER			0x0004					// first saber item, draws blade
 #define ITF_ISSABER2		0x0008					// second saber item, draws blade
+#define ITF_G2ANIMPENDING	0x0010					// anim awaits its first paint to get a live start time
 
 #define ITF_ISANYSABER		(ITF_ISSABER|ITF_ISSABER2)	//either saber
 
