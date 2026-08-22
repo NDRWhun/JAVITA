@@ -486,7 +486,6 @@ void CG_RegisterCvars( void ) {
 	cgi_Cvar_Set( "cg_g2Marks",           "0" );	// decals projected onto ghoul2 characters
 	cgi_Cvar_Set( "cg_saberEntMarks",     "0" );	// saber marks on entities
 	cgi_Cvar_Set( "cg_speedTrail",        "0" );	// force-speed motion-blur trail
-	cgi_Cvar_Set( "cg_shadows",           "0" );	// character shadows
 #endif
 }
 
