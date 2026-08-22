@@ -171,21 +171,15 @@ default of `125` sits above that ceiling.
 | `s_khz` | `22` | Mixer rate — 22 matches the source assets *(latched)* |
 | `vita_rearTouch` | `1` | Rear-touch panel controls — `0` disables them |
 
-The stencil and projected modes are new and not finished — `2` casts onto the ground plane and only reaches walls as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry. `1` is the default for a reason.
+The stencil and projected modes are not finished: `2` casts onto the ground plane, reaches walls only as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Known issues
 
-Carried into 1.0:
-
-- **Mirrors and portals draw unclipped.** The GXM backend implements no user clip planes, so
-  geometry a portal view should cut away is still drawn. Affects the few SP maps using mirrors.
-- **Dynamic glow is unavailable.** `g_bDynamicGlowSupported` is forced off in this backend, so
-  `r_DynamicGlow 1` has no effect.
-
-Performance is draw-call bound rather than triangle bound, and on-screen character count is the
-dominant cost. `r_distanceCull` and `r_subdivisions` are the two cvars worth tuning first.
+- Mirrors and portals draw unclipped — the backend has no user clip planes. Visible on the few
+  maps that use mirrors.
+- Dynamic glow (`r_DynamicGlow`) is not implemented.
 
 ## Build (for developers)
 
@@ -200,8 +194,8 @@ git clone --recursive https://github.com/NDRWhun/JAVITA && cd JAVITA
 bash tools/build.sh        # vdpm deps + SDL + port -> build/JAVITA.vpk
 ```
 
-`bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. Cloned without
-`--recursive`? The script runs `git submodule update --init` for you.
+`bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. If the clone
+was made without `--recursive`, the script runs `git submodule update --init` itself.
 
 The renderer backend lives in [`src/code/rd-gxm/`](src/code/rd-gxm). Its shaders are Cg sources under
 `shaders/`, compiled ahead of time into `gxm_shaders.h` — change a `.cg` and you need to re-run
