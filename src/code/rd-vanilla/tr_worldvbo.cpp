@@ -445,6 +445,7 @@ qboolean R_WorldVBO_Surface( const srfSurfaceFace_t *face, const shader_t *shade
 
 	wvbo_curGroup = face->vboGroup;
 	wvbo_statSurfs++;
+	backEnd.pc.c_wvboSurfaces++;
 	memcpy( wvbo_idx + wvbo_numIdx, face->vboIndexes, face->numIndices * sizeof( glIndex_t ) );
 	wvbo_numIdx += face->numIndices;
 	return qtrue;
@@ -553,6 +554,7 @@ static void R_WorldVBO_FogOverlay( void )
 	GXM_DrawTess( wvbo_numIdx, wvbo_idx, numV );
 	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
 	wvbo_statBatches++;
+	backEnd.pc.c_wvboDraws++;
 #endif
 }
 
@@ -593,6 +595,7 @@ void R_WorldVBO_Flush( shader_t *shader )
 		GXM_SetStateBits( glState.glStateBits );
 		GXM_DrawStaticBuffer( wvbo_groups[wvbo_curGroup].data, wvbo_idx, wvbo_numIdx, vcol );
 		wvbo_statBatches++;
+		backEnd.pc.c_wvboDraws++;
 	}
 	GXM_SetTexUnitCount( 1 );
 	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
