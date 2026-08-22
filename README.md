@@ -4,7 +4,7 @@
 
 <img src="docs/logo-circle.png" alt="JAVITA" width="128" height="128">
 
-<h3 align="center">JAVITA</h3>
+<h3 align="center">JAVITA 1.0</h3>
 
 <p align="center">
   <b>Star Wars Jedi Knight: Jedi Academy — single-player, on the PS Vita</b>
