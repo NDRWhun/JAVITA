@@ -1396,7 +1396,6 @@ static void ProjectDlightTexture( void ) {
 	}
 }
 
-#ifndef USE_GXM_NATIVE
 /*
 ===================
 RB_FogPass
@@ -1433,7 +1432,6 @@ static void RB_FogPass( void ) {
 
 	R_DrawElements( tess.numIndexes, tess.indexes, tess.numVertexes );
 }
-#endif
 
 
 /*
@@ -1948,8 +1946,10 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 		qglEnable(GL_FOG);
 		UseGLFog = true;
 #ifdef USE_GXM_NATIVE
-		// the fragment programs carry the fog curve, so the volume drives them directly
-		GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+		// the fragment programs carry the fog curve; a forced fog owns the uniform for the view
+		if ( !( r_forceFog && r_forceFog->value > 0.0f ) ) {
+			GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+		}
 #endif
 	}
 #endif
@@ -2130,6 +2130,11 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 	{
 		qglFogfv(GL_FOG_COLOR, fog->parms.color);
 	}
+#if defined(USE_GXM_NATIVE)
+	if ( UseGLFog && !( r_forceFog && r_forceFog->value > 0.0f ) ) {
+		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+	}
+#endif
 #endif
 }
 
@@ -2213,28 +2218,7 @@ void RB_StageIteratorGeneric( void )
 	//
 	// call shader function
 	//
-#ifdef USE_GXM_NATIVE
-	// the fragment programs carry fog, so the volume drives them directly
-	const qboolean gxmMapFog = (qboolean)( tess.fogNum && tess.shader->fogPass
-		&& r_drawfog->value && tr.world && !r_forceFog->value );
-	if ( gxmMapFog ) {
-		const fog_t *fog = tr.world->fogs + tess.fogNum;
-		float end = fog->parms.depthForOpaque > 1.0f ? fog->parms.depthForOpaque : 1.0f;
-		// opaque by the cull distance, or the cut drops geometry that is still half visible
-		if ( r_distanceCull && r_distanceCull->value > 0.0f && end > r_distanceCull->value ) {
-			end = r_distanceCull->value;
-		}
-		GXM_SetFog( 1, 0.0f, end, fog->parms.color );
-	}
-#endif
-
 	RB_IterateStagesGeneric( input );
-
-#ifdef USE_GXM_NATIVE
-	if ( gxmMapFog ) {
-		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
-	}
-#endif
 
 	//
 	// now do any dynamic lighting needed
@@ -2254,7 +2238,6 @@ void RB_StageIteratorGeneric( void )
 	//
 	// now do fog
 	//
-#ifndef USE_GXM_NATIVE
 #ifdef JK2_MODE
 	if (tess.fogNum && tess.shader->fogPass && r_drawfog->value)
 #else
@@ -2263,7 +2246,6 @@ void RB_StageIteratorGeneric( void )
 	{
 		RB_FogPass();
 	}
-#endif
 
 	//
 	// unlock arrays
