@@ -55,6 +55,7 @@ typedef struct {
 #else
 	GLuint	vbo;
 #endif
+	float	*xyzMirror;				// cached copy for per-frame fog texcoords (vec4 stride)
 	int		numVerts;
 } wvboGroup_t;
 
@@ -68,6 +69,8 @@ static qboolean		wvbo_failed;
 static glIndex_t	wvbo_idx[WVBO_MAXIDX];
 static int			wvbo_numIdx;
 static int			wvbo_curGroup = -1;
+static int			wvbo_curFog = 0;
+static float		*wvbo_fogSt;			// per-flush fog texcoords, batch-rebased
 
 // per-frame, so the fallback reasons can be told apart
 static int	wvbo_statBatches, wvbo_statSurfs, wvbo_statTris;
@@ -92,6 +95,15 @@ void R_WorldVBO_Clear( void )
 			glDeleteBuffers( 1, &wvbo_groups[i].vbo );
 		}
 #endif
+	}
+	for ( int i = 0; i < wvbo_numGroups; i++ ) {
+		if ( wvbo_groups[i].xyzMirror ) {
+			R_Free( wvbo_groups[i].xyzMirror );
+		}
+	}
+	if ( wvbo_fogSt ) {
+		R_Free( wvbo_fogSt );
+		wvbo_fogSt = NULL;
 	}
 	memset( wvbo_groups, 0, sizeof( wvbo_groups ) );
 	wvbo_numGroups = 0;
@@ -289,6 +301,15 @@ void R_BuildWorldVBO( world_t &worldData )
 
 			wvbo_groups[wvbo_numGroups].data = gpu;
 			wvbo_groups[wvbo_numGroups].uid  = uid;
+			// positions stay CPU-side too: the fog overlay computes texcoords from them
+			{
+				float *mir = (float *)R_Malloc( groupVerts * 4 * sizeof( float ), TAG_MODEL_MD3, qfalse );
+				for ( int mv = 0; mv < groupVerts; mv++ ) {
+					memcpy( &mir[mv * 4], verts + mv * WVBO_STRIDE, 3 * sizeof( float ) );
+					mir[mv * 4 + 3] = 1.0f;
+				}
+				wvbo_groups[wvbo_numGroups].xyzMirror = mir;
+			}
 #else
 			GLuint id = 0;
 			glGenBuffers( 1, &id );
@@ -404,9 +425,14 @@ qboolean R_WorldVBO_Surface( const srfSurfaceFace_t *face, const shader_t *shade
 		wvbo_statStyle++;
 		return qfalse;
 	}
-	if ( fogNum || dlighted || face->dlightBits[backEnd.smpFrame] ) {
+	if ( dlighted || face->dlightBits[backEnd.smpFrame] ) {
 		wvbo_statLit++;
-		return qfalse;					// the fog and dlight passes only exist on the tess path
+		return qfalse;					// the dlight pass only exists on the tess path
+	}
+	if ( wvbo_numIdx == 0 ) {
+		wvbo_curFog = ( fogNum && tr.world ) ? fogNum : 0;
+	} else if ( fogNum != wvbo_curFog ) {
+		return qfalse;					// mixed fog in one batch would mis-fog the overlay
 	}
 	if ( wvbo_numIdx + face->numIndices > WVBO_MAXIDX ) {
 		wvbo_statFull++;
@@ -431,6 +457,105 @@ R_WorldVBO_Flush
 Draws whatever the current batch accumulated.
 ===============
 */
+// The fog volume's density at each vertex, drawn over the resident batch the same
+// way RB_FogPass covers a tess batch. The global fog is already carried by the
+// fragment programs' fog uniform, so only bounded volumes project the fog image.
+static void R_WorldVBO_FogOverlay( void )
+{
+	fog_t	*fog = tr.world->fogs + wvbo_curFog;
+
+#ifndef JK2_MODE
+	if ( ( wvbo_curFog == tr.world->globalFog || wvbo_curFog == tr.world->numfogs )
+		&& r_drawfog->value == 2 ) {
+		return;
+	}
+#endif
+
+	const float *mir = wvbo_groups[wvbo_curGroup].xyzMirror;
+	if ( !mir ) {
+		return;
+	}
+	if ( !wvbo_fogSt ) {
+		wvbo_fogSt = (float *)R_Malloc( WVBO_GROUPVERTS * 2 * sizeof( float ), TAG_MODEL_MD3, qfalse );
+	}
+
+	// the referenced span; the draw rebases onto it so the ring copy stays tight
+	int minV = wvbo_idx[0], maxV = wvbo_idx[0];
+	for ( int i = 1; i < wvbo_numIdx; i++ ) {
+		const int v = wvbo_idx[i];
+		if ( v < minV ) minV = v;
+		if ( v > maxV ) maxV = v;
+	}
+	for ( int i = 0; i < wvbo_numIdx; i++ ) {
+		wvbo_idx[i] = (glIndex_t)( wvbo_idx[i] - minV );
+	}
+	const int numV = maxV - minV + 1;
+
+	// same construction as RB_CalcFogTexCoords; world orientation is current here
+	vec3_t	localVec;
+	vec4_t	fogDistanceVector, fogDepthVector;
+	float	eyeT;
+
+	VectorSubtract( backEnd.ori.origin, backEnd.viewParms.ori.origin, localVec );
+	fogDistanceVector[0] = -backEnd.ori.modelMatrix[2];
+	fogDistanceVector[1] = -backEnd.ori.modelMatrix[6];
+	fogDistanceVector[2] = -backEnd.ori.modelMatrix[10];
+	fogDistanceVector[3] = DotProduct( localVec, backEnd.viewParms.ori.axis[0] );
+	fogDistanceVector[0] *= fog->tcScale;
+	fogDistanceVector[1] *= fog->tcScale;
+	fogDistanceVector[2] *= fog->tcScale;
+	fogDistanceVector[3] *= fog->tcScale;
+	fogDistanceVector[3] += 1.0f / 512.0f;
+
+	if ( fog->hasSurface ) {
+		fogDepthVector[0] = fog->surface[0] * backEnd.ori.axis[0][0] +
+			fog->surface[1] * backEnd.ori.axis[0][1] + fog->surface[2] * backEnd.ori.axis[0][2];
+		fogDepthVector[1] = fog->surface[0] * backEnd.ori.axis[1][0] +
+			fog->surface[1] * backEnd.ori.axis[1][1] + fog->surface[2] * backEnd.ori.axis[1][2];
+		fogDepthVector[2] = fog->surface[0] * backEnd.ori.axis[2][0] +
+			fog->surface[1] * backEnd.ori.axis[2][1] + fog->surface[2] * backEnd.ori.axis[2][2];
+		fogDepthVector[3] = -fog->surface[3] + DotProduct( backEnd.ori.origin, fog->surface );
+		eyeT = DotProduct( backEnd.ori.viewOrigin, fogDepthVector ) + fogDepthVector[3];
+	} else {
+		eyeT = 1.0f;
+		fogDepthVector[0] = fogDepthVector[1] = fogDepthVector[2] = 0.0f;
+		fogDepthVector[3] = 1.0f;
+	}
+	const qboolean eyeOutside = (qboolean)( eyeT < 0.0f );
+
+	for ( int i = 0; i < numV; i++ ) {
+		const float *v = &mir[( minV + i ) * 4];
+		float sc = DotProduct( v, fogDistanceVector ) + fogDistanceVector[3];
+		float tc = DotProduct( v, fogDepthVector ) + fogDepthVector[3];
+		if ( eyeOutside ) {
+			if ( tc < 1.0f ) {
+				tc = 1.0f / 32.0f;
+			} else {
+				tc = 1.0f / 32.0f + ( 30.0f / 32.0f ) * tc / ( tc - eyeT );
+			}
+			sc *= tc;
+		} else if ( tc < 1.0f ) {
+			tc = 1.0f / 32.0f;
+		} else {
+			tc = 31.0f / 32.0f;
+		}
+		wvbo_fogSt[i * 2 + 0] = sc;
+		wvbo_fogSt[i * 2 + 1] = tc;
+	}
+
+#ifdef USE_GXM_NATIVE
+	GL_Bind( tr.fogImage );
+	GL_State( GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA | GLS_DEPTHFUNC_EQUAL );
+	GXM_SetTexUnitCount( 1 );
+	GXM_SetConstantColor( fog->parms.color[0], fog->parms.color[1], fog->parms.color[2], 1.0f );
+	GXM_SetVertexArrays( &mir[minV * 4], wvbo_fogSt, NULL, NULL );
+	GXM_SetStateBits( glState.glStateBits );
+	GXM_DrawTess( wvbo_numIdx, wvbo_idx, numV );
+	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
+	wvbo_statBatches++;
+#endif
+}
+
 void R_WorldVBO_Flush( shader_t *shader )
 {
 	if ( !wvbo_numIdx || wvbo_curGroup < 0 || wvbo_curGroup >= wvbo_numGroups ) {
@@ -473,7 +598,12 @@ void R_WorldVBO_Flush( shader_t *shader )
 	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
 	GL_SelectTexture( 0 );
 
+	if ( wvbo_curFog && tr.world && r_drawfog->value && shader->fogPass ) {
+		R_WorldVBO_FogOverlay();
+	}
+
 	wvbo_numIdx = 0;
+	wvbo_curFog = 0;
 	wvbo_curGroup = -1;
 	return;
 #else
