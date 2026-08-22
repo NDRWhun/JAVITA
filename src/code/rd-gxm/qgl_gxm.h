@@ -198,7 +198,7 @@ void GXM_ImmEnd( void );
 #undef qglDepthRange
 #define qglDepthRange(n, f) GXM_SetDepthRange((float)(n), (float)(f))
 #undef qglDisable
-#define qglDisable(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(0); } while (0)
+#define qglDisable(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(0); else if ((cap) == 0x8037 || (cap) == 0x2A02) GXM_SetDepthBias(0.0f, 0.0f); } while (0)	// stencil + polygon offset fill/line
 #undef qglDisableClientState
 #define qglDisableClientState(...) ((void)0)
 #undef qglDrawArrays
