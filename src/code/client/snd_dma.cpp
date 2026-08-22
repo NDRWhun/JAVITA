@@ -41,6 +41,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #endif
 
 static void S_Play_f(void);
+static void S_PlayVoice_f(void);
 static void S_SoundList_f(void);
 static void S_Music_f(void);
 static void S_StopMusic_f(void);
@@ -698,6 +699,7 @@ void S_Init( void ) {
 	}
 
 	Cmd_AddCommand("play", S_Play_f);
+	Cmd_AddCommand("playvoice", S_PlayVoice_f);
 	Cmd_AddCommand("music", S_Music_f);
 	Cmd_AddCommand("stopmusic", S_StopMusic_f);
 	Cmd_AddCommand("soundlist", S_SoundList_f);
@@ -962,6 +964,7 @@ void S_Shutdown( void )
 	s_soundStarted = 0;
 
 	Cmd_RemoveCommand("play");
+	Cmd_RemoveCommand("playvoice");
 	Cmd_RemoveCommand("music");
 	Cmd_RemoveCommand("stopmusic");
 	Cmd_RemoveCommand("stopsound");
@@ -3998,6 +4001,25 @@ static void S_Play_f( void ) {
 			S_StartLocalSound( h, CHAN_LOCAL_SOUND );
 		}
 		i++;
+	}
+}
+
+// same as play, but on the voice channel so s_volumeVoice governs it
+static void S_PlayVoice_f( void ) {
+	char name[256];
+
+	if ( Cmd_Argc() < 2 ) {
+		return;
+	}
+	if ( !strrchr( Cmd_Argv(1), '.' ) ) {
+		Com_sprintf( name, sizeof(name), "%s.wav", Cmd_Argv(1) );
+	} else {
+		Q_strncpyz( name, Cmd_Argv(1), sizeof(name) );
+	}
+
+	sfxHandle_t h = S_RegisterSound( name );
+	if ( h ) {
+		S_StartSound( NULL, 0, CHAN_VOICE, h );
 	}
 }
 

@@ -1042,7 +1042,7 @@ void target_level_change_use(gentity_t *self, gentity_t *other, gentity_t *activ
 			gi.GetConfigstring( CS_SOUNDS + self->noise_index, sound, sizeof(sound) );
 			if ( sound[0] )
 			{
-				gi.SendConsoleCommand( va("play %s\n", sound) );
+				gi.SendConsoleCommand( va("playvoice %s\n", sound) );
 			}
 			else
 			{

@@ -2211,7 +2211,7 @@ void RB_StageIteratorGeneric( void )
 		const fog_t *fog = tr.world->fogs + tess.fogNum;
 		float end = fog->parms.depthForOpaque > 1.0f ? fog->parms.depthForOpaque : 1.0f;
 		// opaque by the cull distance, or the cut drops geometry that is still half visible
-		if ( r_distanceCull->value > 0.0f && end > r_distanceCull->value ) {
+		if ( r_distanceCull && r_distanceCull->value > 0.0f && end > r_distanceCull->value ) {
 			end = r_distanceCull->value;
 		}
 		GXM_SetFog( 1, 0.0f, end, fog->parms.color );
