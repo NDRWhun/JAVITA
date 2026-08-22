@@ -124,7 +124,7 @@ Render-thread semaphore protocol (all created at 0; R = render thread, M = main)
 extern "C" int sceGxmTransferFinish( void );	// GXM transfer-queue sync (SDK)
 
 static int renderThread( SceSize argc, void *argv ) {
-	// Bring vitaGL up ON THIS THREAD so the GXM context is owned here, then tell
+	// Bring the GXM device up ON THIS THREAD so the context is owned here, then tell
 	// main it is safe to create the window (WIN_CreateWindow no-ops the device init).
 	ri.WIN_LoadGL();
 	sceKernelSignalSema( rend_init_done, 1 );
