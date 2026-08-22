@@ -160,9 +160,6 @@ default of `125` sits above that ceiling.
 | `r_surfaceSprites` | `0` | Foliage / grass sprites — `1` = on (stock default), `0` = off (Vita default) |
 | `r_distanceCull` | `5000` | Far draw-distance cap, in units |
 | `r_forceFog` | `0` | Force fog at this distance (`0` = off) — hides far geometry |
-| `r_ghoul2CrowdLod` | `0` | Above this many on-screen characters, extras drop LOD (`0` = off) |
-| `r_ghoul2CrowdLodStep` | `3` | How many LOD levels the crowd extras drop |
-| `r_g2Threaded` | `0` | Skin characters on a worker thread; `1` = on |
 | `cg_shadows` | `1` | Player/NPC shadows — `0` off, `1` blob, `2` stencil volumes *(experimental)*, `3` projected *(experimental)* |
 | `r_shadowAlpha` | `0.22` | How dark a stencil shadow lands — `0` invisible, `1` solid black |
 | `cg_shadowCasterRange` | `1024` | Characters past this distance keep a blob instead of casting a volume (`0` = all cast) |
@@ -176,6 +173,18 @@ default of `125` sits above that ceiling.
 The stencil and projected modes are new and not finished — `2` casts onto the ground plane and only reaches walls as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry. `1` is the default for a reason.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Known issues
+
+Carried into 1.0:
+
+- **Mirrors and portals draw unclipped.** The GXM backend implements no user clip planes, so
+  geometry a portal view should cut away is still drawn. Affects the few SP maps using mirrors.
+- **Dynamic glow is unavailable.** `g_bDynamicGlowSupported` is forced off in this backend, so
+  `r_DynamicGlow 1` has no effect.
+
+Performance is draw-call bound rather than triangle bound, and on-screen character count is the
+dominant cost. `r_distanceCull` and `r_subdivisions` are the two cvars worth tuning first.
 
 ## Build (for developers)
 

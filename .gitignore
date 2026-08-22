@@ -23,3 +23,6 @@ tools/env.local.sh
 
 # release notes are paste material for the Releases page, not repo content
 RELEASE-*.md
+
+# stray screenshot, not repo content
+/image.png

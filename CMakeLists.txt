@@ -26,8 +26,8 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 
 set(VITA_APP_NAME "JAVITA: Jedi Academy")
 set(VITA_TITLEID  "JAVITA001")
-set(PORT_VERSION  "0.9.1")
-set(VITA_VERSION  "00.91")	# SFO APP_VER is NN.NN and cannot carry the patch digit
+set(PORT_VERSION  "1.0.0")
+set(VITA_VERSION  "01.00")	# SFO APP_VER is NN.NN and cannot carry the patch digit
 
 #----------------------------------------------------------------------------
 # Include domains: native OpenJK Jedi Academy single-player (code/).
