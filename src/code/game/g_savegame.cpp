@@ -785,8 +785,8 @@ static void copy_retail_gclient_to_current(
 	}
 
 	::memcpy(
-		reinterpret_cast<char*>(&dst) + src_post_offset,
-		reinterpret_cast<const char*>(&src) + dst_post_offset,
+		reinterpret_cast<char*>(&dst) + dst_post_offset,
+		reinterpret_cast<const char*>(&src) + src_post_offset,
 		src_post_size);
 }
 

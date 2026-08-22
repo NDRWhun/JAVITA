@@ -158,7 +158,7 @@ void SV_WipeGame_f(void)
 */
 void SG_StoreSaveGameComment(const char *sComment)
 {
-	memmove(saveGameComment,sComment,iSG_COMMENT_SIZE);
+	Q_strncpyz(saveGameComment,sComment,sizeof(saveGameComment));
 }
 
 qboolean SV_TryLoadTransition( const char *mapname )
