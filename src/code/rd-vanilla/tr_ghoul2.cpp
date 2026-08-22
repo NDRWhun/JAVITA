@@ -2606,6 +2606,56 @@ static inline bool bInShadowRange(vec3_t location)
 R_AddGHOULSurfaces
 ==============
 */
+#ifdef VITA
+// World-space merge: skin eligible characters straight into world space (the entity
+// transform rides in the bone snapshot), submit them as world, and same-shader draws
+// merge across entities with no modelview swap between them.
+#define G2_MERGE_MAX 48
+static g2WorldRec_t s_g2WorldRecs[2][G2_MERGE_MAX];
+static int          s_g2WorldRecCount[2];
+
+// every stage must be free of per-entity inputs, since the merged batch draws as world
+static qboolean G2_ShaderMergeable( const shader_t *sh )
+{
+	if ( sh->numDeforms || sh->polygonOffset ) {
+		return qfalse;
+	}
+	for ( int i = 0; i < sh->numUnfoggedPasses; i++ ) {
+		const shaderStage_t *st = &sh->stages[i];
+		if ( !st->active ) {
+			break;
+		}
+		switch ( st->rgbGen ) {
+		case CGEN_IDENTITY:
+		case CGEN_IDENTITY_LIGHTING:
+		case CGEN_LIGHTING_DIFFUSE:
+		case CGEN_CONST:
+		case CGEN_WAVEFORM:
+			break;
+		default:
+			return qfalse;
+		}
+		switch ( st->alphaGen ) {
+		case AGEN_IDENTITY:
+		case AGEN_SKIP:
+		case AGEN_CONST:
+		case AGEN_WAVEFORM:
+			break;
+		default:
+			return qfalse;
+		}
+		for ( int b = 0; b < NUM_TEXTURE_BUNDLES; b++ ) {
+			if ( st->bundle[b].image
+				&& st->bundle[b].tcGen != TCGEN_TEXTURE
+				&& st->bundle[b].tcGen != TCGEN_ENVIRONMENT_MAPPED ) {
+				return qfalse;
+			}
+		}
+	}
+	return qtrue;
+}
+#endif // VITA
+
 void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 	shader_t		*cust_shader = 0;
 #ifdef _G2_GORE
@@ -2676,6 +2726,15 @@ void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 	// construct a world matrix for this entity
 	G2_GenerateWorldMatrix(ent->e.angles, ent->e.origin);
 
+#ifdef VITA
+	// decided after the walk, once every surface's skin-resolved shader is known
+	const int firstMergeSurf = tr.refdef.numDrawSurfs;
+	const qboolean mergeWanted = (qboolean)( r_g2WorldMerge && r_g2WorldMerge->integer
+		&& r_renderThread && r_renderThread->integer
+		&& !personalModel
+		&& !( ent->e.renderfx & ( RF_DEPTHHACK | RF_NODEPTH | RF_DISTORTION
+			| RF_FORCE_ENT_ALPHA | RF_ALPHA_FADE ) ) );
+#endif
 	// walk each possible model for this entity and try rendering it out
 	for (j=0; j<modelCount; j++)
 	{
@@ -2746,6 +2805,59 @@ void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 			RenderSurfaces(RS);
 		}
 	}
+#ifdef VITA
+	if ( mergeWanted && tr.refdef.numDrawSurfs > firstMergeSurf
+		&& s_g2WorldRecCount[tr.smpFrame] < G2_MERGE_MAX )
+	{
+		qboolean ok = qtrue;
+		for ( int di = firstMergeSurf; di < tr.refdef.numDrawSurfs && ok; di++ ) {
+			drawSurf_t *ds = &tr.refdef.drawSurfs[di];
+			int dEnt, dFog, dDl;
+			shader_t *dSh;
+			if ( !ds->surface || *ds->surface != SF_MDX ) {
+				ok = qfalse;
+				break;
+			}
+			R_DecomposeSort( ds->sort, &dEnt, &dSh, &dFog, &dDl );
+			if ( dSh == tr.shadowShader || dSh == tr.projectionShadowShader
+				|| !G2_ShaderMergeable( dSh ) ) {
+				ok = qfalse;	// shadow volumes and entity-driven stages keep the stock path
+				break;
+			}
+#ifdef _G2_GORE
+			if ( ((CRenderableSurface *)ds->surface)->alternateTex ) {
+				ok = qfalse;	// gore verts are baked in model space
+				break;
+			}
+#endif
+		}
+		if ( ok ) {
+			g2WorldRec_t *rec = &s_g2WorldRecs[tr.smpFrame][ s_g2WorldRecCount[tr.smpFrame]++ ];
+			for ( int r = 0; r < 3; r++ ) {
+				rec->matrix.matrix[r][0] = ent->e.axis[0][r];
+				rec->matrix.matrix[r][1] = ent->e.axis[1][r];
+				rec->matrix.matrix[r][2] = ent->e.axis[2][r];
+				rec->matrix.matrix[r][3] = ent->e.origin[r];
+			}
+			VectorCopy( ent->ambientLight, rec->ambientLight );
+			VectorCopy( ent->directedLight, rec->directedLight );
+			rec->ambientLightInt = ent->ambientLightInt;
+			// lightDir was rotated into model space; take it back out for world normals
+			VectorScale( ent->e.axis[0], ent->lightDir[0], rec->lightDir );
+			VectorMA( rec->lightDir, ent->lightDir[1], ent->e.axis[1], rec->lightDir );
+			VectorMA( rec->lightDir, ent->lightDir[2], ent->e.axis[2], rec->lightDir );
+			VectorNormalize( rec->lightDir );
+
+			const unsigned entMask = (unsigned)REFENTITYNUM_MASK << QSORT_REFENTITYNUM_SHIFT;
+			const unsigned worldBits = (unsigned)REFENTITYNUM_WORLD << QSORT_REFENTITYNUM_SHIFT;
+			for ( int di = firstMergeSurf; di < tr.refdef.numDrawSurfs; di++ ) {
+				drawSurf_t *ds = &tr.refdef.drawSurfs[di];
+				((CRenderableSurface *)ds->surface)->worldRec = rec;
+				ds->sort = ( ds->sort & ~entMask ) | worldBits;
+			}
+		}
+	}
+#endif
 	HackadelicOnClient=false;
 }
 
@@ -2849,6 +2961,7 @@ void R_ResetGhoulSkinArena( void )
 {
 	if ( r_renderThread && r_renderThread->integer ) {
 		s_g2SnapUsed[activeBackEnd] = 0;
+		s_g2WorldRecCount[activeBackEnd] = 0;
 	}
 }
 
@@ -2883,6 +2996,8 @@ static void G2_RunCharJob( g2SkinGroup_t *g )
 	if ( !g->snap ) return;	// snapshot arena overflow: surfaces drop this frame
 	CBoneCache *cache = g->cache;
 	const int numBones = cache->mNumBones;
+	// merged char: fold the entity transform in, so the skin loop emits world space
+	const g2WorldRec_t *rec = g->n ? g->surfs[0]->worldRec : NULL;
 	uint32_t seen[G2MT_MAX_BONES / 32] = { 0 };
 
 	for ( int s = 0; s < g->n; s++ )
@@ -2897,8 +3012,16 @@ static void G2_RunCharJob( g2SkinGroup_t *g )
 			seen[b >> 5] |= 1u << ( b & 31 );
 #ifdef JK2_MODE
 			g->snap[b] = cache->Eval( b );
+			if ( rec ) {
+				const mdxaBone_t t = g->snap[b];
+				Multiply_3x4Matrix( &g->snap[b], (mdxaBone_t *)&rec->matrix, (mdxaBone_t *)&t );
+			}
 #else
 			g->snap[b] = cache->EvalRender( b );
+			if ( rec ) {
+				const mdxaBone_t t = g->snap[b];
+				Multiply_3x4Matrix( &g->snap[b], (mdxaBone_t *)&rec->matrix, (mdxaBone_t *)&t );
+			}
 #endif
 		}
 	}
@@ -3394,6 +3517,29 @@ void RB_SurfaceGhoul( CRenderableSurface *surf )
 	// NOTE: This is required because a ghoul model might need to be rendered twice a frame (don't cringe,
 	// it's not THAT bad), so we only delete it when doing the glow pass. Warning though, this assumes that
 	// the glow is rendered _second_!!! If that changes, change this!
+#endif
+#ifdef VITA
+	if ( surf->worldRec ) {
+		// verts and normals are world space; light them with the character's own values
+		const g2WorldRec_t *rec = surf->worldRec;
+		const int firstV = tess.numVertexes;
+		for ( j = 0; j < numVerts; j++ ) {
+			const float in = DotProduct( tess.normal[firstV + j], rec->lightDir );
+			byte *c = tess.vertexColors[firstV + j];
+			if ( in <= 0 ) {
+				*(int *)c = rec->ambientLightInt;
+				continue;
+			}
+			int cv = Q_ftol( rec->ambientLight[0] + in * rec->directedLight[0] );
+			c[0] = (byte)( cv > 255 ? 255 : cv );
+			cv = Q_ftol( rec->ambientLight[1] + in * rec->directedLight[1] );
+			c[1] = (byte)( cv > 255 ? 255 : cv );
+			cv = Q_ftol( rec->ambientLight[2] + in * rec->directedLight[2] );
+			c[2] = (byte)( cv > 255 ? 255 : cv );
+			c[3] = 255;
+		}
+		tess.g2WorldBaked = qtrue;
+	}
 #endif
 	tess.numVertexes += surface->numVerts;
 

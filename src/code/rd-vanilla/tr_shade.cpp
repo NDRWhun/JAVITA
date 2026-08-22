@@ -475,6 +475,9 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 	tess.currentStageIteratorFunc = shader->sky ? RB_StageIteratorSky : RB_StageIteratorGeneric;
 
 	tess.fading = false;
+#ifdef VITA
+	tess.g2WorldBaked = qfalse;
+#endif
 
 	tess.registration++;
 }
@@ -1508,6 +1511,13 @@ static void ComputeColors( shaderStage_t *pStage, alphaGen_t forceAlphaGen, colo
 			memset( tess.svars.colors, tr.identityLightByte, tess.numVertexes * 4 );
 			break;
 		case CGEN_LIGHTING_DIFFUSE:
+#ifdef VITA
+			if ( tess.g2WorldBaked ) {
+				// a merged batch has no entity; the colors were lit at skin time
+				Com_Memcpy( tess.svars.colors, tess.vertexColors, tess.numVertexes * 4 );
+				break;
+			}
+#endif
 			RB_CalcDiffuseColor( ( unsigned char * ) tess.svars.colors );
 			break;
 		case CGEN_LIGHTING_DIFFUSE_ENTITY:

@@ -57,6 +57,7 @@ cvar_t	*r_dynamiclight;
 
 cvar_t	*r_lodbias;
 cvar_t	*r_lodscale;
+cvar_t	*r_g2WorldMerge;
 cvar_t	*r_distanceCull;
 cvar_t	*r_forceFog;
 cvar_t	*r_forceFogColor;
@@ -1785,6 +1786,7 @@ void R_Register( void )
 	r_gxmSync = ri.Cvar_Get( "r_gxmSync", "0", CVAR_ARCHIVE );	// frames per stat line, 0 = off
 	r_worldVBO = ri.Cvar_Get( "r_worldVBO", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_staticBatch = ri.Cvar_Get( "r_staticBatch", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	r_g2WorldMerge = ri.Cvar_Get( "r_g2WorldMerge", "1", CVAR_ARCHIVE_ND );
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE );
 #endif
 	ri.Cvar_CheckRange( r_primitives, MIN_PRIMITIVES, MAX_PRIMITIVES, qtrue );

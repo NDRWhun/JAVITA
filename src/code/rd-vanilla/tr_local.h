@@ -1167,6 +1167,7 @@ extern cvar_t	*r_measureOverdraw;		// enables stencil buffer overdraw measuremen
 
 extern cvar_t	*r_lodbias;				// push/pull LOD transitions
 extern cvar_t	*r_lodscale;
+extern cvar_t	*r_g2WorldMerge;		// bake eligible characters to world space so their draws merge
 extern cvar_t	*r_distanceCull;		// render-distance cap, clamps the map's distanceCull (0 = off)
 extern cvar_t	*r_forceFog;			// forced global fog END distance in units (0 = off)
 extern cvar_t	*r_forceFogColor;		// forced fog colour "r g b"
@@ -1510,6 +1511,7 @@ struct shaderCommands_s
 
 	//rww - doing a fade, don't compute shader color/alpha overrides
 	bool		fading;
+	qboolean	g2WorldBaked;	// merged ghoul2 batch: svars take the skin-time colors
 };
 
 #ifdef _MSC_VER
@@ -1656,6 +1658,15 @@ Ghoul2 Insert Start
 */
 class CBoneCache;
 
+// world-space ghoul2 merge: per-entity transform and light, captured on the frontend
+typedef struct g2WorldRec_s {
+	mdxaBone_t	matrix;			// model -> world (scale rides in the bones)
+	vec3_t		ambientLight;
+	vec3_t		directedLight;
+	vec3_t		lightDir;		// world space, normalized
+	int			ambientLightInt;
+} g2WorldRec_t;
+
 class CRenderableSurface
 {
 public:
@@ -1668,6 +1679,7 @@ public:
 	mdxmSurface_t	*surfaceData;	// pointer to surface data loaded into file - only used by client renderer DO NOT USE IN GAME SIDE - if there is a vid restart this will be out of wack on the game
 	const mdxaBone_t *boneMats;		// frontend bone snapshot (render-thread mode); backend skins from this,
 									// never the live CBoneCache. NULL -> surface drops under r_renderThread.
+	const g2WorldRec_t *worldRec;	// world-space merge: baked transform + light (NULL = per-entity path)
 #ifdef _G2_GORE
 	float			*alternateTex;		// alternate texture coordinates.
 	void			*goreChain;
@@ -1684,6 +1696,7 @@ public:
 		boneCache = src.boneCache;
 		surfaceData = src.surfaceData;
 		boneMats = src.boneMats;	// same frame, same cache -> same snapshot
+		worldRec = src.worldRec;
 		alternateTex = src.alternateTex;
 		goreChain = src.goreChain;
 
@@ -1695,7 +1708,8 @@ CRenderableSurface():
 	ident(SF_MDX),
 	boneCache(0),
 	surfaceData(0),
-	boneMats(0)
+	boneMats(0),
+	worldRec(0)
 #ifdef _G2_GORE
 	,
 	alternateTex(0),
@@ -1708,6 +1722,7 @@ CRenderableSurface():
 		boneCache=0;
 		surfaceData=0;
 		boneMats=0;
+		worldRec=0;
 #ifdef _G2_GORE
 		ident = SF_MDX;
 		alternateTex=0;
