@@ -154,6 +154,7 @@ default of `125` sits above that ceiling.
 | `r_picmip` | `1` | Texture detail — higher = lower-res, less VRAM; `1` is the floor *(latched)* |
 | `r_worldVBO` | `1` | Draw static world surfaces from GPU buffers; `0` = per-frame vertex upload *(latched)* |
 | `r_staticBatch` | `1` | Batch a map's static props so copies of one model share a draw; `0` = one draw each *(latched)* |
+| `r_g2WorldMerge` | `1` | Skin characters in world space so same-material draws merge across them; `0` = one batch run per character |
 | `r_mergeLightmaps` | `1` | Pack lightmaps into atlas pages so world surfaces batch; `0` = one texture each *(latched)* |
 | `r_subdivisions` | `4` | Curve tessellation — higher = coarser curves, fewer verts *(latched)* |
 | `r_lodbias` | `0` | Model LOD bias — higher drops to low-detail models sooner |
