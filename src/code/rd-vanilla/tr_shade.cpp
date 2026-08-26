@@ -1879,14 +1879,12 @@ static const float logtestExp2 = (sqrt( -log( 1.0 / 255.0 ) ));
 #endif
 extern bool tr_stencilled; //tr_backend.cpp
 
-#if defined(USE_GXM_NATIVE) && !defined(JK2_MODE)
+#ifdef USE_GXM_NATIVE
 /*
 ===============
 RB_GxmVolumeFog
 
-The global fog rides the fragment programs' uniform rather than a second pass, so
-every path that draws world geometry has to arm it the same way. Returns whether it
-was armed; the caller disarms after its draws.
+Arms the global-fog uniform for a batch that never reaches the tess path.
 ===============
 */
 qboolean RB_GxmVolumeFog( int fogNum, const shader_t *shader )

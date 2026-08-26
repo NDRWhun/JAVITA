@@ -458,9 +458,7 @@ R_WorldVBO_Flush
 Draws whatever the current batch accumulated.
 ===============
 */
-// The fog volume's density at each vertex, drawn over the resident batch the same
-// way RB_FogPass covers a tess batch. The global fog is already carried by the
-// fragment programs' fog uniform, so only bounded volumes project the fog image.
+// A bounded volume's density per vertex, layered over the batch like RB_FogPass.
 static void R_WorldVBO_FogOverlay( void )
 {
 	fog_t	*fog = tr.world->fogs + wvbo_curFog;
@@ -562,6 +560,7 @@ void R_WorldVBO_Flush( shader_t *shader )
 {
 	if ( !wvbo_numIdx || wvbo_curGroup < 0 || wvbo_curGroup >= wvbo_numGroups ) {
 		wvbo_numIdx = 0;
+		wvbo_curFog = 0;
 		wvbo_curGroup = -1;
 		return;
 	}
