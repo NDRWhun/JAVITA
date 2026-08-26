@@ -78,7 +78,7 @@ float4 main(
 #endif
 
 #if FOG
-	c.rgb = lerp( c.rgb, uFogColor.rgb, sqrt( vFog ) );
+	c.rgb = lerp( c.rgb, uFogColor.rgb, saturate( 1.0f - exp2( -7.98f * vFog * vFog ) ) );
 #endif
 
 	return c;
