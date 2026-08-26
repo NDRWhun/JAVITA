@@ -1878,6 +1878,59 @@ static vec4_t	GLFogOverrideColors[GLFOGOVERRIDE_MAX] =
 static const float logtestExp2 = (sqrt( -log( 1.0 / 255.0 ) ));
 #endif
 extern bool tr_stencilled; //tr_backend.cpp
+
+#if defined(USE_GXM_NATIVE) && !defined(JK2_MODE)
+/*
+===============
+RB_GxmVolumeFog
+
+The global fog rides the fragment programs' uniform rather than a second pass, so
+every path that draws world geometry has to arm it the same way. Returns whether it
+was armed; the caller disarms after its draws.
+===============
+*/
+qboolean RB_GxmVolumeFog( int fogNum, const shader_t *shader )
+{
+	if ( !fogNum || !shader || !shader->fogPass || !tr.world || r_drawfog->value != 2 ) {
+		return qfalse;
+	}
+	if ( fogNum != tr.world->globalFog && fogNum != tr.world->numfogs ) {
+		return qfalse;					// a bounded volume is covered by its own fog pass
+	}
+	if ( r_forceFog && r_forceFog->value > 0.0f ) {
+		return qfalse;					// a forced fog owns the uniform for the whole view
+	}
+
+	const fog_t *fog = tr.world->fogs + fogNum;
+	float fStart = 0.0f, fEnd = fog->parms.depthForOpaque;
+
+	if ( tr.rangedFog ) {
+		fStart = fog->parms.depthForOpaque;
+		fEnd = tr.distanceCull;
+		if ( tr.rangedFog < 0.0f ) {
+			fStart = -tr.rangedFog;
+			fEnd = fog->parms.depthForOpaque;
+			if ( fStart >= fEnd ) {
+				fStart = fEnd - 1.0f;
+			}
+		} else if ( ( tr.distanceCull - fStart ) < tr.rangedFog ) {
+			fStart = tr.distanceCull - tr.rangedFog;
+			if ( fStart < 16.0f ) {
+				fStart = 16.0f;
+			}
+		}
+	}
+
+	GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+	return qtrue;
+}
+
+void RB_GxmVolumeFogOff( void )
+{
+	GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+}
+#endif
+
 static void RB_IterateStagesGeneric( shaderCommands_t *input )
 {
 	int stage;

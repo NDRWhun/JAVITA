@@ -572,6 +572,9 @@ void R_WorldVBO_Flush( shader_t *shader )
 	GL_Cull( shader->cullType );
 
 #ifdef USE_GXM_NATIVE
+	// resident geometry misses the tess path, so the global fog uniform is armed here
+	const qboolean fogArmed = RB_GxmVolumeFog( wvbo_curFog, shader );
+
 	// every stage reads the same resident vertices; only bindings and state move
 	for ( int i = 0; i < shader->numUnfoggedPasses; i++ ) {
 		const shaderStage_t *ps = &shader->stages[i];
@@ -600,6 +603,10 @@ void R_WorldVBO_Flush( shader_t *shader )
 	GXM_SetTexUnitCount( 1 );
 	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
 	GL_SelectTexture( 0 );
+
+	if ( fogArmed ) {
+		RB_GxmVolumeFogOff();
+	}
 
 	if ( wvbo_curFog && tr.world && r_drawfog->value && shader->fogPass ) {
 		R_WorldVBO_FogOverlay();

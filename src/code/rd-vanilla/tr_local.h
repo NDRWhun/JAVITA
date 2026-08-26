@@ -1747,6 +1747,8 @@ void		R_BuildWorldVBO( world_t &worldData );
 void		R_WorldVBO_Clear( void );
 void		R_WorldVBO_ContextReset( void );
 qboolean	R_WorldVBO_Surface( const srfSurfaceFace_t *face, const shader_t *shader, int fogNum, int dlighted );
+qboolean	RB_GxmVolumeFog( int fogNum, const shader_t *shader );	// arm the global-fog uniform for a non-tess batch
+void		RB_GxmVolumeFogOff( void );
 void		R_WorldVBO_Flush( shader_t *shader );
 void		R_WorldVBO_Stats( char *out, int outSize );
 // baked static props (tr_staticbatch.cpp)

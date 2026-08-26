@@ -607,13 +607,13 @@ static void RB_BeginDrawingView (void) {
 		&& !portalDrewSky )
 	{
 		float fogClr[3] = { 0.55f, 0.6f, 0.7f };
-		if ( r_forceFogColor && r_forceFogColor->string[0] )
-			sscanf( r_forceFogColor->string, "%f %f %f", &fogClr[0], &fogClr[1], &fogClr[2] );
-		else if ( tr.world && tr.world->globalFog != -1 )
-		{
+		if ( tr.world && tr.world->globalFog != -1 )
+		{	// match the map, or the culled holes read as a differently coloured band
 			const fog_t *fog = &tr.world->fogs[tr.world->globalFog];
 			fogClr[0] = fog->parms.color[0]; fogClr[1] = fog->parms.color[1]; fogClr[2] = fog->parms.color[2];
 		}
+		else if ( r_forceFogColor && r_forceFogColor->string[0] )
+			sscanf( r_forceFogColor->string, "%f %f %f", &fogClr[0], &fogClr[1], &fogClr[2] );
 		qglClearColor( fogClr[0], fogClr[1], fogClr[2], 1.0f );
 		clearBits |= GL_COLOR_BUFFER_BIT;
 	}
