@@ -2731,6 +2731,7 @@ void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 	const int firstMergeSurf = tr.refdef.numDrawSurfs;
 	const qboolean mergeWanted = (qboolean)( r_g2WorldMerge && r_g2WorldMerge->integer
 		&& r_renderThread && r_renderThread->integer
+		&& !( tr.refdef.rdflags & RDF_NOWORLDMODEL )	// menu models have no world to merge into
 		&& !personalModel
 		&& !( ent->e.renderfx & ( RF_DEPTHHACK | RF_NODEPTH | RF_DISTORTION
 			| RF_FORCE_ENT_ALPHA | RF_ALPHA_FADE ) ) );
