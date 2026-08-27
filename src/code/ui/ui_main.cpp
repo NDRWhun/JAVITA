@@ -5674,40 +5674,39 @@ static void UI_EquipWeapon ( const int weaponIndex )
 	}
 }
 
+extern void SCR_TransitionSplash( void );	// cl_scrn.cpp
+
 static void	UI_LoadMissionSelectMenu( const char *cvarName )
 {
 	int holdLevel = (int)trap_Cvar_VariableValue(cvarName);
 
 	// Figure out which tier menu to load
-	// a reparse rebuilds every ghoul2 model and never frees the pool it allocates from
+	const char *menuName = NULL, *tierFile = NULL;
 	if ((holdLevel > 0) && (holdLevel < 5))
 	{
-		if ( !Menus_FindByName( "ingameMissionSelect1" ) )
-		{
-			UI_LoadMenus("ui/tier1.txt",qfalse);
-		}
-
-		Menus_CloseByName("ingameMissionSelect1");
+		menuName = "ingameMissionSelect1";	tierFile = "ui/tier1.txt";
 	}
 	else if ((holdLevel > 6) && (holdLevel < 10))
 	{
-		if ( !Menus_FindByName( "ingameMissionSelect2" ) )
-		{
-			UI_LoadMenus("ui/tier2.txt",qfalse);
-		}
-
-		Menus_CloseByName("ingameMissionSelect2");
+		menuName = "ingameMissionSelect2";	tierFile = "ui/tier2.txt";
 	}
 	else if ((holdLevel > 11) && (holdLevel < 15))
 	{
-		if ( !Menus_FindByName( "ingameMissionSelect3" ) )
-		{
-			UI_LoadMenus("ui/tier3.txt",qfalse);
-		}
-
-		Menus_CloseByName("ingameMissionSelect3");
+		menuName = "ingameMissionSelect3";	tierFile = "ui/tier3.txt";
+	}
+	else
+	{
+		return;
 	}
 
+	// a reparse rebuilds every ghoul2 model and never frees the pool it allocates from
+	if ( !Menus_FindByName( menuName ) )
+	{	// a first visit compresses this tier's planet art, which blocks for seconds
+		SCR_TransitionSplash();
+		UI_LoadMenus( tierFile, qfalse );
+	}
+
+	Menus_CloseByName( menuName );
 }
 
 // Update the player weapons with the chosen weapon

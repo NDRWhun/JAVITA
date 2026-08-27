@@ -537,6 +537,10 @@ Paints the stock load backdrop over a menu that blocks while it registers assets
 ==================
 */
 void SCR_TransitionSplash( void ) {
+	if ( scr_transitionSplash ) {
+		return;					// already standing in for a blocking load
+	}
+
 	// re-registered every call: a map load resets the shader list, and a cached handle
 	// would then index whatever the rebuilt list put in its slot. Outside the frame,
 	// since an upload between Begin/EndFrame parks the render thread.
