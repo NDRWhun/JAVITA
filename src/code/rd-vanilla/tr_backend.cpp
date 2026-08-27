@@ -607,7 +607,8 @@ static void RB_BeginDrawingView (void) {
 		&& !portalDrewSky )
 	{
 		float fogClr[3] = { 0.55f, 0.6f, 0.7f };
-		if ( tr.world && tr.world->globalFog != -1 )
+		const qboolean forcedFog = (qboolean)( r_forceFog && r_forceFog->value > 0.0f );
+		if ( !forcedFog && tr.world && tr.world->globalFog != -1 )
 		{	// match the map, or the culled holes read as a differently coloured band
 			const fog_t *fog = &tr.world->fogs[tr.world->globalFog];
 			fogClr[0] = fog->parms.color[0]; fogClr[1] = fog->parms.color[1]; fogClr[2] = fog->parms.color[2];
