@@ -1333,7 +1333,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	if ( !r_texCacheCompressed || !r_texCacheCompressed->integer ) return NULL;
 #ifdef VITA
 	// Park the render thread before touching GL from the frontend (same rule as
-	// R_CreateImage); an unsynchronized upload here corrupts the vitaGL heap.
+	// R_CreateImage); the zone allocations below are unlocked under ARENA_THRESHOLD.
 	if ( r_renderThread && r_renderThread->integer ) {
 		R_IssuePendingRenderCommands();
 	}
@@ -1507,14 +1507,21 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 	}
 
 #ifdef VITA
+	const int tStart = ( r_showTexLoad && r_showTexLoad->integer ) ? Com_Milliseconds() : 0;
+	int tCache = 0, tRead = 0;
+
 	// DXT cache hit: build straight from the cached mip chain, no decode/encode/picmip. A miss
 	// or mismatch returns NULL and falls through to the normal load below.
 	if ( r_texCacheCompressed && r_texCacheCompressed->integer && allowTC && name[0] != '$' && name[0] != '*' ) {
 		image = R_CreateImageFromDxtCache( name, mipmap, allowPicmip, allowTC, glWrapClampMode );
 		if ( image ) {
+			if ( tStart && Com_Milliseconds() - tStart >= r_showTexLoad->integer ) {
+				ri.Printf( PRINT_ALL, "^3[tex] %s: %dms cached\n", name, Com_Milliseconds() - tStart );
+			}
 			return image;
 		}
 	}
+	tCache = tStart ? Com_Milliseconds() : 0;
 #endif
 
 	//
@@ -1524,9 +1531,21 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 	if ( !pic ) {
         return NULL;
 	}
+#ifdef VITA
+	tRead = tStart ? Com_Milliseconds() : 0;
+#endif
 
 	image = R_CreateImage( ( char * ) name, pic, width, height, GL_RGBA, mipmap, allowPicmip, allowTC, glWrapClampMode );
 	R_Free( pic );
+#ifdef VITA
+	if ( tStart ) {
+		const int tEnd = Com_Milliseconds();
+		if ( tEnd - tStart >= r_showTexLoad->integer ) {
+			ri.Printf( PRINT_ALL, "^3[tex] %s: %dms = miss %d + read %d + encode %d\n",
+				name, tEnd - tStart, tCache - tStart, tRead - tCache, tEnd - tRead );
+		}
+	}
+#endif
 	return image;
 }
 

@@ -1173,6 +1173,7 @@ extern cvar_t	*r_forceFog;			// forced global fog END distance in units (0 = off
 extern cvar_t	*r_forceFogColor;		// forced fog colour "r g b"
 extern cvar_t	*r_texCacheCompressed;	// DXT mip-chain texture cache on ux0 (0 = off)
 extern cvar_t	*r_dxtFast;				// DXT encode quality (1 = fast/STB_DXT_NORMAL, 0 = high)
+extern cvar_t	*r_showTexLoad;			// log image loads at or over N ms (0 = off)
 
 extern cvar_t	*r_primitives;			// "0" = based on compiled vertex array existance
 										// "1" = glDrawElemet tristrips

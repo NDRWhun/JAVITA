@@ -63,6 +63,7 @@ cvar_t	*r_forceFog;
 cvar_t	*r_forceFogColor;
 cvar_t	*r_texCacheCompressed;
 cvar_t	*r_dxtFast;
+cvar_t	*r_showTexLoad;
 
 cvar_t	*r_norefresh;
 cvar_t	*r_drawentities;
@@ -1662,6 +1663,7 @@ void R_Register( void )
 	// latched, read pre-world.
 	r_texCacheCompressed = ri.Cvar_Get( "r_texCacheCompressed", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_dxtFast            = ri.Cvar_Get( "r_dxtFast",            "1", CVAR_ARCHIVE_ND );
+	r_showTexLoad        = ri.Cvar_Get( "r_showTexLoad",        "0", CVAR_TEMP );	// log image loads at or over N ms
 	{
 		const int on = r_texCacheCompressed->integer ? 1 : 0;
 		ri.Cvar_Set( "r_ext_compress_textures", on ? "1" : "0" );
