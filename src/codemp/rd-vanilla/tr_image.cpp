@@ -567,6 +567,9 @@ static void R_Images_DeleteImageContents( image_t *pImage )
 	if (pImage)
 	{
 		qglDeleteTextures( 1, &pImage->texnum );
+#ifdef USE_GXM_NATIVE
+		GXM_TexFree( pImage->texnum );
+#endif
 		Z_Free(pImage);
 	}
 }
@@ -834,6 +837,10 @@ static void Upload32( unsigned *data,
 				hdr.picmip    = (unsigned)( r_picmip ? r_picmip->integer : 0 );
 				hdr.texbits   = (unsigned)( r_texturebits ? r_texturebits->integer : 0 );
 				hdr.totalSize = (unsigned)blobOfs;
+#ifdef USE_GXM_NATIVE
+				GXM_TexUploadDxt( glState.currenttextures[glState.currenttmu], blob, (unsigned)blobOfs,
+					(unsigned)width, (unsigned)height, (unsigned)mipCount, isDxt5 != 0 );
+#endif
 				R_TexCacheStoreDxt( s_uploadDxtKey, &hdr, mipSizes, blob );
 				Z_Free( blob );
 				goto done;
@@ -845,12 +852,21 @@ static void Upload32( unsigned *data,
 		if (!mipmap)
 		{
 			qglTexImage2D( uiTarget, 0, *pformat, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
+#ifdef USE_GXM_NATIVE
+			// GXM has no rectangle target, and that path never bound through GL_Bind
+			if ( !bRectangle )
+				GXM_TexUpload( glState.currenttextures[glState.currenttmu], data, width, height );
+#endif
 			goto done;
 		}
 
 		R_LightScaleTexture (data, width, height, (qboolean)!mipmap );
 
 		qglTexImage2D( uiTarget, 0, *pformat, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
+#ifdef USE_GXM_NATIVE
+		if ( !bRectangle )
+			GXM_TexUpload( glState.currenttextures[glState.currenttmu], data, width, height );
+#endif
 
 		if (mipmap)
 		{
@@ -1204,6 +1220,10 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 
 	qglTexParameterf( uiTarget, GL_TEXTURE_WRAP_S, glWrapClampMode );
 	qglTexParameterf( uiTarget, GL_TEXTURE_WRAP_T, glWrapClampMode );
+#ifdef USE_GXM_NATIVE
+	// GL_REPEAT is 0x2901; anything else here is one of the clamp modes
+	GXM_TexFilter( image->texnum, 1, glWrapClampMode != GL_REPEAT );
+#endif
 
 	qglBindTexture( uiTarget, 0 );	//jfm: i don't know why this is here, but it breaks lightmaps when there's only 1
 	glState.currenttextures[glState.currenttmu] = 0;	//mark it not bound
@@ -1311,13 +1331,23 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 			h >>= 1; if ( h < 1 ) h = 1;
 		}
 	}
+#ifdef USE_GXM_NATIVE
+	// the cached blob is already UBC, so it goes over whole rather than per level
+	const int uploaded = GXM_TexUploadDxt( image->texnum, blob, hdr.totalSize, hdr.width, hdr.height,
+		hdr.mipCount, hdr.format == TEXCACHE_FMT_DXT5 );
+#else
+	const int uploaded = 1;
+#endif
 	Z_Free( blob );
 
-	if ( qglGetError() != GL_NO_ERROR )
+	if ( !uploaded || qglGetError() != GL_NO_ERROR )
 	{
 		// upload rejected the cached blob: drop this image, let the normal load path rebuild it
 		GLuint tn = (GLuint)image->texnum;
 		qglDeleteTextures( 1, &tn );
+#ifdef USE_GXM_NATIVE
+		GXM_TexFree( image->texnum );
+#endif
 		qglBindTexture( GL_TEXTURE_2D, 0 );
 		glState.currenttextures[glState.currenttmu] = 0;
 		Z_Free( image );
@@ -1338,6 +1368,10 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	}
 	qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glWrapClampMode );
 	qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, glWrapClampMode );
+#ifdef USE_GXM_NATIVE
+	// GL_REPEAT is 0x2901; anything else here is one of the clamp modes
+	GXM_TexFilter( image->texnum, 1, glWrapClampMode != GL_REPEAT );
+#endif
 
 	qglBindTexture( GL_TEXTURE_2D, 0 );
 	glState.currenttextures[glState.currenttmu] = 0;
