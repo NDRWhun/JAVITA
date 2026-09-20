@@ -40,6 +40,12 @@ void GXM_SetClearColor( float r, float g, float b, float a );
 void GXM_SetDepthRange( float zNear, float zFar );
 void GXM_SetDepthBias( float factor, float units );
 void GXM_ImmBegin( unsigned int glMode );
+void GXM_SetStencilTest( int enable );
+void GXM_SetStencilFunc( unsigned int func, int ref, unsigned int mask );
+void GXM_SetStencilMask( unsigned int mask );
+void GXM_SetStencilOp( unsigned int sfail, unsigned int dfail, unsigned int dpass );
+void GXM_SetStencilOpSeparate( unsigned int face, unsigned int sfail, unsigned int dfail, unsigned int dpass );
+void GXM_SetColorMask( int r, int g, int b, int a );
 void GXM_ImmTexCoord2f( float s, float t );
 void GXM_ImmColor4f( float r, float g, float b, float a );
 void GXM_ImmColor4ubv( const unsigned char *c );
@@ -148,7 +154,7 @@ void GXM_ImmEnd( void );
 #undef qglColor4usv
 #define qglColor4usv(...) ((void)0)
 #undef qglColorMask
-#define qglColorMask(...) ((void)0)
+#define qglColorMask(r, g, b, a) GXM_SetColorMask((int)(r), (int)(g), (int)(b), (int)(a))
 #undef qglColorMaterial
 #define qglColorMaterial(...) ((void)0)
 #undef qglColorPointer
@@ -192,7 +198,7 @@ void GXM_ImmEnd( void );
 #undef qglDepthRange
 #define qglDepthRange(n, f) GXM_SetDepthRange((float)(n), (float)(f))
 #undef qglDisable
-#define qglDisable(...) ((void)0)
+#define qglDisable(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(0); else if ((cap) == 0x8037 || (cap) == 0x2A02) GXM_SetDepthBias(0.0f, 0.0f); } while (0)	// stencil + polygon offset fill/line
 #undef qglDisableClientState
 #define qglDisableClientState(...) ((void)0)
 #undef qglDrawArrays
@@ -208,7 +214,7 @@ void GXM_ImmEnd( void );
 #undef qglEdgeFlagv
 #define qglEdgeFlagv(...) ((void)0)
 #undef qglEnable
-#define qglEnable(...) ((void)0)
+#define qglEnable(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(1); } while (0)
 #undef qglEnableClientState
 #define qglEnableClientState(...) ((void)0)
 #undef qglEnd
@@ -618,11 +624,13 @@ void GXM_ImmEnd( void );
 #undef qglShadeModel
 #define qglShadeModel(...) ((void)0)
 #undef qglStencilFunc
-#define qglStencilFunc(...) ((void)0)
+#define qglStencilFunc(f, r, m) GXM_SetStencilFunc((unsigned int)(f), (int)(r), (unsigned int)(m))
 #undef qglStencilMask
-#define qglStencilMask(...) ((void)0)
+#define qglStencilMask(m) GXM_SetStencilMask((unsigned int)(m))
 #undef qglStencilOp
-#define qglStencilOp(...) ((void)0)
+#define qglStencilOp(sf, df, dp) GXM_SetStencilOp((unsigned int)(sf), (unsigned int)(df), (unsigned int)(dp))
+#undef qglStencilOpSeparate
+#define qglStencilOpSeparate GXM_SetStencilOpSeparate
 #undef qglTexCoord1d
 #define qglTexCoord1d(...) ((void)0)
 #undef qglTexCoord1dv
@@ -784,7 +792,6 @@ void GXM_ImmEnd( void );
 
 // used as calls AND as bare pointer tests, so these need real symbols
 void GXM_NoOpMultiTexCoord2f( unsigned int, float, float );
-void GXM_NoOpStencilOpSeparate( unsigned int, unsigned int, unsigned int, unsigned int );
 void GXM_NoOpTexUnit( unsigned int );
 #undef qglActiveTextureARB
 #define qglActiveTextureARB GXM_NoOpTexUnit
@@ -792,8 +799,6 @@ void GXM_NoOpTexUnit( unsigned int );
 #define qglClientActiveTextureARB GXM_NoOpTexUnit
 #undef qglMultiTexCoord2fARB
 #define qglMultiTexCoord2fARB GXM_NoOpMultiTexCoord2f
-#undef qglStencilOpSeparate
-#define qglStencilOpSeparate GXM_NoOpStencilOpSeparate
 
 // called directly, never through a qgl macro
 #define glActiveTextureARB(...) ((void)0)
