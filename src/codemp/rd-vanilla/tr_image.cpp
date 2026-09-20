@@ -1411,22 +1411,6 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 			Com_sprintf( tick, sizeof(tick), "img %d", s_imgCount );
 			Sys_BootMark( tick );
 		}
-
-		// load stall before anything has reached the screen (boot bake): show the
-		// progress bar. Once any real frame presents, cgame's loading UI owns loads.
-		static int s_stallCount = 0;
-		if ( tr.registered && tr.whiteImage && !tr.vitaFramePresented && R_MsSinceLastPresent() > 700 ) {
-			if ( !( s_stallCount++ & 7 ) ) {
-				progressCommand_t *cmd = (progressCommand_t *)R_GetCommandBuffer( sizeof( *cmd ) );
-				if ( cmd ) {
-					cmd->commandId = RC_PROGRESS;
-					cmd->count = s_stallCount;
-					R_IssuePendingRenderCommands();
-				}
-			}
-		} else {
-			s_stallCount = 0;
-		}
 	}
 	// DXT cache hit: build straight from the cached mip chain, no decode/encode/picmip
 	if ( r_texCacheCompressed && r_texCacheCompressed->integer && allowTC && name[0] != '$' && name[0] != '*' ) {

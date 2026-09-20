@@ -134,7 +134,6 @@ static int renderThread( SceSize argc, void *argv ) {
 			qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 			qglClear( GL_COLOR_BUFFER_BIT );
 			ri.WIN_Present( &window );
-			RB_NotePresent();
 			sceGxmTransferFinish();
 			qglFinish();
 			Sys_BootMark( "rt: ctx done" );

@@ -2175,10 +2175,6 @@ const void	*RB_SwapBuffers( const void *data ) {
     GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
     ri.WIN_Present(&window);
-#ifdef VITA
-	RB_NotePresent();
-	tr.vitaFramePresented = qtrue;
-#endif
 
 	backEnd.projection2D = qfalse;
 
@@ -2252,54 +2248,6 @@ static const void *RB_Cinematic( const void *data ) {
 }
 
 extern window_t window;	// tr_init.cpp
-static int s_lastPresentMs = 0;
-
-void RB_NotePresent( void ) {
-	s_lastPresentMs = ri.Milliseconds();
-}
-
-int R_MsSinceLastPresent( void ) {
-	return ri.Milliseconds() - s_lastPresentMs;
-}
-
-// load-stall progress: first-run DXT bakes run for minutes with no frames;
-// present a bar so the black/frozen screen reads as work, not a hang
-static const void *RB_Progress( const void *data ) {
-	const progressCommand_t *cmd = (const progressCommand_t *)data;
-
-	qglClearColor( 0.04f, 0.04f, 0.07f, 1.0f );
-	qglClear( GL_COLOR_BUFFER_BIT );
-
-	RB_SetGL2D();
-	GL_Bind( tr.whiteImage );
-	GL_State( GLS_DEPTHTEST_DISABLE );
-
-	// 640x480 virtual space (RB_SetGL2D ortho); asymptotic fill for the unknown total
-	const float bw = 320.0f, bh = 8.0f;
-	const float bx = ( 640.0f - bw ) * 0.5f, by = 430.0f;
-	const float f  = cmd->count / ( cmd->count + 96.0f );
-
-	qglColor4f( 0.22f, 0.22f, 0.26f, 1.0f );
-	qglBegin( GL_QUADS );
-		qglVertex2f( bx - 2, by - 2 );
-		qglVertex2f( bx + bw + 2, by - 2 );
-		qglVertex2f( bx + bw + 2, by + bh + 2 );
-		qglVertex2f( bx - 2, by + bh + 2 );
-	qglEnd();
-
-	qglColor4f( 0.35f, 0.6f, 1.0f, 1.0f );
-	qglBegin( GL_QUADS );
-		qglVertex2f( bx, by );
-		qglVertex2f( bx + bw * f, by );
-		qglVertex2f( bx + bw * f, by + bh );
-		qglVertex2f( bx, by + bh );
-	qglEnd();
-
-	// present WITHOUT RB_NotePresent: only real frames end a stall
-	ri.WIN_Present( &window );
-
-	return (const void *)(cmd + 1);
-}
 
 // glReadPixels runs here so the GXM-owning thread does the readback
 extern byte *RB_ReadPixels( int x, int y, int width, int height, size_t *offset, int *padlen );
@@ -2389,9 +2337,6 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_SCREENSHOT_MT:
 			data = RB_ScreenshotMT( data );
-			break;
-		case RC_PROGRESS:
-			data = RB_Progress( data );
 			break;
 #endif
 		case RC_END_OF_LIST:
