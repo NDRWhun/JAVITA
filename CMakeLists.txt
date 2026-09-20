@@ -170,7 +170,18 @@ target_link_libraries(${PROJECT_NAME}.elf
 #----------------------------------------------------------------------------
 # Package: ELF -> SELF -> VPK
 #----------------------------------------------------------------------------
-vita_create_self(${PROJECT_NAME}.self ${PROJECT_NAME}.elf UNSAFE)
+# vita-elf-create walks the whole input and corrupts its heap near this ELF's size; the copy keeps the basename so the module name is unchanged
+set(PACKAGE_ELF ${CMAKE_BINARY_DIR}/package/${PROJECT_NAME}.elf)
+add_custom_command(OUTPUT ${PACKAGE_ELF}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/package
+  COMMAND ${CMAKE_OBJCOPY} --strip-debug $<TARGET_FILE:${PROJECT_NAME}.elf> ${PACKAGE_ELF}
+  DEPENDS ${PROJECT_NAME}.elf
+  COMMENT "Stripping debug info for packaging"
+  VERBATIM)
+add_custom_target(${PROJECT_NAME}-package-elf ALL DEPENDS ${PACKAGE_ELF})
+
+vita_create_self(${PROJECT_NAME}.self ${PACKAGE_ELF} UNSAFE)
+add_dependencies(${PROJECT_NAME}.elf-velf ${PROJECT_NAME}-package-elf)
 
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
 vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
