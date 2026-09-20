@@ -38,6 +38,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #define _STENCIL_REVERSE
 
+#ifdef USE_GXM_NATIVE
+#define SHADOW_BATCH_VERTS	15000	// below the backend's immediate vertex cap
+#endif
+
 typedef struct edgeDef_s {
 	int		i2;
 	int		facing;
@@ -87,6 +91,12 @@ void R_RenderShadowEdges( void ) {
 	c_rejected = 0;
 #endif
 
+#ifdef USE_GXM_NATIVE
+	// closed and reopened before the immediate buffer fills, or it would drop vertices
+	int batchVerts = 0;
+	qglBegin( GL_TRIANGLES );
+#endif
+
 	for ( i = 0 ; i < tess.numVertexes ; i++ ) {
 		c = numEdgeDefs[ i ];
 		for ( j = 0 ; j < c ; j++ ) {
@@ -99,12 +109,27 @@ void R_RenderShadowEdges( void ) {
 			//we are going to render all edges even though it is a tiny bit slower. -rww
 #if 1
 			i2 = edgeDefs[ i ][ j ].i2;
+#ifdef USE_GXM_NATIVE
+			// the strip split into triangles so every edge shares one batch instead of a draw each
+			qglVertex3fv( tess.xyz[ i ] );
+			qglVertex3fv( shadowXyz[ i ] );
+			qglVertex3fv( tess.xyz[ i2 ] );
+			qglVertex3fv( shadowXyz[ i ] );
+			qglVertex3fv( shadowXyz[ i2 ] );
+			qglVertex3fv( tess.xyz[ i2 ] );
+			if ( ( batchVerts += 6 ) >= SHADOW_BATCH_VERTS ) {
+				qglEnd();
+				qglBegin( GL_TRIANGLES );
+				batchVerts = 0;
+			}
+#else
 			qglBegin( GL_TRIANGLE_STRIP );
 				qglVertex3fv( tess.xyz[ i ] );
 				qglVertex3fv( shadowXyz[ i ] );
 				qglVertex3fv( tess.xyz[ i2 ] );
 				qglVertex3fv( shadowXyz[ i2 ] );
 			qglEnd();
+#endif
 #else
 			hit[0] = 0;
 			hit[1] = 0;
@@ -151,6 +176,20 @@ void R_RenderShadowEdges( void ) {
 		o2 = tess.indexes[ i*3 + 1 ];
 		o3 = tess.indexes[ i*3 + 2 ];
 
+#ifdef USE_GXM_NATIVE
+		// both caps stay in the open batch rather than taking a draw each
+		qglVertex3fv(tess.xyz[o1]);
+		qglVertex3fv(tess.xyz[o2]);
+		qglVertex3fv(tess.xyz[o3]);
+		qglVertex3fv(shadowXyz[o3]);
+		qglVertex3fv(shadowXyz[o2]);
+		qglVertex3fv(shadowXyz[o1]);
+		if ( ( batchVerts += 6 ) >= SHADOW_BATCH_VERTS ) {
+			qglEnd();
+			qglBegin( GL_TRIANGLES );
+			batchVerts = 0;
+		}
+#else
 		qglBegin(GL_TRIANGLES);
 			qglVertex3fv(tess.xyz[o1]);
 			qglVertex3fv(tess.xyz[o2]);
@@ -161,7 +200,12 @@ void R_RenderShadowEdges( void ) {
 			qglVertex3fv(shadowXyz[o2]);
 			qglVertex3fv(shadowXyz[o1]);
 		qglEnd();
+#endif
 	}
+#endif
+
+#ifdef USE_GXM_NATIVE
+	qglEnd();
 #endif
 }
 
@@ -340,6 +384,11 @@ void RB_DoShadowTessEnd( vec3_t lightPos )
 
 	qglEnable( GL_STENCIL_TEST );
 	qglStencilFunc( GL_ALWAYS, 1, 255 );
+#ifdef USE_GXM_NATIVE
+	GXM_SetColorMask( 0, 0, 0, 0 );
+	GXM_SetStencilTest( 1 );
+	GXM_SetStencilFunc( GL_ALWAYS, 1, 255 );
+#endif
 #else
 	qglColor3f( 1.0f, 0.0f, 0.0f );
 	qglPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
@@ -355,19 +404,32 @@ void RB_DoShadowTessEnd( vec3_t lightPos )
 		GL_Cull(CT_TWO_SIDED);
 		qglStencilOpSeparate(GL_FRONT, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
 		qglStencilOpSeparate(GL_BACK, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
+#ifdef USE_GXM_NATIVE
+		GXM_SetStencilOpSeparate(GL_FRONT, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
+		GXM_SetStencilOpSeparate(GL_BACK, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
+#endif
 
 		R_RenderShadowEdges();
 		qglDisable(GL_STENCIL_TEST);
+#ifdef USE_GXM_NATIVE
+		GXM_SetStencilTest( 0 );
+#endif
 	}
 	else
 	{
 		GL_Cull(CT_FRONT_SIDED);
 		qglStencilOp(GL_KEEP, GL_INCR, GL_KEEP);
+#ifdef USE_GXM_NATIVE
+		GXM_SetStencilOp(GL_KEEP, GL_INCR, GL_KEEP);
+#endif
 
 		R_RenderShadowEdges();
 
 		GL_Cull(CT_BACK_SIDED);
 		qglStencilOp(GL_KEEP, GL_DECR, GL_KEEP);
+#ifdef USE_GXM_NATIVE
+		GXM_SetStencilOp(GL_KEEP, GL_DECR, GL_KEEP);
+#endif
 
 		R_RenderShadowEdges();
 	}
@@ -400,6 +462,9 @@ void RB_DoShadowTessEnd( vec3_t lightPos )
 
 	// reenable writing to the color buffer
 	qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+#ifdef USE_GXM_NATIVE
+	GXM_SetColorMask( 1, 1, 1, 1 );
+#endif
 
 #ifdef _DEBUG_STENCIL_SHADOWS
 	qglPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -433,6 +498,11 @@ void RB_ShadowFinish( void ) {
 	qglStencilFunc( GL_NOTEQUAL, 0, 255 );
 
 	qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+#ifdef USE_GXM_NATIVE
+	GXM_SetStencilTest( 1 );
+	GXM_SetStencilFunc( GL_NOTEQUAL, 0, 255 );
+	GXM_SetStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+#endif
 
 	bool planeZeroBack = false;
 	if (qglIsEnabled(GL_CLIP_PLANE0))
@@ -467,6 +537,9 @@ void RB_ShadowFinish( void ) {
 
 	qglColor4f(1,1,1,1);
 	qglDisable( GL_STENCIL_TEST );
+#ifdef USE_GXM_NATIVE
+	GXM_SetStencilTest( 0 );
+#endif
 	if (planeZeroBack)
 	{
 		qglEnable (GL_CLIP_PLANE0);
@@ -610,6 +683,11 @@ void RB_DistortionFill(void)
 	qglEnable(GL_STENCIL_TEST);
 	qglStencilFunc(GL_NOTEQUAL, 0, 0xFFFFFFFF);
 	qglStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+#ifdef USE_GXM_NATIVE
+	GXM_SetStencilTest( 1 );
+	GXM_SetStencilFunc( GL_NOTEQUAL, 0, 0xFFFFFFFF );
+	GXM_SetStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+#endif
 
 	qglDisable (GL_CLIP_PLANE0);
 	GL_Cull( CT_TWO_SIDED );
@@ -719,5 +797,8 @@ void RB_DistortionFill(void)
 	qglPopMatrix();
 
 	qglDisable( GL_STENCIL_TEST );
+#ifdef USE_GXM_NATIVE
+	GXM_SetStencilTest( 0 );
+#endif
 }
 
