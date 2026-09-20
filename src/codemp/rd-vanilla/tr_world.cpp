@@ -1153,6 +1153,9 @@ const void *R_DrawWireframeAutomap(const void *data)
 
 	//disable 2d texturing
 	qglDisable( GL_TEXTURE_2D );
+#ifdef USE_GXM_NATIVE
+	GXM_SetTexUnitCount( 0 );	// the whole automap pass is flat-shaded
+#endif
 
 	//now draw the backdrop
 #if 0 //this does no good sadly, because of the issue of having to clear with a second scene
@@ -1184,6 +1187,13 @@ const void *R_DrawWireframeAutomap(const void *data)
 	//draw a black backdrop
 	qglPushMatrix();
 	qglLoadIdentity(); //get the ident matrix
+#ifdef USE_GXM_NATIVE
+	{
+		// the backdrop is in eye space; GXM has no matrix stack, so it is set and put back
+		static const float ident[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+		GXM_SetModelView( ident );
+	}
+#endif
 
 	qglBegin( GL_QUADS );
 	qglVertex3f( -QUADINFINITY, QUADINFINITY, -(backEnd.viewParms.zFar-1) );
@@ -1194,6 +1204,9 @@ const void *R_DrawWireframeAutomap(const void *data)
 
 	//pop back the viewmatrix
 	qglPopMatrix();
+#ifdef USE_GXM_NATIVE
+	GXM_SetModelView( backEnd.viewParms.world.modelMatrix );	// the map surfaces below are world space
+#endif
 
 
 	//set the mode to line draw
@@ -1345,6 +1358,9 @@ const void *R_DrawWireframeAutomap(const void *data)
 
 	//reenable 2d texturing
 	qglEnable( GL_TEXTURE_2D );
+#ifdef USE_GXM_NATIVE
+	GXM_SetTexUnitCount( 1 );
+#endif
 
 	//white color/full alpha
 	qglColor4f(1.0f, 1.0f, 1.0f, 1.0f);
