@@ -123,12 +123,22 @@ add_isolated_module(jampgame game  _GAME    ${JAMP_GAME_SOURCES})
 add_isolated_module(cgame    cgame _CGAME   ${JAMP_CGAME_SOURCES})
 add_isolated_module(ui       ui    UI_BUILD ${JAMP_UI_SOURCES})
 
+# Native GXM renderer backend, plus the bridge that rd-vanilla issues its draws through.
+set(GXM_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_device.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_texture.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-vanilla/tr_gxm_bridge.cpp
+)
+
 #----------------------------------------------------------------------------
 # Engine ELF (renderer statically in) + the three module objects.
 #----------------------------------------------------------------------------
 add_executable(${PROJECT_NAME}.elf
   ${JAMP_ENGINE_SOURCES}
   ${JAMP_PLATFORM_SOURCES}
+  ${GXM_SOURCES}
   ${jampgame_MODULE_OBJECT}
   ${cgame_MODULE_OBJECT}
   ${ui_MODULE_OBJECT}
