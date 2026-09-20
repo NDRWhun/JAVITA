@@ -132,7 +132,7 @@ extern qboolean ItemParse_model_g2anim_go( itemDef_t *item, const char *animName
 #define MEM_POOL_SIZE  (4 * 1024 * 1024)
 #endif
 
-static char memoryPool[MEM_POOL_SIZE];
+static char *memoryPool;	// Vita: heap-allocated (kept out of the ELF's BSS)
 static int allocPoint;
 static qboolean outOfMemory;
 
@@ -155,6 +155,11 @@ UI_Alloc
 */
 void *UI_Alloc( int size ) {
 	char	*p;
+
+	if ( !memoryPool ) {
+		memoryPool = (char *)malloc( MEM_POOL_SIZE );
+		if ( !memoryPool ) { outOfMemory = qtrue; return NULL; }
+	}
 
 	if ( allocPoint + size > MEM_POOL_SIZE ) {
 		outOfMemory = qtrue;
@@ -213,7 +218,7 @@ typedef struct stringDef_s {
 } stringDef_t;
 
 static int strPoolIndex = 0;
-static char strPool[STRING_POOL_SIZE];
+static char *strPool;	// Vita: heap-allocated (kept out of the ELF's BSS)
 
 static int strHandleCount = 0;
 static stringDef_t *strHandle[HASH_TABLE_SIZE];
@@ -231,6 +236,11 @@ const char *String_Alloc(const char *p) {
 
 	if (*p == 0) {
 		return staticNULL;
+	}
+
+	if ( !strPool ) {
+		strPool = (char *)malloc( STRING_POOL_SIZE );
+		if ( !strPool ) return NULL;
 	}
 
 	hash = hashForString(p);

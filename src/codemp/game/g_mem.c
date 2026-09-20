@@ -44,7 +44,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #define POOLSIZE	(4 * 1024 * 1024) // (256*1024)
 
-static char		memoryPool[POOLSIZE];
+static char		*memoryPool;	// Vita: heap-allocated (kept out of the ELF's BSS)
 static int		allocPoint;
 
 void *G_Alloc( int size ) {
@@ -53,6 +53,14 @@ void *G_Alloc( int size ) {
 	if ( size <= 0 ) {
 		trap->Error( ERR_DROP, "G_Alloc: zero-size allocation\n", size );
 		return NULL;
+	}
+
+	if ( !memoryPool ) {
+		memoryPool = (char *)malloc( POOLSIZE );
+		if ( !memoryPool ) {
+			trap->Error( ERR_DROP, "G_Alloc: pool malloc failed\n" );
+			return NULL;
+		}
 	}
 
 	if ( g_debugAlloc.integer ) {

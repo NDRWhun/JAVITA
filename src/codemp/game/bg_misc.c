@@ -3106,12 +3106,21 @@ int BG_ModelCache(const char *modelName, const char *skinName)
 //with casted datatypes, which is why it is so large.
 
 
-static char		bg_pool[MAX_POOL_SIZE];
+static char		*bg_pool;	// Vita: heap-allocated (kept out of the ELF's BSS)
 static int		bg_poolSize = 0;
 static int		bg_poolTail = MAX_POOL_SIZE;
 
+static void BG_EnsurePool( void ) {
+	if ( !bg_pool ) {
+		bg_pool = (char *)malloc( MAX_POOL_SIZE );
+		if ( !bg_pool )
+			Com_Error( ERR_DROP, "BG_Alloc: pool malloc failed" );
+	}
+}
+
 void *BG_Alloc ( int size )
 {
+	BG_EnsurePool();
 	bg_poolSize = ((bg_poolSize + 0x00000003) & 0xfffffffc);
 
 	if (bg_poolSize + size > bg_poolTail)
@@ -3127,6 +3136,7 @@ void *BG_Alloc ( int size )
 
 void *BG_AllocUnaligned ( int size )
 {
+	BG_EnsurePool();
 	if (bg_poolSize + size > bg_poolTail)
 	{
 		Com_Error( ERR_DROP, "BG_AllocUnaligned: buffer exceeded tail (%d > %d)", bg_poolSize + size, bg_poolTail);
@@ -3140,6 +3150,7 @@ void *BG_AllocUnaligned ( int size )
 
 void *BG_TempAlloc( int size )
 {
+	BG_EnsurePool();
 	size = ((size + 0x00000003) & 0xfffffffc);
 
 	if (bg_poolTail - size < bg_poolSize)
