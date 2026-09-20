@@ -40,12 +40,6 @@ void GXM_SetClearColor( float r, float g, float b, float a );
 void GXM_SetDepthRange( float zNear, float zFar );
 void GXM_SetDepthBias( float factor, float units );
 void GXM_ImmBegin( unsigned int glMode );
-void GXM_SetStencilTest( int enable );
-void GXM_SetStencilFunc( unsigned int func, int ref, unsigned int mask );
-void GXM_SetStencilMask( unsigned int mask );
-void GXM_SetStencilOp( unsigned int sfail, unsigned int dfail, unsigned int dpass );
-void GXM_SetStencilOpSeparate( unsigned int face, unsigned int sfail, unsigned int dfail, unsigned int dpass );
-void GXM_SetColorMask( int r, int g, int b, int a );
 void GXM_ImmTexCoord2f( float s, float t );
 void GXM_ImmColor4f( float r, float g, float b, float a );
 void GXM_ImmColor4ubv( const unsigned char *c );
@@ -154,7 +148,7 @@ void GXM_ImmEnd( void );
 #undef qglColor4usv
 #define qglColor4usv(...) ((void)0)
 #undef qglColorMask
-#define qglColorMask(r, g, b, a) GXM_SetColorMask((int)(r), (int)(g), (int)(b), (int)(a))
+#define qglColorMask(...) ((void)0)
 #undef qglColorMaterial
 #define qglColorMaterial(...) ((void)0)
 #undef qglColorPointer
@@ -198,7 +192,7 @@ void GXM_ImmEnd( void );
 #undef qglDepthRange
 #define qglDepthRange(n, f) GXM_SetDepthRange((float)(n), (float)(f))
 #undef qglDisable
-#define qglDisable(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(0); else if ((cap) == 0x8037 || (cap) == 0x2A02) GXM_SetDepthBias(0.0f, 0.0f); } while (0)	// stencil + polygon offset fill/line
+#define qglDisable(...) ((void)0)
 #undef qglDisableClientState
 #define qglDisableClientState(...) ((void)0)
 #undef qglDrawArrays
@@ -207,8 +201,6 @@ void GXM_ImmEnd( void );
 #define qglDrawElements(...) ((void)0)
 #undef qglDrawPixels
 #define qglDrawPixels(...) ((void)0)
-#undef qglDrawRangeElements
-#define qglDrawRangeElements(...) ((void)0)
 #undef qglEdgeFlag
 #define qglEdgeFlag(...) ((void)0)
 #undef qglEdgeFlagPointer
@@ -216,7 +208,7 @@ void GXM_ImmEnd( void );
 #undef qglEdgeFlagv
 #define qglEdgeFlagv(...) ((void)0)
 #undef qglEnable
-#define qglEnable(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(1); } while (0)
+#define qglEnable(...) ((void)0)
 #undef qglEnableClientState
 #define qglEnableClientState(...) ((void)0)
 #undef qglEnd
@@ -626,11 +618,11 @@ void GXM_ImmEnd( void );
 #undef qglShadeModel
 #define qglShadeModel(...) ((void)0)
 #undef qglStencilFunc
-#define qglStencilFunc(f, r, m) GXM_SetStencilFunc((unsigned int)(f), (int)(r), (unsigned int)(m))
+#define qglStencilFunc(...) ((void)0)
 #undef qglStencilMask
-#define qglStencilMask(m) GXM_SetStencilMask((unsigned int)(m))
+#define qglStencilMask(...) ((void)0)
 #undef qglStencilOp
-#define qglStencilOp(sf, df, dp) GXM_SetStencilOp((unsigned int)(sf), (unsigned int)(df), (unsigned int)(dp))
+#define qglStencilOp(...) ((void)0)
 #undef qglTexCoord1d
 #define qglTexCoord1d(...) ((void)0)
 #undef qglTexCoord1dv
@@ -801,7 +793,7 @@ void GXM_NoOpTexUnit( unsigned int );
 #undef qglMultiTexCoord2fARB
 #define qglMultiTexCoord2fARB GXM_NoOpMultiTexCoord2f
 #undef qglStencilOpSeparate
-#define qglStencilOpSeparate GXM_SetStencilOpSeparate
+#define qglStencilOpSeparate GXM_NoOpStencilOpSeparate
 
 // called directly, never through a qgl macro
 #define glActiveTextureARB(...) ((void)0)
@@ -822,7 +814,6 @@ void GXM_NoOpTexUnit( unsigned int );
 #define glGenTextures(...) ((void)0)
 #define glGetError(...) (0)
 #define glRenderbufferStorage(...) ((void)0)
-#define glStencilOpSeparate(...) ((void)0)
 #define glTexImage2D(...) ((void)0)
 #define glTexParameteri(...) ((void)0)
 

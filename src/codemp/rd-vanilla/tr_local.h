@@ -28,6 +28,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "rd-common/tr_common.h"
 #include "ghoul2/ghoul2_shared.h" //rwwRMG - added
 #include "qgl.h"
+#ifdef USE_GXM_NATIVE
+#include "../rd-gxm/gxm_backend.h"
+#endif
 
 #ifdef VITA
 #include <psp2/kernel/threadmgr.h>
@@ -55,8 +58,13 @@ static inline unsigned int vita_get_tls_reg( void ) {
 #define tessPtr ( (shaderCommands_t *)( *(uintptr_t *)get_tls_addr() ) )
 #endif
 
+#ifdef USE_GXM_NATIVE
+#define GL_INDEX_TYPE		GL_UNSIGNED_SHORT
+typedef unsigned short glIndex_t;	// batch indices are < SHADER_MAX_VERTEXES; the backend draws U16
+#else
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
 typedef unsigned int glIndex_t;
+#endif
 
 #define LL(x) x=LittleLong(x)
 

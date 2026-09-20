@@ -24,7 +24,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #ifdef VITA
+#ifdef USE_GXM_NATIVE
+#include "gl_vita_types.h"
+#else
 #include <vitaGL.h>
+#endif
 #else
 #if defined( __LINT__ )
 #	include <GL/gl.h>
@@ -501,4 +505,10 @@ extern PFNGLISPROGRAMARBPROC qglIsProgramARB;
 
 extern PFNGLLOCKARRAYSEXTPROC qglLockArraysEXT;
 extern PFNGLUNLOCKARRAYSEXTPROC qglUnlockArraysEXT;
+#endif
+
+// Native GXM build: override every entry point above. This must be last.
+#ifdef USE_GXM_NATIVE
+#include "../rd-gxm/qgl_gxm.h"
+#define QGL_NATIVE_HOLES
 #endif

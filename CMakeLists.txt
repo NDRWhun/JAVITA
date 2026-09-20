@@ -144,6 +144,12 @@ add_executable(${PROJECT_NAME}.elf
   ${ui_MODULE_OBJECT}
 )
 
+# while the port runs, both renderers stay buildable; ON drops vitaGL entirely
+option(GXM_NATIVE "Render through the native sceGxm backend instead of vitaGL" OFF)
+if(GXM_NATIVE)
+  target_compile_definitions(${PROJECT_NAME}.elf PRIVATE USE_GXM_NATIVE)
+endif()
+
 target_link_libraries(${PROJECT_NAME}.elf
   SDL2
   vitaGL

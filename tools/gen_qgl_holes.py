@@ -37,8 +37,8 @@ GPL_HEADER = [
 ]
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QGL_H = os.path.join(HERE, "src", "code", "rd-vanilla", "qgl.h")
-DST = os.path.join(HERE, "src", "code", "rd-gxm", "qgl_gxm.h")
+QGL_H = os.path.join(HERE, "src", "codemp","rd-vanilla", "qgl.h")
+DST = os.path.join(HERE, "src", "codemp","rd-gxm", "qgl_gxm.h")
 SCAN_DIRS = ("rd-vanilla", "rd-common")
 
 # the only qgl entry points whose return value is read anywhere
@@ -86,7 +86,7 @@ qgl_names = sorted(set(qgl_re.findall(qgl_h_text)))
 ext_re = re.compile(r"^extern\s+PFN\w+\s+(qgl\w+)\s*;", re.M)
 ext_all = set(ext_re.findall(qgl_h_text))
 ext_local = set(re.findall(r"(qgl[A-Za-z0-9_]+)\s*=",
-                io.open(os.path.join(HERE, "src", "code", "rd-vanilla", "gl_vita_ext.cpp"),
+                io.open(os.path.join(HERE, "src", "codemp","rd-vanilla", "gl_vita_ext.cpp"),
                         encoding="latin1", errors="replace").read()))
 # These are used both as calls and as bare truthiness tests (`if (qglX)`), so a
 # function-like macro would vanish in the test. They map to real no-op functions.
@@ -105,7 +105,7 @@ qgl_names = [n for n in qgl_names if n not in POINTER_NOOPS and n not in KEEP_LO
 
 direct = set()
 for d in SCAN_DIRS:
-    dirpath = os.path.join(HERE, "src", "code", d)
+    dirpath = os.path.join(HERE, "src", "codemp",d)
     if not os.path.isdir(dirpath):
         continue
     for fn in sorted(os.listdir(dirpath)):
