@@ -44,6 +44,11 @@ extern volatile qboolean pendingCtxInit;	// one-shot: run ctx init on render thr
 extern cvar_t *r_renderThread;
 extern cvar_t *r_worldVBO;		// bake eligible static world surfaces into one VBO
 extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not first frame
+#ifdef USE_GXM_NATIVE
+extern cvar_t *r_gxmSync;		// 1 = drain the gpu every frame (debug)
+extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
+extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
+#endif
 void R_StartRenderThread( void );
 void R_StopRenderThread( void );
 // tess is thread-local: frontend and render backend each pick their own

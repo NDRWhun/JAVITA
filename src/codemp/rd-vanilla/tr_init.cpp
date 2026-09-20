@@ -25,6 +25,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 
+#ifdef USE_GXM_NATIVE
+#include "../rd-gxm/gxm_device.h"	// GXM_ReadPixels
+#endif
+
 #include <algorithm>
 #include "../rd-common/tr_common.h"
 #include "tr_WorldEffects.h"
@@ -125,6 +129,11 @@ cvar_t	*r_dxtFast;
 cvar_t	*r_distanceCull;
 cvar_t	*r_forceFog;
 cvar_t	*r_forceFogColor;
+#endif
+#ifdef USE_GXM_NATIVE
+cvar_t	*r_gxmCullFlip;
+cvar_t	*r_gxmStats;
+cvar_t	*r_gxmSync;
 #endif
 cvar_t	*r_texturebits;
 cvar_t	*r_texturebitslm;
@@ -289,6 +298,13 @@ void RE_GetBModelVerts( int bmodelIndex, vec3_t *verts, vec3_t normal );
 
 void R_Splash()
 {
+#ifdef USE_GXM_NATIVE
+	// clear-only first scene: a draw before any completed scene GPU-faults
+	qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+	qglClear( GL_COLOR_BUFFER_BIT );
+	ri.WIN_Present( &window );
+	return;
+#endif
 	image_t *pImage;
 /*	const char* s = ri.Cvar_VariableString("se_language");
 	if (Q_stricmp(s,"english"))
@@ -814,7 +830,12 @@ static void InitOpenGL( void )
 
 	if ( glConfig.vidWidth == 0 )
 	{
+#ifdef USE_GXM_NATIVE
+		// GRAPHICS_API_OPENGL is what makes SDL set SDL_WINDOW_OPENGL
+		windowDesc_t windowDesc = { GRAPHICS_API_GENERIC };
+#else
 		windowDesc_t windowDesc = { GRAPHICS_API_OPENGL };
+#endif
 		memset(&glConfig, 0, sizeof(glConfig));
 		memset(&glConfigExt, 0, sizeof(glConfigExt));
 
@@ -1000,7 +1021,11 @@ byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, int *pa
 	buffer = (byte *)Hunk_AllocateTempMemory(padwidth * height + *offset + packAlign - 1);
 
 	bufstart = (byte *)PADP((intptr_t) buffer + *offset, packAlign);
+#ifdef USE_GXM_NATIVE
+	GXM_ReadPixels(x, y, width, height, 3, padwidth, bufstart);
+#else
 	qglReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, bufstart);
+#endif
 
 	*offset = bufstart - buffer;
 	*padlen = padwidth - linelen;
@@ -1335,8 +1360,12 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 
 	cBuf = (byte *)PADP(cmd->captureBuffer, packAlign);
 
+#ifdef USE_GXM_NATIVE
+	GXM_ReadPixels(0, 0, cmd->width, cmd->height, 3, padwidth, cBuf);
+#else
 	qglReadPixels(0, 0, cmd->width, cmd->height, GL_RGB,
 		GL_UNSIGNED_BYTE, cBuf);
+#endif
 
 	memcount = padwidth * cmd->height;
 
@@ -1426,6 +1455,9 @@ void GL_SetDefaultState( void )
 	// make sure our GL state vector is set correctly
 	//
 	glState.glStateBits = GLS_DEPTHTEST_DISABLE | GLS_DEPTHMASK_TRUE;
+#ifdef USE_GXM_NATIVE
+	GXM_SetStateBits( glState.glStateBits );
+#endif
 
 	qglPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
 	qglDepthMask( GL_TRUE );
@@ -1732,6 +1764,11 @@ void R_Register( void )
 	r_forceFog           = ri.Cvar_Get( "r_forceFog",           "0", CVAR_ARCHIVE_ND, "" );	// fog end distance hiding the cull pop
 	r_forceFogColor      = ri.Cvar_Get( "r_forceFogColor", "0.55 0.6 0.7", CVAR_ARCHIVE_ND, "" );
 #endif
+#ifdef USE_GXM_NATIVE
+	r_gxmCullFlip        = ri.Cvar_Get( "r_gxmCullFlip",        "1", CVAR_ARCHIVE, "" );	// invert the GL->GXM winding mapping
+	r_gxmStats           = ri.Cvar_Get( "r_gxmStats",           "0", CVAR_ARCHIVE, "" );	// frames per backend stat line, 0 = off
+	r_gxmSync            = ri.Cvar_Get( "r_gxmSync",            "0", CVAR_ARCHIVE, "" );	// 1 = drain the gpu every frame
+#endif
 	r_ambientScale						= ri.Cvar_Get( "r_ambientScale",					"0.6",						CVAR_CHEAT, "" );
 	r_directedScale						= ri.Cvar_Get( "r_directedScale",					"1",						CVAR_CHEAT, "" );
 	r_autoMap							= ri.Cvar_Get( "r_autoMap",						"0",						CVAR_ARCHIVE_ND, "" ); //automap renderside toggle for debugging -rww
@@ -1890,6 +1927,11 @@ void R_Init( void ) {
 	R_ImageLoader_Init();
 	R_NoiseInit();
 	R_Register();
+
+#ifdef USE_GXM_NATIVE
+	// rd-gxm names no game, so hand it the resolved home path for its stats log
+	GXM_SetStatsLogPath( ri.Cvar_VariableString( "fs_homepath" ) );
+#endif
 
 	max_polys = Q_min( r_maxpolys->integer, DEFAULT_MAX_POLYS );
 	max_polyverts = Q_min( r_maxpolyverts->integer, DEFAULT_MAX_POLYVERTS );
