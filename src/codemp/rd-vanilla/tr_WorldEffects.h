@@ -36,3 +36,4 @@ bool R_IsRaining();
 //bool R_IsSnowing();
 bool R_IsPuffing();
 void RE_AddWeatherZone(vec3_t mins, vec3_t maxs);
+void R_CacheWorldEffects(void);

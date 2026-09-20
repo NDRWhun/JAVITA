@@ -1358,6 +1358,28 @@ void R_ShutdownWorldEffects(void)
 	R_InitWorldEffects();
 }
 
+/*
+===============
+R_CacheWorldEffects
+
+The cache allocates from the zone, opens files and uses va(); the backend may touch none of those.
+===============
+*/
+void R_CacheWorldEffects(void)
+{
+	if (!tr.world || !mParticleClouds.size() || mOutside.Initialized())
+	{
+		return;
+	}
+#ifdef VITA
+	// the backend reads the point cache, so park it while this fills
+	if (r_renderThread && r_renderThread->integer) {
+		R_IssuePendingRenderCommands();
+	}
+#endif
+	mOutside.Cache();
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // RB_RenderWorldEffects - If any particle clouds exist, this will update and render them
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -1394,7 +1416,7 @@ void RB_RenderWorldEffects(void)
 	//----------------------------------------
 	if (!mOutside.Initialized())
 	{
-		mOutside.Cache();
+		return;			// R_CacheWorldEffects builds it on the main thread
 	}
 	else
 	{

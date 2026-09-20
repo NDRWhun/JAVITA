@@ -442,6 +442,8 @@ void RE_RotatePic2 ( float x, float y, float w, float h,
 	cmd->a = a;
 }
 
+extern void R_CacheWorldEffects( void );	// tr_WorldEffects.cpp
+
 void RE_RenderWorldEffects(void)
 {
 	drawBufferCommand_t	*cmd;
@@ -449,6 +451,8 @@ void RE_RenderWorldEffects(void)
 	if (!tr.registered) {
 		return;
 	}
+	R_CacheWorldEffects();
+
 	cmd = (drawBufferCommand_t *)R_GetCommandBuffer( sizeof( *cmd ) );
 	if ( !cmd ) {
 		return;
