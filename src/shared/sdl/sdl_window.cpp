@@ -26,6 +26,17 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "sys/sys_local.h"
 #include "sdl_icon.h"
 
+#ifdef USE_GXM_NATIVE
+#include <psp2/libime.h>
+#include <psp2/sysmodule.h>
+#include "../../codemp/rd-gxm/gxm_device.h"
+#include "../../codemp/rd-gxm/gxm_texture.h"
+#include "../../codemp/rd-gxm/gxm_backend.h"
+// supplied by tr_gxm_bridge.cpp, which is where tess is visible
+extern "C" void GXM_GetTessArrays( const float **xyz, const float **uv0,
+								   const float **uv1, const unsigned char **rgba );
+#endif
+
 enum rserr_t
 {
 	RSERR_OK,
@@ -144,6 +155,21 @@ void GLimp_Minimize(void)
 
 void WIN_Present( window_t *window )
 {
+#ifdef USE_GXM_NATIVE
+	// the IME draws and reads input only while this is pumped, and SDL only did it
+	// from the GL swap this path replaces
+	if ( SDL_IsScreenKeyboardShown( screen ) ) {
+		sceImeUpdate();
+	}
+
+	// end the frame's scene, queue the flip, and open the next one so the
+	// renderer always has a scene to draw into
+	GXM_EndFrame();
+	GXM_BeginFrame();
+	GXM_RingBeginFrame();
+	(void)window;
+	return;
+#endif
 	if ( window->api == GRAPHICS_API_OPENGL )
 	{
 		SDL_GL_SwapWindow(screen);
@@ -316,7 +342,7 @@ static bool GLimp_DetectAvailableModes(void)
 	return true;
 }
 
-#ifdef VITA
+#if defined(VITA) && !defined(USE_GXM_NATIVE)
 #include <psp2/kernel/sysmem.h>
 // must run on the vglInit thread, before vglInit
 extern "C" void vglSetParamBufferSize( uint32_t size );
@@ -366,7 +392,7 @@ static rserr_t GLimp_SetMode(glconfig_t *glConfig, const windowDesc_t *windowDes
 
 	Com_Printf( "Initializing display\n");
 
-#ifdef VITA
+#if defined(VITA) && !defined(USE_GXM_NATIVE)
 	// r_renderThread 0 fallback: vglInit fires later in SDL_CreateWindow on this thread.
 	if ( doParamBufferSize ) {
 		WIN_SetupVglMem( "vgl mem setup (main thread)" );
@@ -819,6 +845,11 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 {
 	WIN_RegisterVideoCvars();
 
+#ifdef USE_GXM_NATIVE
+	// single-threaded path: nothing else brings the device up, and the first state call faults without it
+	WIN_LoadGL();
+#endif
+
 	// Create the window and set up the context
 	if(!GLimp_StartDriverAndSetMode( glConfig, windowDesc, r_mode->integer,
 										(qboolean)r_fullscreen->integer, (qboolean)r_noborder->integer ))
@@ -837,6 +868,13 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 
 	glConfig->deviceSupportsGamma =
 		(qboolean)(!r_ignorehwgamma->integer && SDL_SetWindowBrightness( screen, 1.0f ) >= 0);
+
+#ifdef USE_GXM_NATIVE
+	// No GL context here, so the pixel format is stated; the depth/stencil surface is S8D24.
+	glConfig->colorBits   = 32;
+	glConfig->depthBits   = 24;
+	glConfig->stencilBits = 8;
+#endif
 
 	// This depends on SDL_INIT_VIDEO, hence having it here
 	IN_Init( screen );
@@ -913,11 +951,22 @@ so the GXM context is owned here
 */
 void WIN_LoadGL( void )
 {
+#ifdef USE_GXM_NATIVE
+	// SDL loads this only from its GL path, which a native device never takes;
+	// without it every sceIme import resolves to zero and the console keyboard faults
+	sceSysmoduleLoadModule( SCE_SYSMODULE_IME );
+	if ( !GXM_DeviceInit() || !GXM_RingInit( 4 * 1024 * 1024 ) || !GXM_BackendInit() )
+	{
+		Com_Error( ERR_FATAL, "WIN_LoadGL: native GXM device init failed" );
+	}
+	GXM_SetTessArraysHook( GXM_GetTessArrays );
+#else
 	WIN_SetupVglMem( "vgl mem setup (render thread)" );
 	if ( SDL_GL_LoadLibrary( NULL ) < 0 )
 	{
 		Com_Error( ERR_FATAL, "WIN_LoadGL: SDL_GL_LoadLibrary failed (%s)", SDL_GetError() );
 	}
+#endif
 }
 
 /*
@@ -948,6 +997,13 @@ window_t WIN_CreateWindow( const windowDesc_t *windowDesc, glconfig_t *glConfig 
 	glConfig->deviceSupportsGamma =
 		(qboolean)(!r_ignorehwgamma->integer && SDL_SetWindowBrightness( screen, 1.0f ) >= 0);
 
+#ifdef USE_GXM_NATIVE
+	// No GL context here, so the pixel format is stated; the depth/stencil surface is S8D24.
+	glConfig->colorBits   = 32;
+	glConfig->depthBits   = 24;
+	glConfig->stencilBits = 8;
+#endif
+
 	// This depends on SDL_INIT_VIDEO, hence having it here
 	IN_Init( screen );
 
@@ -968,10 +1024,14 @@ SDL_GL_SwapWindow no-ops unless the window is current on the calling thread
 */
 void WIN_MakeCurrent( void )
 {
+#ifndef USE_GXM_NATIVE
+	// SDL's GL hooks are absent without a GL video driver, and this one is
+	// dispatched unchecked; the native present owns its context anyway
 	if ( SDL_GL_MakeCurrent( screen, opengl_context ) < 0 )
 	{
 		Com_Printf( "WIN_MakeCurrent: SDL_GL_MakeCurrent failed (%s)\n", SDL_GetError() );
 	}
+#endif
 }
 #endif // VITA
 
@@ -1069,5 +1129,20 @@ void *WIN_GL_GetProcAddress( const char *proc )
 
 qboolean WIN_GL_ExtensionSupported( const char *extension )
 {
+#ifdef USE_GXM_NATIVE
+	// no GL context to ask; S3TC is real here because UBC1/UBC3 are DXT1/DXT5
+	static const char *supported[] = {
+		"GL_ARB_texture_compression",
+		"GL_EXT_texture_compression_s3tc",
+		"GL_EXT_texture_env_add",		// the two-texture add program set
+	};
+	for ( size_t i = 0; i < ARRAY_LEN( supported ); i++ ) {
+		if ( !Q_stricmp( extension, supported[i] ) ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
+#else
 	return SDL_GL_ExtensionSupported( extension ) == SDL_TRUE ? qtrue : qfalse;
+#endif
 }
