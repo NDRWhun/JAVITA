@@ -22,6 +22,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "tr_local.h"
+#ifdef USE_GXM_NATIVE
+#include "../rd-gxm/gxm_device.h"
+#endif
 #ifndef VITA
 #include "glext.h"
 #endif
@@ -80,6 +83,9 @@ void GL_Bind( image_t *image ) {
 		image->frameUsed = tr.frameCount;
 		glState.currenttextures[glState.currenttmu] = texnum;
 		qglBindTexture (GL_TEXTURE_2D, texnum);
+#ifdef USE_GXM_NATIVE
+		GXM_TexBind( glState.currenttmu, texnum );
+#endif
 	}
 }
 
@@ -132,11 +138,21 @@ void GL_SelectTexture( int unit )
 /*
 ** GL_Cull
 */
+#ifdef USE_GXM_NATIVE
+// the GL cull face, translated for GXM's inverted winding
+#define GXM_SETCULL( glMode, on )	GXM_SetCull( glMode, on )
+#else
+#define GXM_SETCULL( glMode, on )	((void)0)
+#endif
+
 void GL_Cull( int cullType ) {
 	if ( glState.faceCulling == cullType ) {
 		return;
 	}
 	glState.faceCulling = cullType;
+#ifdef USE_GXM_NATIVE
+	GXM_SetCullFlip( r_gxmCullFlip ? r_gxmCullFlip->integer : 0 );
+#endif
 	if (backEnd.projection2D) {	//don't care, we're in 2d when it's always disabled
 		return;
 	}
@@ -144,6 +160,7 @@ void GL_Cull( int cullType ) {
 	if ( cullType == CT_TWO_SIDED )
 	{
 		qglDisable( GL_CULL_FACE );
+		GXM_SETCULL( 0, 0 );
 	}
 	else
 	{
@@ -154,10 +171,12 @@ void GL_Cull( int cullType ) {
 			if ( backEnd.viewParms.isMirror )
 			{
 				qglCullFace( GL_FRONT );
+				GXM_SETCULL( GL_FRONT, 1 );
 			}
 			else
 			{
 				qglCullFace( GL_BACK );
+				GXM_SETCULL( GL_BACK, 1 );
 			}
 		}
 		else
@@ -165,10 +184,12 @@ void GL_Cull( int cullType ) {
 			if ( backEnd.viewParms.isMirror )
 			{
 				qglCullFace( GL_BACK );
+				GXM_SETCULL( GL_BACK, 1 );
 			}
 			else
 			{
 				qglCullFace( GL_FRONT );
+				GXM_SETCULL( GL_FRONT, 1 );
 			}
 		}
 	}
@@ -179,6 +200,13 @@ void GL_Cull( int cullType ) {
 */
 void GL_TexEnv( int env )
 {
+#ifdef USE_GXM_NATIVE
+	// only unit 1 has an env, and it is set ahead of the cache test
+	if ( glState.currenttmu == 1 ) {
+		GXM_SetTexEnv( env == GL_ADD     ? GXM_TEXENV_ADD :
+					   env == GL_REPLACE ? GXM_TEXENV_REPLACE : GXM_TEXENV_MODULATE );
+	}
+#endif
 	if ( env == glState.texEnv[glState.currenttmu] )
 	{
 		return;
@@ -400,6 +428,10 @@ void GL_State( uint32_t stateBits )
 	}
 
 	glState.glStateBits = stateBits;
+#ifdef USE_GXM_NATIVE
+	// the qgl* emissions above are holes, so this is what actually carries the state
+	GXM_SetStateBits( stateBits );
+#endif
 }
 
 
@@ -426,10 +458,62 @@ static void RB_Hyperspace( void ) {
 }
 
 
+#ifdef USE_GXM_NATIVE
+/*
+================
+R_ObliqueProjection
+
+Folds the portal plane into the near plane; GXM has no user clip planes (Lengyel's oblique frustum).
+================
+*/
+static void R_ObliqueProjection( float *proj )
+{
+	const float *n = backEnd.viewParms.portalPlane.normal;
+
+	// the eye-space plane glClipPlane took; s_flipMatrix maps (forward, left, up) onto GL's (right, up, back)
+	const float fwd  = DotProduct( backEnd.viewParms.ori.axis[0], n );
+	const float left = DotProduct( backEnd.viewParms.ori.axis[1], n );
+	const float up   = DotProduct( backEnd.viewParms.ori.axis[2], n );
+	const float c[4] = { -left, up, -fwd,
+		DotProduct( n, backEnd.viewParms.ori.origin ) - backEnd.viewParms.portalPlane.dist };
+
+	const float q[4] = {
+		( ( c[0] < 0.0f ? -1.0f : 1.0f ) + proj[8] ) / proj[0],
+		( ( c[1] < 0.0f ? -1.0f : 1.0f ) + proj[9] ) / proj[5],
+		-1.0f,
+		( 1.0f + proj[10] ) / proj[14] };
+
+	const float d = c[0] * q[0] + c[1] * q[1] + c[2] * q[2] + c[3] * q[3];
+	if ( fabs( d ) < 1e-6f ) {
+		return;					// the plane runs through the eye; the frustum would degenerate
+	}
+	const float s = 2.0f / d;
+
+	proj[2]  = c[0] * s;
+	proj[6]  = c[1] * s;
+	proj[10] = c[2] * s + 1.0f;
+	proj[14] = c[3] * s;
+}
+#endif
+
 void SetViewportAndScissor( void ) {
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( backEnd.viewParms.projectionMatrix );
 	qglMatrixMode(GL_MODELVIEW);
+
+#ifdef USE_GXM_NATIVE
+	if ( backEnd.viewParms.isPortal ) {
+		float proj[16];
+		memcpy( proj, backEnd.viewParms.projectionMatrix, sizeof( proj ) );
+		R_ObliqueProjection( proj );
+		GXM_SetProjection( proj );
+	} else {
+		GXM_SetProjection( backEnd.viewParms.projectionMatrix );
+	}
+	GXM_SetDepthRange( 0.0f, 1.0f );	// the entity loop overrides this per depth hack
+	GXM_SetViewport( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
+		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
+#endif
 
 	// set the window clipping
 	qglViewport( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
@@ -482,7 +566,16 @@ void RB_BeginDrawingView (void) {
 		qglFogf( GL_FOG_START, r_forceFog->value * 0.5f );
 		qglFogf( GL_FOG_END,   r_forceFog->value );
 		qglEnable( GL_FOG );
+#ifdef USE_GXM_NATIVE
+		GXM_SetFog( 1, r_forceFog->value * 0.5f, r_forceFog->value, fogClr );
+#endif
 	}
+#ifdef USE_GXM_NATIVE
+	else
+	{
+		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+	}
+#endif
 #endif
 
 	// clear relevant buffers
@@ -920,6 +1013,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			RB_EndWorldVBO();	// leaving world surfaces -> flush VBO batch before entity/world matrix swap
 #endif
 			qglLoadMatrixf( backEnd.ori.modelMatrix );
+			#ifdef USE_GXM_NATIVE
+			GXM_SetModelView( backEnd.ori.modelMatrix );
+			#endif
 
 			//
 			// change depthrange if needed
@@ -1020,6 +1116,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 
 			qglLoadMatrixf( backEnd.ori.modelMatrix );
+			#ifdef USE_GXM_NATIVE
+			GXM_SetModelView( backEnd.ori.modelMatrix );
+			#endif
 
 			depthRange = pRender->depthRange;
 			switch ( depthRange )
@@ -1179,6 +1278,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	// go back to the world modelview matrix
 	qglLoadMatrixf( backEnd.viewParms.world.modelMatrix );
+	#ifdef USE_GXM_NATIVE
+	GXM_SetModelView( backEnd.viewParms.world.modelMatrix );
+	#endif
 	if ( depthRange ) {
 		qglDepthRange (0, 1);
 	}
@@ -1230,6 +1332,28 @@ void	RB_SetGL2D (void) {
 	qglMatrixMode(GL_MODELVIEW);
     qglLoadIdentity ();
 
+#ifdef USE_GXM_NATIVE
+	{
+		static const float ident[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+		float ortho[16];
+		Com_Memset( ortho, 0, sizeof(ortho) );
+		ortho[0]  =  2.0f / 640.0f;
+		ortho[5]  = -2.0f / 480.0f;
+		ortho[10] = -2.0f;
+		ortho[12] = -1.0f;
+		ortho[13] =  1.0f;
+		ortho[14] = -1.0f;
+		ortho[15] =  1.0f;
+		GXM_SetProjection( ortho );
+		GXM_SetModelView( ident );
+		GXM_SetTexUnitCount( 1 );
+		GXM_SetVertexColorEnabled( 1 );
+		GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
+		GXM_SetCull( 0, 0 );
+		GXM_SetViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+	}
+#endif
+
 	GL_State( GLS_DEPTHTEST_DISABLE |
 			  GLS_SRCBLEND_SRC_ALPHA |
 			  GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
@@ -1238,6 +1362,9 @@ void	RB_SetGL2D (void) {
 	qglDisable( GL_CLIP_PLANE0 );
 #ifdef VITA
 	qglDisable( GL_FOG );	// no fog on HUD/menus
+#ifdef USE_GXM_NATIVE
+	GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+#endif
 #endif
 
 	// set time for 2D shaders
@@ -1322,6 +1449,10 @@ void RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *
 		tr.scratchImage[client]->width = cols;
 		tr.scratchImage[client]->height = rows;
 		qglTexImage2D( GL_TEXTURE_2D, 0, GL_RGB8, cols, rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
+#ifdef USE_GXM_NATIVE
+		GXM_TexUpload( tr.scratchImage[client]->texnum, data, cols, rows );
+		GXM_TexFilter( tr.scratchImage[client]->texnum, 1, 1 );
+#endif
 		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glConfig.clampToEdgeAvailable ? GL_CLAMP_TO_EDGE : GL_CLAMP );
@@ -2174,7 +2305,24 @@ const void	*RB_SwapBuffers( const void *data ) {
 
     GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
+#ifdef USE_GXM_NATIVE
+	if ( r_gxmStats && r_gxmStats->integer > 0 ) {
+		static int gxmReportFrame = 0;
+		if ( ( ++gxmReportFrame % r_gxmStats->integer ) == 0 ) {
+			char line[192];
+			GXM_ReportStats( line, sizeof( line ) );
+			ri.Printf( PRINT_ALL, "%s", line );
+		}
+	}
+#endif
+
     ri.WIN_Present(&window);
+#ifdef USE_GXM_NATIVE
+	// r_gxmSync 1: block until the gpu has drained, to tell a lifetime bug from a bad scene
+	if ( r_gxmSync && r_gxmSync->integer ) {
+		GXM_Sync();
+	}
+#endif
 
 	backEnd.projection2D = qfalse;
 
@@ -2214,12 +2362,19 @@ static const void *RB_Cinematic( const void *data ) {
 		img->width = (word)cmd->cols;
 		img->height = (word)cmd->rows;
 		qglTexImage2D( GL_TEXTURE_2D, 0, GL_RGB8, cmd->cols, cmd->rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, cmd->pixels );
+#ifdef USE_GXM_NATIVE
+		GXM_TexUpload( img->texnum, cmd->pixels, cmd->cols, cmd->rows );
+		GXM_TexFilter( img->texnum, 1, 1 );
+#endif
 		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glConfig.clampToEdgeAvailable ? GL_CLAMP_TO_EDGE : GL_CLAMP );
 		qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, glConfig.clampToEdgeAvailable ? GL_CLAMP_TO_EDGE : GL_CLAMP );
 	} else if ( cmd->dirty ) {
 		qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cmd->cols, cmd->rows, GL_RGBA, GL_UNSIGNED_BYTE, cmd->pixels );
+#ifdef USE_GXM_NATIVE
+		GXM_TexUpload( img->texnum, cmd->pixels, cmd->cols, cmd->rows );
+#endif
 	}
 
 	if ( cmd->w ) {
@@ -2242,6 +2397,12 @@ static const void *RB_Cinematic( const void *data ) {
 		qglTexCoordPointer( 2, GL_FLOAT, 0, st );
 		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, col );
 		qglDrawElements( GL_TRIANGLES, 6, GL_INDEX_TYPE, idx );
+#ifdef USE_GXM_NATIVE
+		GXM_SetTexUnitCount( 1 );
+		GXM_SetVertexArrays( &xyz[0][0], &st[0][0], NULL, (const unsigned char *)col );
+		GXM_SetStateBits( glState.glStateBits );
+		GXM_DrawTess( 6, idx, 4 );
+#endif
 	}
 
 	return (const void *)(cmd + 1);

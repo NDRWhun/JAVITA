@@ -174,7 +174,13 @@ instead of using the single glDrawElements call that may be inefficient
 without compiled vertex arrays.
 ==================
 */
-static void R_DrawElements( int numIndexes, const glIndex_t *indexes ) {
+static void R_DrawElements( int numIndexes, const glIndex_t *indexes, int numVertexes ) {
+#ifdef USE_GXM_NATIVE
+	GXM_SetStateBits( glState.glStateBits );
+	GXM_DrawTess( numIndexes, indexes, numVertexes );
+	return;
+#endif
+	(void)numVertexes;
 	int		primitives;
 
 	primitives = r_primitives->integer;
@@ -312,7 +318,7 @@ static void DrawTris (shaderCommands_t *input) {
 		GLimp_LogComment( "glLockArraysEXT\n" );
 	}
 
-	R_DrawElements( input->numIndexes, input->indexes );
+	R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
 
 	if (qglUnlockArraysEXT) {
 		qglUnlockArraysEXT();
@@ -427,7 +433,7 @@ static void DrawMultitextured( shaderCommands_t *input, int stage ) {
 
 	R_BindAnimatedImage( &pStage->bundle[1] );
 
-	R_DrawElements( input->numIndexes, input->indexes );
+	R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
 
 	//
 	// disable texturing on TEXTURE1, then select TEXTURE0
@@ -719,7 +725,16 @@ static void ProjectDlightTexture2( void ) {
 
 			GL_State(GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL);// | GLS_ATEST_GT_0);
 
-			R_DrawElements( numIndexes, hitIndexes );
+#ifdef USE_GXM_NATIVE
+			// this pass stages its own de-indexed arrays, so tess holds the wrong data
+			GXM_SetTexUnitCount( 2 );
+			GXM_SetVertexArrays( &vertCoordsArray[0][0], &oldTexCoordsArray[0][0],
+				&texCoordsArray[0][0], (const unsigned char *)colorArray );
+#endif
+			R_DrawElements( numIndexes, hitIndexes, numIndexes );
+#ifdef USE_GXM_NATIVE
+			GXM_SetTexUnitCount( 1 );
+#endif
 
 			qglDisable( GL_TEXTURE_2D );
 			GL_SelectTexture(0);
@@ -742,7 +757,11 @@ static void ProjectDlightTexture2( void ) {
 				GL_State( GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
 			}
 
-			R_DrawElements( numIndexes, hitIndexes );
+#ifdef USE_GXM_NATIVE
+			GXM_SetVertexArrays( &vertCoordsArray[0][0], &texCoordsArray[0][0],
+				NULL, (const unsigned char *)colorArray );
+#endif
+			R_DrawElements( numIndexes, hitIndexes, numIndexes );
 		}
 
 		if (fogging)
@@ -1060,7 +1079,15 @@ static void ProjectDlightTexture( void ) {
 
 			GL_State(GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL);// | GLS_ATEST_GT_0);
 
-			R_DrawElements( numIndexes, hitIndexes );
+#ifdef USE_GXM_NATIVE
+			GXM_SetTexUnitCount( 2 );
+			GXM_SetVertexArrays( &tess.xyz[0][0], (const float *)tess.svars.texcoords[0],
+				&texCoordsArray[0][0], (const unsigned char *)colorArray );
+#endif
+			R_DrawElements( numIndexes, hitIndexes, tess.numVertexes );
+#ifdef USE_GXM_NATIVE
+			GXM_SetTexUnitCount( 1 );
+#endif
 
 			qglDisable( GL_TEXTURE_2D );
 			GL_SelectTexture(0);
@@ -1083,7 +1110,11 @@ static void ProjectDlightTexture( void ) {
 				GL_State( GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
 			}
 
-			R_DrawElements( numIndexes, hitIndexes );
+#ifdef USE_GXM_NATIVE
+			GXM_SetVertexArrays( &tess.xyz[0][0], &texCoordsArray[0][0],
+				NULL, (const unsigned char *)colorArray );
+#endif
+			R_DrawElements( numIndexes, hitIndexes, tess.numVertexes );
 		}
 
 		if (fogging)
@@ -1130,7 +1161,7 @@ static void RB_FogPass( void ) {
 		GL_State( GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
 	}
 
-	R_DrawElements( tess.numIndexes, tess.indexes );
+	R_DrawElements( tess.numIndexes, tess.indexes, tess.numVertexes );
 }
 
 /*
@@ -1766,7 +1797,7 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 			//
 			// draw
 			//
-			R_DrawElements( input->numIndexes, input->indexes );
+			R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
 
 			if (lStencilled)
 			{ //re-enable the color buffer, disable stencil test
