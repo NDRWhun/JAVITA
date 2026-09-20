@@ -1403,7 +1403,8 @@ e_status CIN_RunCinematic (int handle)
 	cinTable[currentHandle].tfps = ((((Sys_Milliseconds()*com_timescale->value) - cinTable[currentHandle].startTime)*cinTable[currentHandle].roqFPS)/1000);
 
 	start = cinTable[currentHandle].startTime;
-	while(  (cinTable[currentHandle].tfps != cinTable[currentHandle].numQuads)
+	// only decode while behind the clock; an inequality runs to eof whenever numQuads is ahead
+	while(  (cinTable[currentHandle].tfps > cinTable[currentHandle].numQuads)
 		&& (cinTable[currentHandle].status == FMV_PLAY) )
 	{
 		RoQInterrupt();
