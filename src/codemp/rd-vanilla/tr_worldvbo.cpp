@@ -24,6 +24,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // Ineligible/dlit/fogged fall back to tess. Grids bake at full LOD.
 
 #include "tr_local.h"
+#ifdef USE_GXM_NATIVE
+#include "../rd-gxm/gxm_device.h"
+#endif
 
 void R_BindAnimatedImage( textureBundle_t *bundle );
 
@@ -42,6 +45,11 @@ typedef struct {
 #define WVBO_OFS_ST1	((const GLvoid *)20)
 #define WVBO_OFS_RGBA	((const GLvoid *)28)
 
+#ifdef USE_GXM_NATIVE
+// one u16 index space covers the whole bake; eligible surfaces past it stay on tess
+#define WVBO_MAX_VERTS	65536
+#endif
+
 typedef struct {
 	const void	*surfData;	// == msurface_t.data; render-time lookup key
 	shader_t	*shader;
@@ -51,7 +59,12 @@ typedef struct {
 
 // Not stored in tr/world_t: both are memset every map load, which would leak the GL buffer.
 static struct {
+#ifdef USE_GXM_NATIVE
+	void		*data;		// GPU-mapped vertex buffer, read straight by the backend
+	SceUID		uid;
+#else
 	GLuint		vbo;
+#endif
 	glIndex_t	*idx;		// malloc; baked indices stay CPU-side, staged per shader run
 	wvboSurf_t	*surfs;		// malloc
 	int			numSurfs;
@@ -73,7 +86,12 @@ static void WorldVbo_Flush( void )
 	if ( !s_wvboStaged ) {
 		return;
 	}
+#ifdef USE_GXM_NATIVE
+	// colours are baked per vertex, so the stream colour is always live
+	GXM_DrawStaticBuffer( s_wvbo.data, s_wvboStage, s_wvboStaged, 1 );
+#else
 	qglDrawElements( GL_TRIANGLES, s_wvboStaged, GL_INDEX_TYPE, s_wvboStage );
+#endif
 	backEnd.pc.c_wvboDraws++;
 	s_wvboStaged = 0;
 }
@@ -160,6 +178,15 @@ static void WorldVbo_BakeColor( const shaderStage_t *st, const byte *raw, byte *
 
 void R_FreeWorldVBO( void )
 {
+#ifdef USE_GXM_NATIVE
+	if ( s_wvbo.data ) {
+		// a queued scene may still reference the buffer, so wait the GPU out first
+		GXM_Sync();
+		GXM_Free( s_wvbo.uid );
+		s_wvbo.data = NULL;
+		s_wvbo.uid = 0;
+	}
+#else
 	if ( s_wvbo.vbo ) {
 		// vitaGL keeps per-array vbo references (written through at draw); re-point
 		// the arrays we used before deleting so no dangling buffer pointer survives.
@@ -172,6 +199,7 @@ void R_FreeWorldVBO( void )
 		qglTexCoordPointer( 2, GL_FLOAT, 0, NULL );
 	}
 	if ( s_wvbo.vbo ) { glDeleteBuffers( 1, &s_wvbo.vbo ); s_wvbo.vbo = 0; }
+#endif
 	if ( s_wvbo.idx ) { free( s_wvbo.idx ); s_wvbo.idx = NULL; }
 	if ( s_wvbo.surfs ) { free( s_wvbo.surfs ); s_wvbo.surfs = NULL; }
 	if ( s_wvbo.hash )  { free( s_wvbo.hash );  s_wvbo.hash  = NULL; }
@@ -196,6 +224,9 @@ void R_BuildWorldVBO( world_t *w )
 	const int surfLast  = w->bmodels ? surfFirst + w->bmodels[0].numSurfaces : w->numsurfaces;
 
 	int totalVerts = 0, totalIdx = 0, numEl = 0;
+#ifdef USE_GXM_NATIVE
+	int skippedU16 = 0;		// eligible surfaces the u16 index space has no room for
+#endif
 	for ( int i = surfFirst; i < surfLast; i++ ) {
 		msurface_t *s = &w->surfaces[i];
 		if ( s->fogIndex != 0 || !s->data ) continue;
@@ -204,11 +235,17 @@ void R_BuildWorldVBO( world_t *w )
 		if ( t == SF_FACE ) {
 			srfSurfaceFace_t *f = (srfSurfaceFace_t *)s->data;
 			if ( f->numPoints <= 0 || f->numIndices <= 0 ) continue;
+#ifdef USE_GXM_NATIVE
+			if ( totalVerts + f->numPoints > WVBO_MAX_VERTS ) { skippedU16++; continue; }
+#endif
 			totalVerts += f->numPoints;
 			totalIdx   += f->numIndices;
 		} else {
 			srfGridMesh_t *g = (srfGridMesh_t *)s->data;
 			if ( g->width < 2 || g->height < 2 ) continue;
+#ifdef USE_GXM_NATIVE
+			if ( totalVerts + g->width * g->height > WVBO_MAX_VERTS ) { skippedU16++; continue; }
+#endif
 			totalVerts += g->width * g->height;
 			totalIdx   += ( g->width - 1 ) * ( g->height - 1 ) * 6;
 		}
@@ -238,6 +275,9 @@ void R_BuildWorldVBO( world_t *w )
 		if ( t == SF_FACE ) {
 			srfSurfaceFace_t *f = (srfSurfaceFace_t *)s->data;
 			if ( f->numPoints <= 0 || f->numIndices <= 0 ) continue;
+#ifdef USE_GXM_NATIVE
+			if ( vCount + f->numPoints > WVBO_MAX_VERTS ) continue;	// must reject what the count pass rejected
+#endif
 			const float *pv = f->points[0];
 			for ( int p = 0; p < f->numPoints; p++, pv += VERTEXSIZE ) {
 				wvboVert_t *o = &verts[vCount++];
@@ -251,6 +291,9 @@ void R_BuildWorldVBO( world_t *w )
 		} else {
 			srfGridMesh_t *g = (srfGridMesh_t *)s->data;
 			if ( g->width < 2 || g->height < 2 ) continue;
+#ifdef USE_GXM_NATIVE
+			if ( vCount + g->width * g->height > WVBO_MAX_VERTS ) continue;	// must reject what the count pass rejected
+#endif
 			const int W = g->width, H = g->height;
 			for ( int n = 0; n < W * H; n++ ) {
 				const drawVert_t *dv = &g->verts[n];
@@ -296,6 +339,17 @@ void R_BuildWorldVBO( world_t *w )
 		s_wvbo.hash[h] = r;
 	}
 
+#ifdef USE_GXM_NATIVE
+	// the GPU reads the vertices in place, so they live in a GXM memblock
+	s_wvbo.data = GXM_Alloc( SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
+		(unsigned int)( vCount * sizeof(wvboVert_t) ), 4, SCE_GXM_MEMORY_ATTRIB_READ, &s_wvbo.uid );
+	if ( !s_wvbo.data ) {
+		free( verts ); free( idx );
+		R_FreeWorldVBO();
+		return;
+	}
+	memcpy( s_wvbo.data, verts, (size_t)vCount * sizeof(wvboVert_t) );
+#else
 	size_t vramBefore = vglMemFree( VGL_MEM_VRAM );
 	size_t ramBefore  = vglMemFree( VGL_MEM_RAM );
 
@@ -305,15 +359,23 @@ void R_BuildWorldVBO( world_t *w )
 	// CDRAM for textures (a failed texture upload is silent and binds stale data).
 	glBufferData( GL_ARRAY_BUFFER, (GLsizei)( vCount * sizeof(wvboVert_t) ), verts, GL_DYNAMIC_DRAW );
 	glBindBuffer( GL_ARRAY_BUFFER, 0 );
+#endif
 
 	free( verts );
 	s_wvbo.idx = idx;	// indices stay CPU-side; staged per shader run at draw time
 	s_wvbo.ready = qtrue;
 	ri.Printf( PRINT_ALL, "r_worldVBO: baked %d surfaces (%d verts, %d indices, %d KB VBO)\n",
 		rCount, vCount, iCount, (int)( ( vCount * sizeof(wvboVert_t) ) >> 10 ) );
+#ifdef USE_GXM_NATIVE
+	if ( skippedU16 ) {
+		ri.Printf( PRINT_ALL, "r_worldVBO: %d surfaces past the %d-vertex u16 limit fall back to tess\n",
+			skippedU16, WVBO_MAX_VERTS );
+	}
+#else
 	ri.Printf( PRINT_ALL, "r_worldVBO: VRAM free %u -> %u KB, RAM pool free %u -> %u KB\n",
 		(unsigned)( vramBefore >> 10 ), (unsigned)( vglMemFree( VGL_MEM_VRAM ) >> 10 ),
 		(unsigned)( ramBefore >> 10 ), (unsigned)( vglMemFree( VGL_MEM_RAM ) >> 10 ) );
+#endif
 }
 
 static wvboSurf_t *WorldVbo_Lookup( const void *surfData )
@@ -337,6 +399,23 @@ static void WorldVbo_SetupBatch( shader_t *sh )
 
 	WorldVbo_Flush();	// stale staged indices must not draw with the new shader's state
 	GL_Cull( sh->cullType );
+#ifdef USE_GXM_NATIVE
+	// the backend reads the interleaved buffer directly, so only state and bindings move
+	GL_State( st->stateBits );
+
+	GL_SelectTexture( 0 );
+	R_BindAnimatedImage( &st->bundle[0] );
+	if ( st->bundle[1].image ) {
+		GL_SelectTexture( 1 );
+		GL_TexEnv( sh->multitextureEnv );
+		R_BindAnimatedImage( &st->bundle[1] );
+		GL_SelectTexture( 0 );
+	}
+
+	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
+	GXM_SetTexUnitCount( st->bundle[1].image ? 2 : 1 );
+	GXM_SetStateBits( glState.glStateBits );
+#else
 	glBindBuffer( GL_ARRAY_BUFFER, s_wvbo.vbo );
 
 	qglEnableClientState( GL_VERTEX_ARRAY );
@@ -359,6 +438,7 @@ static void WorldVbo_SetupBatch( shader_t *sh )
 		GL_TexEnv( sh->multitextureEnv );
 		R_BindAnimatedImage( &st->bundle[1] );
 	}
+#endif
 
 	s_wvboBatch = qtrue;
 	s_wvboBatchShader = sh;
@@ -370,12 +450,18 @@ void RB_EndWorldVBO( void )
 {
 	if ( !s_wvboBatch ) return;
 	WorldVbo_Flush();
+#ifdef USE_GXM_NATIVE
+	// the next tess draw picks its own unit count, but leave the shadow single-textured
+	GXM_SetTexUnitCount( 1 );
+	GL_SelectTexture( 0 );
+#else
 	if ( s_wvboBatchShader && s_wvboBatchShader->stages[0].bundle[1].image ) {
 		GL_SelectTexture( 1 );
 		qglDisable( GL_TEXTURE_2D );
 		GL_SelectTexture( 0 );
 	}
 	glBindBuffer( GL_ARRAY_BUFFER, 0 );
+#endif
 	s_wvboBatch = qfalse;
 	s_wvboBatchShader = NULL;
 }
@@ -401,7 +487,11 @@ qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlight
 	if ( s_wvboStaged + rec->numIndexes > WVBO_STAGE_MAX ) {
 		WorldVbo_Flush();
 		if ( rec->numIndexes > WVBO_STAGE_MAX ) {	// oversized surface: draw straight from the bake
+#ifdef USE_GXM_NATIVE
+			GXM_DrawStaticBuffer( s_wvbo.data, s_wvbo.idx + rec->firstIndex, rec->numIndexes, 1 );
+#else
 			qglDrawElements( GL_TRIANGLES, rec->numIndexes, GL_INDEX_TYPE, s_wvbo.idx + rec->firstIndex );
+#endif
 			backEnd.pc.c_wvboDraws++;
 			backEnd.pc.c_wvboSurfaces++;
 			return qtrue;
