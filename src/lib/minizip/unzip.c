@@ -2142,3 +2142,32 @@ extern int ZEXPORT unzSetOffset (unzFile file, uLong pos)
 {
     return unzSetOffset64(file,pos);
 }
+
+extern int ZEXPORT unzGetCentralDirectoryInfo (unzFile file, ZPOS64_T *offset, ZPOS64_T *size, ZPOS64_T *entries)
+{
+    unz64_s* s;
+
+    if (file==NULL)
+        return UNZ_PARAMERROR;
+    s=(unz64_s*)file;
+    *offset = s->offset_central_dir;
+    *size = s->size_central_dir;
+    *entries = s->gi.number_entry;
+    return UNZ_OK;
+}
+
+extern int ZEXPORT unzReadCentralDirectory (unzFile file, void *buf, unsigned len)
+{
+    unz64_s* s;
+
+    if (file==NULL)
+        return UNZ_PARAMERROR;
+    s=(unz64_s*)file;
+    if (len > s->size_central_dir)
+        return UNZ_PARAMERROR;
+    if (ZSEEK64(s->z_filefunc,s->filestream,s->offset_central_dir+s->byte_before_the_zipfile,ZLIB_FILEFUNC_SEEK_SET)!=0)
+        return UNZ_ERRNO;
+    if (ZREAD64(s->z_filefunc,s->filestream,buf,len)!=len)
+        return UNZ_ERRNO;
+    return UNZ_OK;
+}

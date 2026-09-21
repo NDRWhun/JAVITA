@@ -428,6 +428,12 @@ extern uLong ZEXPORT unzGetOffset (unzFile file);
 extern int ZEXPORT unzSetOffset64 (unzFile file, ZPOS64_T pos);
 extern int ZEXPORT unzSetOffset (unzFile file, uLong pos);
 
+/* Offset (relative to the zip start), byte size and entry count of the central directory */
+extern int ZEXPORT unzGetCentralDirectoryInfo (unzFile file, ZPOS64_T *offset, ZPOS64_T *size, ZPOS64_T *entries);
+
+/* Read the first len bytes of the central directory into buf */
+extern int ZEXPORT unzReadCentralDirectory (unzFile file, void *buf, unsigned len);
+
 
 
 #ifdef __cplusplus
