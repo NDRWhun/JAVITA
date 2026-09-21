@@ -209,6 +209,55 @@ static void SockadrToNetadr( struct sockaddr_in *s, netadr_t *a ) {
 	a->port = s->sin_port;
 }
 
+#ifdef VITA
+// resolved hostnames are kept for ten minutes so reconnects and browser refreshes skip the lookup
+typedef struct dnsEntry_s {
+	char		name[128];
+	uint32_t	addr;
+	int			expire;
+} dnsEntry_t;
+
+static dnsEntry_t s_dnsCache[8];
+
+static qboolean Sys_VitaResolve( const char *host, uint32_t *addr ) {
+	const int	now = Sys_Milliseconds();
+	dnsEntry_t	*slot;
+	size_t		i;
+	int			state = 0;
+	static int	s_rid = -1;
+	SceNetInAddr ia;
+
+	for ( i = 0; i < ARRAY_LEN( s_dnsCache ); i++ ) {
+		if ( s_dnsCache[i].name[0] && now < s_dnsCache[i].expire && !Q_stricmp( s_dnsCache[i].name, host ) ) {
+			*addr = s_dnsCache[i].addr;
+			return qtrue;
+		}
+	}
+
+	// newlib's resolver blocks without a bound, so the sceNet one is used with a timeout
+	if ( sceNetCtlInetGetState( &state ) < 0 || state != SCE_NETCTL_STATE_CONNECTED )
+		return qfalse;
+	if ( s_rid < 0 )
+		s_rid = sceNetResolverCreate( "jamp_dns", NULL, 0 );
+	if ( s_rid < 0 )
+		return qfalse;
+	if ( sceNetResolverStartNtoa( s_rid, host, &ia, 2 * 1000 * 1000, 1, 0 ) < 0 )
+		return qfalse;
+	*addr = ia.s_addr;
+
+	// the expired or oldest slot takes the new name
+	slot = &s_dnsCache[0];
+	for ( i = 1; i < ARRAY_LEN( s_dnsCache ); i++ ) {
+		if ( s_dnsCache[i].expire < slot->expire )
+			slot = &s_dnsCache[i];
+	}
+	Q_strncpyz( slot->name, host, sizeof( slot->name ) );
+	slot->addr = *addr;
+	slot->expire = now + 10 * 60 * 1000;
+	return qtrue;
+}
+#endif
+
 /*
 =============
 Sys_StringToSockaddr
@@ -232,27 +281,8 @@ static qboolean Sys_StringToSockaddr( const char *s, struct sockaddr_in *sadr )
 	else
 	{
 #ifdef VITA
-		// newlib's resolver blocks the main thread indefinitely; fail fast with no
-		// connection, otherwise resolve via sceNetResolver with a bounded timeout
-		extern void Sys_BootMark( const char *s );
-		Sys_BootMark( va( "dns: %s", s ) );
-		int state = 0;
-		if ( sceNetCtlInetGetState( &state ) < 0 || state != SCE_NETCTL_STATE_CONNECTED ) {
-			Sys_BootMark( "dns: no connection" );
+		if ( !Sys_VitaResolve( s, &sadr->sin_addr.s_addr ) )
 			return qfalse;
-		}
-		static int s_rid = -1;
-		if ( s_rid < 0 )
-			s_rid = sceNetResolverCreate( "jamp_dns", NULL, 0 );
-		if ( s_rid < 0 )
-			return qfalse;
-		SceNetInAddr ia;
-		if ( sceNetResolverStartNtoa( s_rid, s, &ia, 2 * 1000 * 1000, 1, 0 ) < 0 ) {
-			Sys_BootMark( "dns: failed" );
-			return qfalse;
-		}
-		Sys_BootMark( "dns: ok" );
-		sadr->sin_addr.s_addr = ia.s_addr;
 #else
 		if( ( h = gethostbyname( s ) ) == 0 )
 			return qfalse;

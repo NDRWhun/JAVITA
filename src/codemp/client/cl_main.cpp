@@ -2757,7 +2757,12 @@ void CL_Init( void ) {
 	// register our variables
 	//
 	cl_noprint = Cvar_Get( "cl_noprint", "0", 0 );
+#ifdef VITA
+	// the motd request adds a blocking hostname lookup to every connect
+	cl_motd = Cvar_Get ("cl_motd", "0", CVAR_ARCHIVE_ND, "Display welcome message from master server on the bottom of connection screen" );
+#else
 	cl_motd = Cvar_Get ("cl_motd", "1", CVAR_ARCHIVE_ND, "Display welcome message from master server on the bottom of connection screen" );
+#endif
 	cl_motdServer[0] = Cvar_Get( "cl_motdServer1", UPDATE_SERVER_NAME, 0 );
 	cl_motdServer[1] = Cvar_Get( "cl_motdServer2", JKHUB_UPDATE_SERVER_NAME, 0 );
 	for ( int index = 2; index < MAX_MASTER_SERVERS; index++ )
