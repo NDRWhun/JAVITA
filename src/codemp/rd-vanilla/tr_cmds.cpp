@@ -103,7 +103,7 @@ static volatile int rend_handedBuffer = 0;	// index of the frame being handed of
 /*
 Render-thread semaphore protocol (all created at 0; R = render thread, M = main):
 
-  init:  M starts R -> R: WIN_LoadGL (vglInit on R), Signal(init) -> M: create window,
+  init:  M starts R -> R: WIN_LoadGL (device init on R), Signal(init) -> M: create window,
          pendingCtxInit=true, Signal(in) -> R: ctx init + clear-only first scene,
          Signal(init), Signal(out) <- this one unconsumed token is the frame-1 credit.
   frame: M: Wait(out), Signal(in), flip activeBackEnd/tessPtr -> R: Wait(in),
@@ -115,12 +115,12 @@ Render-thread semaphore protocol (all created at 0; R = render thread, M = main)
 */
 extern "C" int sceGxmTransferFinish( void );	// GXM transfer-queue sync (SDK)
 
-// Render backend thread: owns the vitaGL/GXM context (vglInit fires here).
+// Render backend thread: owns the GXM context (the device comes up here).
 extern void Sys_BootMark( const char *s );
 static int renderThread( SceSize argc, void *argv ) {
-	Sys_BootMark( "rt: vglinit" );
+	Sys_BootMark( "rt: device" );
 	ri.WIN_LoadGL();
-	Sys_BootMark( "rt: vglinit done" );
+	Sys_BootMark( "rt: device done" );
 	sceKernelSignalSema( rend_init_done, 1 );
 
 	for ( ;; ) {

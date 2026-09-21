@@ -843,15 +843,15 @@ static void InitOpenGL( void )
 		if ( r_renderThread && r_renderThread->integer )
 		{
 			extern void Sys_BootMark( const char *s );
-			// bring the vitaGL/GXM context up on the render thread, which owns it
+			// bring the GXM context up on the render thread, which owns it
 			// from here on; see the semaphore protocol in tr_cmds.cpp
 			ri.WIN_InitSDLVideo();
 			Sys_BootMark( "gl: sdlvideo" );
 			R_StartRenderThread();
 			SceUInt tmo = 8 * 1000 * 1000;
-			if ( sceKernelWaitSema( rend_init_done, 1, &tmo ) < 0 )	// vglInit ran on the render thread
-				Com_Error( ERR_FATAL, "render thread vglInit timeout" );
-			Sys_BootMark( "gl: vglinit done" );
+			if ( sceKernelWaitSema( rend_init_done, 1, &tmo ) < 0 )	// the device came up on the render thread
+				Com_Error( ERR_FATAL, "render thread device init timeout" );
+			Sys_BootMark( "gl: device done" );
 			window = ri.WIN_CreateWindow( &windowDesc, &glConfig );
 			Sys_BootMark( "gl: window" );
 			// hand off for the one-shot context init (clear-only first scene), wait it out

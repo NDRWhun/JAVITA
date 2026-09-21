@@ -804,7 +804,7 @@ static void InitOpenGL( void )
 			R_StartRenderThread();
 			// 3. main: wait for device init to have run on the render thread.
 			sceKernelWaitSema( rend_init_done, 1, NULL );
-			// 4. main: create the window + GL context (SDL_CreateWindow now no-ops vglInit).
+			// 4. main: create the window; the device already came up on the render thread.
 			window = ri.WIN_CreateWindow( &windowDesc, &glConfig );
 			// 5. main: hand off to the render thread for the one-shot context init
 			//    (GL_SetDefaultState + R_Splash), then wait for it to finish. The render
@@ -2055,7 +2055,7 @@ void R_Init( void ) {
 
 	// NOTE: under r_renderThread the render backend thread is started earlier, inside
 	// InitOpenGL(), BEFORE window creation, because the render thread must OWN the
-	// vitaGL/GXM context (it fires vglInit on itself via WIN_LoadGL). See InitOpenGL()
+	// GXM context (it brings the device up on itself via WIN_LoadGL). See InitOpenGL()
 	// and the token trace in tr_cmds.cpp. It is intentionally NOT started here.
 
 	//ri.Printf( PRINT_ALL, "----- finished R_Init -----\n" );

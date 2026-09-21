@@ -24,11 +24,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #ifdef VITA
-#ifdef USE_GXM_NATIVE
 #include "gl_vita_types.h"
-#else
-#include <vitaGL.h>
-#endif
 #else
 #if defined( __LINT__ )
 #	include <GL/gl.h>

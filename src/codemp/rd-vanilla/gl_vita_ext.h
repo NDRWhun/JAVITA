@@ -48,11 +48,7 @@ Included only from qgl.h's VITA branch. Storage is defined in gl_vita_ext.cpp.
 
 #ifdef VITA
 
-#ifdef USE_GXM_NATIVE
 #include "gl_vita_types.h"
-#else
-#include <vitaGL.h>
-#endif
 
 /* GL calling-convention macros (vitaGL doesn't define them; harmless empty). */
 #ifndef APIENTRY

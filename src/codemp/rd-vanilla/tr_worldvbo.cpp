@@ -339,7 +339,6 @@ void R_BuildWorldVBO( world_t *w )
 		s_wvbo.hash[h] = r;
 	}
 
-#ifdef USE_GXM_NATIVE
 	// the GPU reads the vertices in place, so they live in a GXM memblock
 	s_wvbo.data = GXM_Alloc( SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
 		(unsigned int)( vCount * sizeof(wvboVert_t) ), 4, SCE_GXM_MEMORY_ATTRIB_READ, &s_wvbo.uid );
@@ -349,33 +348,16 @@ void R_BuildWorldVBO( world_t *w )
 		return;
 	}
 	memcpy( s_wvbo.data, verts, (size_t)vCount * sizeof(wvboVert_t) );
-#else
-	size_t vramBefore = vglMemFree( VGL_MEM_VRAM );
-	size_t ramBefore  = vglMemFree( VGL_MEM_RAM );
-
-	glGenBuffers( 1, &s_wvbo.vbo );
-	glBindBuffer( GL_ARRAY_BUFFER, s_wvbo.vbo );
-	// DYNAMIC_DRAW: vitaGL then allocates RAM-first instead of VRAM-first, leaving
-	// CDRAM for textures (a failed texture upload is silent and binds stale data).
-	glBufferData( GL_ARRAY_BUFFER, (GLsizei)( vCount * sizeof(wvboVert_t) ), verts, GL_DYNAMIC_DRAW );
-	glBindBuffer( GL_ARRAY_BUFFER, 0 );
-#endif
 
 	free( verts );
 	s_wvbo.idx = idx;	// indices stay CPU-side; staged per shader run at draw time
 	s_wvbo.ready = qtrue;
 	ri.Printf( PRINT_ALL, "r_worldVBO: baked %d surfaces (%d verts, %d indices, %d KB VBO)\n",
 		rCount, vCount, iCount, (int)( ( vCount * sizeof(wvboVert_t) ) >> 10 ) );
-#ifdef USE_GXM_NATIVE
 	if ( skippedU16 ) {
 		ri.Printf( PRINT_ALL, "r_worldVBO: %d surfaces past the %d-vertex u16 limit fall back to tess\n",
 			skippedU16, WVBO_MAX_VERTS );
 	}
-#else
-	ri.Printf( PRINT_ALL, "r_worldVBO: VRAM free %u -> %u KB, RAM pool free %u -> %u KB\n",
-		(unsigned)( vramBefore >> 10 ), (unsigned)( vglMemFree( VGL_MEM_VRAM ) >> 10 ),
-		(unsigned)( ramBefore >> 10 ), (unsigned)( vglMemFree( VGL_MEM_RAM ) >> 10 ) );
-#endif
 }
 
 static wvboSurf_t *WorldVbo_Lookup( const void *surfData )
