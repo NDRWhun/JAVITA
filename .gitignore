@@ -26,3 +26,8 @@ RELEASE-*.md
 
 # stray screenshot, not repo content
 /image.png
+
+# host tool build output
+tools/texbake/texbake.exe
+tools/texbake/obj/
+tools/texbake/texcache_out/
