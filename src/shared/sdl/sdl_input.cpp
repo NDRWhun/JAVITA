@@ -1300,7 +1300,11 @@ static void IN_JoyMove( void )
 	// IN_JoyMove runs every frame (even with no game active / in the main menu),
 	// whereas CL_JoystickMove only runs in-game (cls.state gated) — so this is the
 	// place that lets the pad navigate menus the way the touchscreen does.
+#ifdef SP_GAME
 	if ( Key_GetCatcher() & KEYCATCH_UI )
+#else
+	if ( ( Key_GetCatcher() & KEYCATCH_UI ) || cls.cursorActive )	// the download prompt owns the pointer too
+#endif
 	{
 		Sint16 ax = SDL_JoystickGetAxis( stick, 0 );	// left stick X
 		Sint16 ay = SDL_JoystickGetAxis( stick, 1 );	// left stick Y

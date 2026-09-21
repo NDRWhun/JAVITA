@@ -1503,10 +1503,10 @@ void CL_KeyEvent (int key, qboolean down, unsigned time) {
 		}
 	}
 
-	// cursor-driven menus: Cross = click, Circle = back; d-pad navigates
-	if ( Key_GetCatcher() & KEYCATCH_UI ) {
+	// cursor-driven menus and the engine's download prompt: Cross = click, Circle = back; d-pad navigates
+	if ( ( Key_GetCatcher() & KEYCATCH_UI ) || cls.cursorActive ) {
 		if ( key == A_JOY3 )		// Cross: enter in d-pad mode, else click
-			key = cl_vitaHideMenuCursor ? A_ENTER : A_MOUSE1;
+			key = ( cl_vitaHideMenuCursor && !cls.cursorActive ) ? A_ENTER : A_MOUSE1;
 		else if ( key == A_JOY2 )	// Circle -> back
 			key = A_ESCAPE;
 		else if ( key == A_JOY9 )	// D-Up

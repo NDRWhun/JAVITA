@@ -2853,7 +2853,11 @@ void CL_Init( void ) {
 	cl_filterGames = Cvar_Get( "cl_filterGames", "MBII MBIIOpenBeta", CVAR_ARCHIVE_ND, "List of fs_game to filter (space separated)" );
 
 	cl_downloadName = Cvar_Get( "cl_downloadName", "", CVAR_INTERNAL );
+#ifdef VITA
+	cl_downloadPrompt = Cvar_Get( "cl_downloadPrompt", "0", CVAR_ARCHIVE, "Confirm pk3 downloads from the server" );
+#else
 	cl_downloadPrompt = Cvar_Get( "cl_downloadPrompt", "1", CVAR_ARCHIVE, "Confirm pk3 downloads from the server" );
+#endif
 	cl_downloadOverlay = Cvar_Get( "cl_downloadOverlay", "1", CVAR_ARCHIVE, "Draw download info overlay" );
 
 	cl_reconnectArgs = Cvar_Get( "cl_reconnectArgs", "", CVAR_ARCHIVE, "Arguments provided when last connecting to a server" );
