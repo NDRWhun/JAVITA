@@ -596,7 +596,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 	unsigned int width;				// mip0, after picmip + maxTextureSize clamp
 	unsigned int height;
 	unsigned int mipCount;			// 1..TEXCACHE_MAX_MIPS
-	unsigned int picmip;			// r_picmip it was baked with; mismatch = rebuild
+	unsigned int picmip;			// r_picmip it was baked with, 0 when the image ignores picmip; mismatch = rebuild
 	unsigned int texbits;			// always 0; the DXT payload never depends on r_texturebits
 	unsigned int totalSize;			// sum of per-mip sizes
 } texCacheHdrDxt_t;
@@ -659,6 +659,7 @@ typedef struct bakeJob_s {
 	int			width, height;				// after picmip and the size clamp
 	int			halvings;					// mip passes that take srcWidth to width
 	int			mipmap;
+	int			allowPicmip;
 	int			clampMode;
 	int			bytes;						// pic + blob, against BAKE_INFLIGHT_MAX
 	char		key[MAX_QPATH];
@@ -739,7 +740,7 @@ static void R_BakeChain( bakeJob_t *job )
 	hdr.width     = (unsigned)job->width;
 	hdr.height    = (unsigned)job->height;
 	hdr.mipCount  = (unsigned)job->mipCount;
-	hdr.picmip    = (unsigned)( r_picmip ? r_picmip->integer : 0 );
+	hdr.picmip    = (unsigned)( job->allowPicmip && r_picmip ? r_picmip->integer : 0 );
 	hdr.texbits   = 0;
 	hdr.totalSize = (unsigned)job->blobSize;
 	R_TexCacheStoreDxt( job->key, &hdr, job->mipSizes, job->blob );
@@ -903,6 +904,7 @@ static qboolean R_BakeEnqueue( image_t *image, unsigned *pic, int width, int hei
 	job->height    = h;
 	job->halvings  = halvings;
 	job->mipmap    = mipmap;
+	job->allowPicmip = allowPicmip;
 	job->clampMode = clampMode;
 	job->bytes     = bytes;
 	Q_strncpyz( job->key, key, sizeof( job->key ) );
@@ -1111,7 +1113,7 @@ static void Upload32( unsigned *data,
 				hdr.width     = (unsigned)width;
 				hdr.height    = (unsigned)height;
 				hdr.mipCount  = (unsigned)mipCount;
-				hdr.picmip    = (unsigned)( r_picmip ? r_picmip->integer : 0 );
+				hdr.picmip    = (unsigned)( picmip && r_picmip ? r_picmip->integer : 0 );
 				hdr.texbits   = 0;
 				hdr.totalSize = (unsigned)blobOfs;
 #ifdef USE_GXM_NATIVE
@@ -1570,7 +1572,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		|| hdr.mipCount < 1 || hdr.mipCount > TEXCACHE_MAX_MIPS
 		|| hdr.width == 0 || hdr.height == 0
 		|| (int)hdr.width > glConfig.maxTextureSize || (int)hdr.height > glConfig.maxTextureSize
-		|| hdr.picmip != (unsigned)( r_picmip ? r_picmip->integer : 0 ) )
+		|| hdr.picmip != (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 ) )
 	{
 		sceIoClose( fd );
 		return NULL;

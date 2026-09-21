@@ -590,7 +590,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 	unsigned int width;				// mip0, after picmip + maxTextureSize clamp
 	unsigned int height;
 	unsigned int mipCount;			// 1..TEXCACHE_MAX_MIPS
-	unsigned int picmip;			// r_picmip it was baked with; mismatch = rebuild
+	unsigned int picmip;			// r_picmip it was baked with, 0 when the image ignores picmip; mismatch = rebuild
 	unsigned int texbits;			// always 0; the DXT payload never depends on r_texturebits
 	unsigned int totalSize;			// sum of per-mip sizes
 } texCacheHdrDxt_t;
@@ -894,7 +894,7 @@ static void Upload32( unsigned *data,
 			    hdr.width     = (unsigned)width;
 			    hdr.height    = (unsigned)height;
 			    hdr.mipCount  = (unsigned)mipCount;
-			    hdr.picmip    = (unsigned)( r_picmip ? r_picmip->integer : 0 );
+			    hdr.picmip    = (unsigned)( picmip && r_picmip ? r_picmip->integer : 0 );
 			    hdr.texbits   = 0;
 			    hdr.totalSize = (unsigned)blobOfs;
 #ifdef USE_GXM_NATIVE
@@ -1352,7 +1352,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		|| hdr.width == 0 || hdr.height == 0
 		|| ( hdr.width & ( hdr.width - 1 ) ) || ( hdr.height & ( hdr.height - 1 ) )
 		|| (int)hdr.width > glConfig.maxTextureSize || (int)hdr.height > glConfig.maxTextureSize
-		|| hdr.picmip != (unsigned)( r_picmip ? r_picmip->integer : 0 ) )
+		|| hdr.picmip != (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 ) )
 	{
 		sceIoClose( fd );
 		return NULL;
