@@ -210,4 +210,8 @@ void		WIN_MakeCurrent( void );
 void *		WIN_GL_GetProcAddress( const char *proc );
 qboolean	WIN_GL_ExtensionSupported( const char *extension );
 
+#ifdef VITA
+void		Sys_BootMark( const char *s );	// unbuffered boot-milestone trail (sys_modules.cpp)
+#endif
+
 uint8_t ConvertUTF32ToExpectedCharset( uint32_t utf32 );

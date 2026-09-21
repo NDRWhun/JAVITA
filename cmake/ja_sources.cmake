@@ -139,6 +139,7 @@ set(JA_SOURCES
     src/shared/sys/snapvector.cpp
     src/shared/sys/sys_event.cpp
     src/shared/sys/sys_main.cpp
+    src/vita/sys_modules.cpp
     src/shared/sys/sys_unix.cpp
     # ---- JKA SP game module (code/) ----
     src/code/game/AI_Animal.cpp

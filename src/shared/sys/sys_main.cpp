@@ -34,6 +34,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #ifdef VITA
 #include <psp2/apputil.h>
+#include <psp2/ctrl.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/appmgr.h>
@@ -308,6 +309,10 @@ void Sys_UnloadDll( void *dllHandle )
 		return;
 	}
 
+#ifdef VITA
+	if ( dllHandle == (void *)1 )
+		return;	// static-module pseudo handle (Sys_LoadGameDll)
+#endif
 	Sys_UnloadLibrary(dllHandle);
 }
 
@@ -621,6 +626,12 @@ void *Sys_LoadSPGameDll( const char *name, GetGameAPIProc **GetGameAPI )
 
 void *Sys_LoadGameDll( const char *name, GetModuleAPIProc **moduleAPI )
 {
+#if defined(VITA) && !defined(SP_GAME)
+	// no dlopen: modules are partially linked in with per-module GetModuleAPI aliases
+	extern GetModuleAPIProc *Sys_VitaStaticModuleAPI( const char *name );
+	*moduleAPI = Sys_VitaStaticModuleAPI( name );
+	return *moduleAPI ? (void *)1 : NULL;
+#endif
 	void	*libHandle = NULL;
 	char	filename[MAX_OSPATH];
 
@@ -762,15 +773,52 @@ char *Sys_StripAppBundle( char *dir )
 #	endif
 #endif
 
+#ifdef VITA
+/*
+=================
+Sys_Vita_CheckConfigGate
+
+The LiveArea "Configuration" gate launches us with a "-config" param
+(target psla:-config). On that, hand off to companion.bin before we touch
+SDL/vitaGL -- it owns its own GL context and re-launches eboot.bin when done.
+=================
+*/
+static void Sys_Vita_CheckConfigGate( void )
+{
+	SceAppUtilInitParam initParam;
+	SceAppUtilBootParam bootParam;
+	memset( &initParam, 0, sizeof( initParam ) );
+	memset( &bootParam, 0, sizeof( bootParam ) );
+	sceAppUtilInit( &initParam, &bootParam );
+
+	SceAppUtilAppEventParam eventParam;
+	memset( &eventParam, 0, sizeof( eventParam ) );
+	sceAppUtilReceiveAppEvent( &eventParam );
+
+	if ( eventParam.type == 0x05 ) {
+		char buffer[2048];
+		memset( buffer, 0, sizeof( buffer ) );
+		sceAppUtilAppEventParseLiveArea( &eventParam, buffer );
+		// configurator disabled: the -config gate is gone from template.xml. to
+		// re-enable, restore that and drop the 0 below.
+		if ( 0 && strstr( buffer, "-config" ) )
+			sceAppMgrLoadExec( "app0:/companion.bin", NULL, NULL );
+	}
+}
+#endif
+
 int main ( int argc, char* argv[] )
 {
 	int		i;
 	char	commandLine[ MAX_STRING_CHARS ] = { 0 };
 
 #ifdef VITA
+	Sys_BootMark( "main" );
 	// deterministic core layout: main 1, G2 skin worker + mixer 0, render backend 2
 	sceKernelChangeThreadCpuAffinityMask( sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_1 );
+	Sys_Vita_CheckConfigGate();
 #endif
+
 	Sys_PlatformInit( argc, argv );
 	CON_Init();
 
@@ -801,7 +849,28 @@ int main ( int argc, char* argv[] )
 		Q_strcat( commandLine, sizeof( commandLine ), " " );
 	}
 
+#ifdef VITA
+	// safe mode: L held at launch -> single-threaded renderer, sync sound loads
+	{
+		SceCtrlData pad;
+		memset( &pad, 0, sizeof( pad ) );
+		sceCtrlPeekBufferPositive( 0, &pad, 1 );
+		if ( pad.buttons & SCE_CTRL_LTRIGGER ) {
+			Sys_BootMark( "safe mode" );
+			Q_strcat( commandLine, sizeof( commandLine ),
+				"+set r_renderThread 0 +set s_asyncLoad 0 +set s_mixThread 0 " );
+		}
+	}
+#endif
+
 	Com_Init (commandLine);
+
+#ifdef VITA
+	{
+		extern void Sys_StartStallWatchdog( void );
+		Sys_StartStallWatchdog();
+	}
+#endif
 
 #ifndef DEDICATED
 	SDL_version compiled;

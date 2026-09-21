@@ -37,8 +37,8 @@ GPL_HEADER = [
 ]
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QGL_H = os.path.join(HERE, "src", "code", "rd-vanilla", "qgl.h")
-DST = os.path.join(HERE, "src", "code", "rd-gxm", "qgl_gxm.h")
+QGL_H = os.path.join(HERE, "src", "codemp","rd-vanilla", "qgl.h")
+DST = os.path.join(HERE, "src", "codemp","rd-gxm", "qgl_gxm.h")
 SCAN_DIRS = ("rd-vanilla", "rd-common")
 
 # the only qgl entry points whose return value is read anywhere
@@ -86,7 +86,7 @@ qgl_names = sorted(set(qgl_re.findall(qgl_h_text)))
 ext_re = re.compile(r"^extern\s+PFN\w+\s+(qgl\w+)\s*;", re.M)
 ext_all = set(ext_re.findall(qgl_h_text))
 ext_local = set(re.findall(r"(qgl[A-Za-z0-9_]+)\s*=",
-                io.open(os.path.join(HERE, "src", "code", "rd-vanilla", "gl_vita_ext.cpp"),
+                io.open(os.path.join(HERE, "src", "codemp","rd-vanilla", "gl_vita_ext.cpp"),
                         encoding="latin1", errors="replace").read()))
 # These are used both as calls and as bare truthiness tests (`if (qglX)`), so a
 # function-like macro would vanish in the test. They map to real no-op functions.
@@ -94,8 +94,6 @@ POINTER_NOOPS = {
     "qglActiveTextureARB": ("GXM_NoOpTexUnit", "unsigned int"),
     "qglClientActiveTextureARB": ("GXM_NoOpTexUnit", "unsigned int"),
     "qglMultiTexCoord2fARB": ("GXM_NoOpMultiTexCoord2f", "unsigned int, float, float"),
-    "qglStencilOpSeparate": ("GXM_NoOpStencilOpSeparate",
-                             "unsigned int, unsigned int, unsigned int, unsigned int"),
 }
 qgl_names = sorted(set(qgl_names) | (ext_all - ext_local))
 # gl_vita_ext.cpp already provides real no-op definitions for these, and some are
@@ -105,7 +103,7 @@ qgl_names = [n for n in qgl_names if n not in POINTER_NOOPS and n not in KEEP_LO
 
 direct = set()
 for d in SCAN_DIRS:
-    dirpath = os.path.join(HERE, "src", "code", d)
+    dirpath = os.path.join(HERE, "src", "codemp",d)
     if not os.path.isdir(dirpath):
         continue
     for fn in sorted(os.listdir(dirpath)):
@@ -137,6 +135,12 @@ out = GPL_HEADER + [
     "void GXM_SetDepthRange( float zNear, float zFar );",
     "void GXM_SetDepthBias( float factor, float units );",
     "void GXM_ImmBegin( unsigned int glMode );",
+    "void GXM_SetStencilTest( int enable );",
+    "void GXM_SetStencilFunc( unsigned int func, int ref, unsigned int mask );",
+    "void GXM_SetStencilMask( unsigned int mask );",
+    "void GXM_SetStencilOp( unsigned int sfail, unsigned int dfail, unsigned int dpass );",
+    "void GXM_SetStencilOpSeparate( unsigned int face, unsigned int sfail, unsigned int dfail, unsigned int dpass );",
+    "void GXM_SetColorMask( int r, int g, int b, int a );",
     "void GXM_ImmTexCoord2f( float s, float t );",
     "void GXM_ImmColor4f( float r, float g, float b, float a );",
     "void GXM_ImmColor4ubv( const unsigned char *c );",
@@ -165,6 +169,21 @@ for n in qgl_names:
         out.append("#define %s(n, f) GXM_SetDepthRange((float)(n), (float)(f))" % n)
     elif n == "qglPolygonOffset":
         out.append("#define %s(f, u) GXM_SetDepthBias((f), (u))" % n)
+    # stencil and the colour mask are real state the shadow volumes depend on
+    elif n == "qglColorMask":
+        out.append("#define %s(r, g, b, a) GXM_SetColorMask((int)(r), (int)(g), (int)(b), (int)(a))" % n)
+    elif n == "qglStencilFunc":
+        out.append("#define %s(f, r, m) GXM_SetStencilFunc((unsigned int)(f), (int)(r), (unsigned int)(m))" % n)
+    elif n == "qglStencilMask":
+        out.append("#define %s(m) GXM_SetStencilMask((unsigned int)(m))" % n)
+    elif n == "qglStencilOp":
+        out.append("#define %s(sf, df, dp) GXM_SetStencilOp((unsigned int)(sf), (unsigned int)(df), (unsigned int)(dp))" % n)
+    elif n == "qglStencilOpSeparate":
+        out.append("#define %s GXM_SetStencilOpSeparate" % n)
+    elif n == "qglEnable":
+        out.append("#define %s(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(1); } while (0)" % n)
+    elif n == "qglDisable":
+        out.append("#define %s(cap) do { if ((cap) == 0x0B90) GXM_SetStencilTest(0); else if ((cap) == 0x8037 || (cap) == 0x2A02) GXM_SetDepthBias(0.0f, 0.0f); } while (0)\t// stencil + polygon offset fill/line" % n)
     # the remaining glBegin/glVertex blocks: weather, the cinematic quad, shadows
     elif n in IMMEDIATE:
         out.append("#define %s%s" % (n, IMMEDIATE[n]))

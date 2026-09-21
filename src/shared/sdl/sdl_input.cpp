@@ -26,6 +26,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "sys/sys_local.h"
 
 #ifdef VITA
+#ifndef SP_GAME
+qboolean cl_vitaHideMenuCursor = qfalse;	// menu pointer visibility; single player defines it in cl_keys.cpp
+#endif
 #include <psp2/touch.h>		// rear touch panel -> A_AUX combo zones
 static cvar_t *vita_rearTouch = NULL;
 #endif
@@ -682,6 +685,7 @@ void IN_Init( void *windowData )
 	//   Down=JOY7 Left=JOY8 Up=JOY9 Right=JOY10 Select=JOY11 Start=JOY12
 	vita_rearTouch = Cvar_Get( "vita_rearTouch", "1", CVAR_ARCHIVE );	// rear-panel zones on/off
 
+
 	// first run only; IN_Init also runs on vid_restart and would overwrite the player's binds
 	cvar_t *vitaDefaultBinds = Cvar_Get( "vita_defaultBinds", "1", CVAR_ARCHIVE );
 	if ( vitaDefaultBinds->integer ) {
@@ -708,14 +712,23 @@ void IN_Init( void *windowData )
 	}
 
 	// Print the full control map so it's discoverable in the console / log.
+#ifdef SP_GAME
 	Com_Printf( "\n^3JAVITA controls:^7\n"
+#else
+	Com_Printf( "\n^3JAMPVITA controls:^7\n"
+#endif
 		"  L Stick: move   R Stick: look\n"
 		"  R: attack   L: alt-attack   Cross: jump   Square: crouch\n"
 		"  Circle: use   Triangle: use force   D-pad UD: weapons   D-pad LR: force select\n"
 		"  Start: menu   Select: objectives   Start+Select: console\n"
 		"  Rear top-LEFT = HOLD modifier, then:\n"
+#ifdef SP_GAME
 		"    +Triangle force-speed  +Circle force-heal  +Cross force-push  +Square force-pull\n"
 		"    +R saber-stance  +D-pad U/D inv-next/prev  +D-pad L inv-use  +D-pad R quick-saber\n"
+#else
+		"    +Triangle taunt  +Circle engage-duel  +Square saber-stance\n"
+		"    +D-pad U/D inv-next/prev  +D-pad L/R force-prev/next\n"
+#endif
 		"  Rear top-right: zoom   rear bottom-left: force-fire   rear bottom-right: run\n"
 		"  (disable rear touch: vita_rearTouch 0)\n\n" );
 #endif

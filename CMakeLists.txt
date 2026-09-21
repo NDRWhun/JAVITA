@@ -1,10 +1,12 @@
 #============================================================================
-# JAVITA — Jedi Knight: Jedi Academy (Single Player) for PlayStation Vita
+# Jedi Knight: Jedi Academy for PlayStation Vita
 #
-# Single statically-linked ELF -> .self -> .vpk via the VitaSDK toolchain.
-# Engine/renderer + game/cgame/icarus = OpenJK code/ (Jedi Academy single-player).
+# One tree, two statically-linked ELFs -> .self -> .vpk via the VitaSDK toolchain.
+#   JAVITA.vpk    single player, OpenJK code/
+#   JAMPVITA.vpk  multiplayer,   OpenJK codemp/ (game/cgame/ui partially linked)
+# Both render through the native sceGxm backend; there is no vitaGL.
 #============================================================================
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 
 # --- VitaSDK toolchain ---
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -24,50 +26,26 @@ set(CMAKE_CXX_STANDARD 14)
 
 include("${VITASDK}/share/vita.cmake" REQUIRED)
 
-set(VITA_APP_NAME "JAVITA: Jedi Academy")
-set(VITA_TITLEID  "JAVITA001")
+if(NOT CMAKE_OBJCOPY)
+  find_program(CMAKE_OBJCOPY arm-vita-eabi-objcopy)
+endif()
+if(NOT CMAKE_LINKER)
+  find_program(CMAKE_LINKER arm-vita-eabi-ld)
+endif()
+
 set(PORT_VERSION  "1.0.0")
 set(VITA_VERSION  "01.00")	# SFO APP_VER is NN.NN and cannot carry the patch digit
 
-#----------------------------------------------------------------------------
-# Include domains: native OpenJK Jedi Academy single-player (code/).
-#----------------------------------------------------------------------------
-include_directories(
-  ${CMAKE_SOURCE_DIR}/src/compat   # newlib gap-fillers (e.g. <endian.h>); must be first
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/code/game
-  ${CMAKE_SOURCE_DIR}/src/code/cgame
-  ${CMAKE_SOURCE_DIR}/src/code/icarus
-  ${CMAKE_SOURCE_DIR}/src/code
-  ${CMAKE_SOURCE_DIR}/src/code/rd-common
-  ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla
-  ${CMAKE_SOURCE_DIR}/src/shared
-  ${CMAKE_SOURCE_DIR}/src/lib/gsl-lite/include
-  ${CMAKE_SOURCE_DIR}/src/lib/minizip/include
-  ${CMAKE_SOURCE_DIR}/src/lib/minizip/include/minizip
-  ${CMAKE_BINARY_DIR}/generated
-)
-
-# Generate qcommon/q_version.h (normally produced by OpenJK's build).
-set(GIT_TAG "JAVITA-${PORT_VERSION}")
-set(SOURCE_DATE "${CMAKE_BUILD_TYPE}")
-configure_file(
-  ${CMAKE_SOURCE_DIR}/src/shared/qcommon/q_version.h.in
-  ${CMAKE_BINARY_DIR}/generated/qcommon/q_version.h
-  @ONLY)
-configure_file(
-  ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/template.xml.in
-  ${CMAKE_BINARY_DIR}/generated/livearea/template.xml
-  @ONLY)
+set(SP_APP_NAME   "JAVITA: Jedi Academy")
+set(SP_TITLEID    "JAVITA001")
+set(MP_APP_NAME   "JAMPVITA: Jedi Academy MP")
+set(MP_TITLEID    "JAMPV0001")
 
 #----------------------------------------------------------------------------
-# Defines.
-#  SP_GAME / _JK2EXE : OpenJK single-player build (engine + game unified)
-#  VITA / __linux__  : Vita platform + take the unix code paths
+# Defines and flags shared by both games. SP_GAME/_JK2EXE are single-player
+# only and are set on that target, since shared/ code branches on them.
 #----------------------------------------------------------------------------
-add_compile_definitions(
-  SP_GAME
-  _JK2EXE
+set(JK_COMMON_DEFINES
   VITA
   __linux__
   ARCH_STRING="arm"
@@ -76,24 +54,51 @@ add_compile_definitions(
   __FLOAT_WORD_ORDER=1
   IOAPI_NO_64          # minizip: use fopen (newlib has no fopen64)
 )
+add_compile_definitions(${JK_COMMON_DEFINES})
 
-#----------------------------------------------------------------------------
-# Flags (StaticJK-proven ARM/NEON hard-float set).
-#----------------------------------------------------------------------------
-set(JAVITA_ARCH_FLAGS
+set(JK_ARCH_FLAGS
   -g -O3
   -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
   -ffast-math -fsigned-char -fno-short-enums
   -fsingle-precision-constant -fno-optimize-sibling-calls
 )
-add_compile_options(${JAVITA_ARCH_FLAGS})
+add_compile_options(${JK_ARCH_FLAGS})
 # C++ needs permissive (legacy id-Tech-3 era code) + GNU visibility.
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fpermissive>)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-D__GNU_VISIBLE>)
 
+# the module isolation block below still reads these names
+set(JAMP_COMMON_DEFINES ${JK_COMMON_DEFINES})
+set(JAMP_ARCH_FLAGS ${JK_ARCH_FLAGS})
+
 #----------------------------------------------------------------------------
-# Source set (see cmake/ja_sources.cmake).
+# Include domains every target shares; the per-game trees are set per target.
 #----------------------------------------------------------------------------
+include_directories(
+  ${CMAKE_SOURCE_DIR}/src/compat   # newlib gap-fillers (e.g. <endian.h>); must be first
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/shared
+  ${CMAKE_SOURCE_DIR}/src/lib/gsl-lite/include
+  ${CMAKE_SOURCE_DIR}/src/lib/minizip/include
+  ${CMAKE_SOURCE_DIR}/src/lib/minizip/include/minizip
+)
+
+# Each game gets its own qcommon/q_version.h so the banners do not collide.
+set(SOURCE_DATE "${CMAKE_BUILD_TYPE}")
+set(GIT_TAG "JAVITA-${PORT_VERSION}")
+configure_file(
+  ${CMAKE_SOURCE_DIR}/src/shared/qcommon/q_version.h.in
+  ${CMAKE_BINARY_DIR}/generated/sp/qcommon/q_version.h
+  @ONLY)
+set(GIT_TAG "JAMPVITA-${PORT_VERSION}")
+configure_file(
+  ${CMAKE_SOURCE_DIR}/src/shared/qcommon/q_version.h.in
+  ${CMAKE_BINARY_DIR}/generated/mp/qcommon/q_version.h
+  @ONLY)
+configure_file(
+  ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/template.xml.in
+  ${CMAKE_BINARY_DIR}/generated/livearea/template.xml
+  @ONLY)
 
 # Build SDL2 from the submodule with the vitaGL video driver off: the SDK's prebuilt
 # SDL2 pulls SDL_vitagles_vgl.c, which references vgl* symbols we no longer link
@@ -106,37 +111,8 @@ set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
 set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SDL-vitagl EXCLUDE_FROM_ALL)
 
-include(${CMAKE_SOURCE_DIR}/cmake/ja_sources.cmake)
-
-# Native GXM renderer backend, plus the bridge that rd-vanilla issues its draws through.
-set(GXM_SOURCES
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_device.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_state.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_backend.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla/tr_gxm_bridge.cpp
-)
-
-add_executable(${PROJECT_NAME}.elf ${JA_SOURCES} ${GXM_SOURCES})
-target_compile_definitions(${PROJECT_NAME}.elf PRIVATE USE_GXM_NATIVE)
-
-# mp3code's global `window` (float decode table) collides with rd-vanilla's
-# `window_t window`. Rename it consistently across the (self-contained) mp3
-# decoder only, via a per-file macro -- no source edits, no effect elsewhere.
-file(GLOB JK2_MP3_SOURCES ${CMAKE_SOURCE_DIR}/src/code/mp3code/*.c)
-set_source_files_properties(${JK2_MP3_SOURCES} PROPERTIES COMPILE_DEFINITIONS "window=mp3code_window")
-
-target_link_libraries(${PROJECT_NAME}.elf
-  SDL2-static
-  # image / compression
-  jpeg
-  png16
-  z
-  # math
-  mathneon
-  # C++ runtime
-  stdc++
-  # Sce stubs
+# The Sce stubs both ELFs link, in one place.
+set(JK_SCE_STUBS
   SceGxm_stub
   SceDisplay_stub
   SceCtrl_stub
@@ -149,22 +125,160 @@ target_link_libraries(${PROJECT_NAME}.elf
   SceIme_stub
   SceSysmodule_stub
   SceKernelDmacMgr_stub
+  SceAppMgr_stub
+  SceAppUtil_stub
   ScePower_stub
   SceNet_stub
   SceNetCtl_stub
-  c
-  m
 )
 
-#----------------------------------------------------------------------------
-# Package: ELF -> SELF -> VPK
-#----------------------------------------------------------------------------
-vita_create_self(${PROJECT_NAME}.self ${PROJECT_NAME}.elf UNSAFE)
+include(${CMAKE_SOURCE_DIR}/cmake/ja_sources.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/jamp_sources.cmake)
 
+#============================================================================
+# Single player: JAVITA.elf
+#============================================================================
+set(SP_GXM_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_device.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla/tr_gxm_bridge.cpp
+)
+
+add_executable(JAVITA.elf ${JA_SOURCES} ${SP_GXM_SOURCES})
+target_compile_definitions(JAVITA.elf PRIVATE USE_GXM_NATIVE SP_GAME _JK2EXE)
+target_include_directories(JAVITA.elf PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/code/game
+  ${CMAKE_SOURCE_DIR}/src/code/cgame
+  ${CMAKE_SOURCE_DIR}/src/code/icarus
+  ${CMAKE_SOURCE_DIR}/src/code
+  ${CMAKE_SOURCE_DIR}/src/code/rd-common
+  ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla
+  ${CMAKE_BINARY_DIR}/generated/sp
+)
+target_link_libraries(JAVITA.elf
+  SDL2-static
+  jpeg png16 z
+  mathneon
+  stdc++
+  ${JK_SCE_STUBS}
+  c m
+)
+
+# mp3code's global `window` (float decode table) collides with rd-vanilla's
+# `window_t window`. Rename it consistently across the (self-contained) mp3
+# decoder only, via a per-file macro -- no source edits, no effect elsewhere.
+file(GLOB SP_MP3_SOURCES ${CMAKE_SOURCE_DIR}/src/code/mp3code/*.c)
+set_source_files_properties(${SP_MP3_SOURCES} PROPERTIES COMPILE_DEFINITIONS "window=mp3code_window")
+
+#============================================================================
+# Multiplayer: JAMPVITA.elf
+#
+# game/cgame/ui cannot be dlopened on the Vita and their bg_* copies collide,
+# so each is partially linked and its symbols localized behind one entry point.
+#============================================================================
+file(GLOB JAMP_BOTLIB_SOURCES ${CMAKE_SOURCE_DIR}/src/codemp/botlib/*.cpp)
+set_source_files_properties(${JAMP_BOTLIB_SOURCES} PROPERTIES COMPILE_DEFINITIONS "BOTLIB")
+
+file(GLOB MP_MP3_SOURCES ${CMAKE_SOURCE_DIR}/src/codemp/mp3code/*.c)
+set_source_files_properties(${MP_MP3_SOURCES} PROPERTIES COMPILE_DEFINITIONS "window=mp3code_window")
+
+function(add_isolated_module MOD SUFFIX MODDEFINE)
+  add_library(${MOD}_objs OBJECT ${ARGN})
+  target_compile_definitions(${MOD}_objs PRIVATE ${JAMP_COMMON_DEFINES} ${MODDEFINE})
+  target_compile_options(${MOD}_objs PRIVATE ${JAMP_ARCH_FLAGS})
+  target_include_directories(${MOD}_objs PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/compat
+    ${CMAKE_SOURCE_DIR}/src/codemp
+    ${CMAKE_SOURCE_DIR}/src/codemp/game
+    ${CMAKE_SOURCE_DIR}/src/shared
+    ${CMAKE_BINARY_DIR}/generated/mp
+  )
+  set(rsp ${CMAKE_BINARY_DIR}/${MOD}_objs.rsp)
+  file(GENERATE OUTPUT ${rsp} CONTENT "$<JOIN:$<TARGET_OBJECTS:${MOD}_objs>,\n>")
+  set(out ${CMAKE_BINARY_DIR}/${MOD}_module.o)
+  add_custom_command(OUTPUT ${out}
+    COMMAND ${CMAKE_LINKER} -r -o ${CMAKE_BINARY_DIR}/${MOD}_pre.o @${rsp}
+    COMMAND ${CMAKE_OBJCOPY} --redefine-sym GetModuleAPI=GetModuleAPI_${SUFFIX} ${CMAKE_BINARY_DIR}/${MOD}_pre.o
+    COMMAND ${CMAKE_OBJCOPY} -G GetModuleAPI_${SUFFIX} ${CMAKE_BINARY_DIR}/${MOD}_pre.o ${out}
+    DEPENDS ${MOD}_objs ${rsp} $<TARGET_OBJECTS:${MOD}_objs>
+    COMMENT "Isolating module ${MOD} (entry GetModuleAPI_${SUFFIX})"
+    COMMAND_EXPAND_LISTS)
+  set_source_files_properties(${out} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+  set(${MOD}_MODULE_OBJECT ${out} PARENT_SCOPE)
+endfunction()
+
+add_isolated_module(jampgame game  _GAME    ${JAMP_GAME_SOURCES})
+add_isolated_module(cgame    cgame _CGAME   ${JAMP_CGAME_SOURCES})
+add_isolated_module(ui       ui    UI_BUILD ${JAMP_UI_SOURCES})
+
+set(MP_GXM_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_device.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_texture.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-vanilla/tr_gxm_bridge.cpp
+)
+
+add_executable(JAMPVITA.elf
+  ${JAMP_ENGINE_SOURCES}
+  ${JAMP_PLATFORM_SOURCES}
+  ${MP_GXM_SOURCES}
+  ${jampgame_MODULE_OBJECT}
+  ${cgame_MODULE_OBJECT}
+  ${ui_MODULE_OBJECT}
+)
+target_compile_definitions(JAMPVITA.elf PRIVATE USE_GXM_NATIVE)
+target_include_directories(JAMPVITA.elf PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/codemp
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-common
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-vanilla
+  ${CMAKE_BINARY_DIR}/generated/mp
+)
+target_link_libraries(JAMPVITA.elf
+  SDL2-static
+  jpeg png16 z
+  mathneon
+  stdc++
+  ${JK_SCE_STUBS}
+  c m
+)
+
+#============================================================================
+# Package: ELF -> SELF -> VPK, once per game.
+#
+# vita-elf-create walks the whole input and corrupts its heap near these ELF
+# sizes; the stripped copy keeps the basename so the module name is unchanged.
+#============================================================================
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
-vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
+
+foreach(GAME JAVITA JAMPVITA)
+  set(PKG_ELF ${CMAKE_BINARY_DIR}/package/${GAME}.elf)
+  add_custom_command(OUTPUT ${PKG_ELF}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/package
+    COMMAND ${CMAKE_OBJCOPY} --strip-debug $<TARGET_FILE:${GAME}.elf> ${PKG_ELF}
+    DEPENDS ${GAME}.elf
+    COMMENT "Stripping debug info for packaging ${GAME}"
+    VERBATIM)
+  add_custom_target(${GAME}-package-elf ALL DEPENDS ${PKG_ELF})
+  vita_create_self(${GAME}.self ${PKG_ELF} UNSAFE)
+  add_dependencies(${GAME}.elf-velf ${GAME}-package-elf)
+endforeach()
+
+vita_create_vpk(JAVITA.vpk ${SP_TITLEID} JAVITA.self
   VERSION ${VITA_VERSION}
-  NAME ${VITA_APP_NAME}
+  NAME ${SP_APP_NAME}
+  FILE ${CMAKE_SOURCE_DIR}/sce_sys/icon0.png sce_sys/icon0.png
+  FILE ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
+  FILE ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
+  FILE ${CMAKE_BINARY_DIR}/generated/livearea/template.xml sce_sys/livearea/contents/template.xml
+)
+
+# shares the single-player LiveArea art for now; only the SFO name differs
+vita_create_vpk(JAMPVITA.vpk ${MP_TITLEID} JAMPVITA.self
+  VERSION ${VITA_VERSION}
+  NAME ${MP_APP_NAME}
   FILE ${CMAKE_SOURCE_DIR}/sce_sys/icon0.png sce_sys/icon0.png
   FILE ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
   FILE ${CMAKE_SOURCE_DIR}/sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
