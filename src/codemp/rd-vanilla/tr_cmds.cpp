@@ -23,6 +23,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 
+#ifdef USE_GXM_NATIVE
+#include "../rd-gxm/gxm_device.h"	// GXM_Sync
+#endif
+
 
 /*
 =====================
@@ -136,6 +140,9 @@ static int renderThread( SceSize argc, void *argv ) {
 			ri.WIN_Present( &window );
 			sceGxmTransferFinish();
 			qglFinish();
+#ifdef USE_GXM_NATIVE
+			GXM_Sync();	// the first scene must be done before main starts uploading
+#endif
 			Sys_BootMark( "rt: ctx done" );
 			pendingCtxInit = qfalse;
 			sceKernelSignalSema( rend_init_done, 1 );	// release main from step-5 wait
