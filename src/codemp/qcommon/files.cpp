@@ -827,6 +827,12 @@ fileHandle_t FS_SV_FOpenFileWrite( const char *filename ) {
 	if (!fsh[f].handleFiles.file.o) {
 		f = 0;
 	}
+#ifdef VITA
+	else {
+		// downloads arrive in 2 KB blocks; a larger stdio buffer turns them into fewer card writes
+		setvbuf( fsh[f].handleFiles.file.o, NULL, _IOFBF, 64 * 1024 );
+	}
+#endif
 	return f;
 }
 
