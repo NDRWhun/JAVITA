@@ -111,6 +111,7 @@ set(JAMP_ENGINE_SOURCES
     src/codemp/qcommon/stringed_interface.cpp
     src/codemp/qcommon/vm.cpp
     src/codemp/qcommon/z_memman_pc.cpp
+    src/codemp/rd-common/tr_dxt.cpp
     src/codemp/rd-common/tr_font.cpp
     src/codemp/rd-common/tr_image_jpg.cpp
     src/codemp/rd-common/tr_image_load.cpp

@@ -601,7 +601,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 	unsigned int totalSize;			// sum of per-mip sizes
 } texCacheHdrDxt_t;
 
-extern "C" void stb_compress_dxt_block( unsigned char *dst, const unsigned char *src, int alpha, int mode );
+#include "../rd-common/tr_dxt.h"
 
 static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 								const unsigned *mipSizes, const byte *blob );
@@ -636,7 +636,7 @@ static int R_DxtEncodeUploadAppend( int level, GLenum glFmt, int w, int h, const
 					brow[cc*4+2] = s[2]; brow[cc*4+3] = s[3];
 				}
 			}
-			stb_compress_dxt_block( dst, block, isDxt5, mode );
+			R_CompressDxtBlock( dst, block, isDxt5, mode != 0 );
 			dst += blockBytes;
 		}
 	}
