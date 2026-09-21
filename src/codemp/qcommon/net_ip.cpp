@@ -375,7 +375,7 @@ qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, fd_set *fdr ) {
 	}
 #endif
 
-	memset( from.sin_zero, 0, 8 );
+	memset( from.sin_zero, 0, sizeof( from.sin_zero ) );
 
 	if ( usingSocks && memcmp( &from, &socksRelayAddr, fromlen ) == 0 ) {
 		if ( ret < 10 || net_message->data[0] != 0 || net_message->data[1] != 0 || net_message->data[2] != 0 || net_message->data[3] != 1 ) {
@@ -827,7 +827,7 @@ void NET_OpenSocks( int port ) {
 	socksRelayAddr.sin_family = AF_INET;
 	memcpy( &socksRelayAddr.sin_addr, &buf[4], 4 );
 	memcpy( &socksRelayAddr.sin_port, &buf[8], 2 );
-	memset( &socksRelayAddr.sin_zero, 0, 8 );
+	memset( &socksRelayAddr.sin_zero, 0, sizeof( socksRelayAddr.sin_zero ) );
 
 	usingSocks = qtrue;
 }
