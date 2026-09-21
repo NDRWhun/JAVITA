@@ -3056,6 +3056,26 @@ static void FS_Restart_f( void ) {
 
 //===========================================================================
 
+// downloaded paks carry the referenced pak's name, so the name alone says whether the server can want one
+static qboolean FS_DownloadedPakMayBeReferenced( const char *pakfile ) {
+	int i;
+
+	for ( i = 0; i < fs_numServerReferencedPaks; i++ ) {
+		const char *name = fs_serverReferencedPakNames[i];
+		const char *slash;
+
+		if ( !name )
+			continue;
+		slash = strrchr( name, '/' );
+		if ( slash )
+			name = slash + 1;
+		if ( !Q_stricmp( pakfile, va( "dl_%s.pk3", name ) ) ||
+			 !Q_stricmp( pakfile, va( "dl_%s.%08x.pk3", name, fs_serverReferencedPaks[i] ) ) )
+			return qtrue;
+	}
+	return qfalse;
+}
+
 static int QDECL paksort( const void *a, const void *b ) {
 	char	*aa, *bb;
 
@@ -3130,10 +3150,13 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 		pakfile = FS_BuildOSPath( path, dir, pakfiles[i] );
 		filename = get_filename(pakfile);
 
+		// files beginning with "dl_" are only loaded when referenced by the server
+		if ( !Q_stricmpn( filename, "dl_", 3 ) && !FS_DownloadedPakMayBeReferenced( filename ) )
+			continue;
+
 		if ( ( pak = FS_LoadZipFile( pakfile, pakfiles[i] ) ) == 0 )
 			continue;
 
-		// files beginning with "dl_" are only loaded when referenced by the server
 		if (!Q_stricmpn(filename, "dl_", 3)) {
 			int j;
 			qboolean found = qfalse;
