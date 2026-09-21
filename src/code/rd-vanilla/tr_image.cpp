@@ -1476,15 +1476,23 @@ static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 		sceIoMkdir( dir, 0777 );
 		s_dxtDirReady = qtrue;
 	}
-	char path[256];
+	char path[256], tmp[264];
 	R_TexCacheDxt_Path( name, path, sizeof(path) );
-	// Always overwrite (no exists-check) so a stale or corrupt entry just gets rewritten.
-	SceUID fd = sceIoOpen( path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666 );
+	Com_sprintf( tmp, sizeof(tmp), "%s.tmp", path );
+	// written beside the entry and renamed over it, so a short write never destroys a good file
+	SceUID fd = sceIoOpen( tmp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666 );
 	if ( fd < 0 ) return;
-	sceIoWrite( fd, hdr, sizeof(*hdr) );
-	sceIoWrite( fd, mipSizes, hdr->mipCount * sizeof(unsigned) );
-	sceIoWrite( fd, blob, hdr->totalSize );
+	const int hdrLen = (int)sizeof(*hdr), mipLen = (int)( hdr->mipCount * sizeof(unsigned) );
+	const qboolean ok = (qboolean)( sceIoWrite( fd, hdr, hdrLen ) == hdrLen
+		&& sceIoWrite( fd, mipSizes, mipLen ) == mipLen
+		&& sceIoWrite( fd, blob, hdr->totalSize ) == (int)hdr->totalSize );
 	sceIoClose( fd );
+	if ( !ok ) {
+		sceIoRemove( tmp );
+		return;
+	}
+	sceIoRemove( path );
+	sceIoRename( tmp, path );
 }
 #endif // VITA
 
