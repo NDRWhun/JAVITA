@@ -29,7 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/gxm_device.h"
+#include "rd-gxm/gxm_device.h"
 #endif
 
 #ifdef VITA

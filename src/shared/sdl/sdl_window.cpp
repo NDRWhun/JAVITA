@@ -28,9 +28,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifdef USE_GXM_NATIVE
 #include <psp2/libime.h>
 #include <psp2/sysmodule.h>
-#include "../../code/rd-gxm/gxm_device.h"
-#include "../../code/rd-gxm/gxm_texture.h"
-#include "../../code/rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_device.h"
+#include "rd-gxm/gxm_texture.h"
+#include "rd-gxm/gxm_backend.h"
 // supplied by tr_gxm_bridge.cpp, which is where tess is visible
 extern "C" void GXM_GetTessArrays( const float **xyz, const float **uv0,
 								   const float **uv1, const unsigned char **rgba );

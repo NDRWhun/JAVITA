@@ -27,7 +27,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifdef USE_GXM_NATIVE
 
 #include "tr_local.h"
-#include "../rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_backend.h"
 
 /*
 ================

@@ -509,6 +509,6 @@ extern PFNGLUNLOCKARRAYSEXTPROC qglUnlockArraysEXT;
 
 // Native GXM build: override every entry point above. This must be last.
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/qgl_gxm.h"
+#include "rd-gxm/qgl_gxm.h"
 #define QGL_NATIVE_HOLES
 #endif

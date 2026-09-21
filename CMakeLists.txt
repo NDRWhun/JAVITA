@@ -135,18 +135,20 @@ set(JK_SCE_STUBS
 include(${CMAKE_SOURCE_DIR}/cmake/ja_sources.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/jamp_sources.cmake)
 
+# One native sceGxm backend for both games. Only the tess bridge stays per-renderer,
+# because tess and glState are private to each rd-vanilla.
+set(GXM_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_device.cpp
+  ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_texture.cpp
+  ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_backend.cpp
+)
+
 #============================================================================
 # Single player: JAVITA.elf
 #============================================================================
-set(SP_GXM_SOURCES
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_device.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_texture.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_state.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-gxm/gxm_backend.cpp
-  ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla/tr_gxm_bridge.cpp
-)
-
-add_executable(JAVITA.elf ${JA_SOURCES} ${SP_GXM_SOURCES})
+add_executable(JAVITA.elf ${JA_SOURCES} ${GXM_SOURCES}
+  ${CMAKE_SOURCE_DIR}/src/code/rd-vanilla/tr_gxm_bridge.cpp)
 target_compile_definitions(JAVITA.elf PRIVATE USE_GXM_NATIVE SP_GAME _JK2EXE)
 target_include_directories(JAVITA.elf PRIVATE
   ${CMAKE_SOURCE_DIR}/src/code/game
@@ -213,18 +215,11 @@ add_isolated_module(jampgame game  _GAME    ${JAMP_GAME_SOURCES})
 add_isolated_module(cgame    cgame _CGAME   ${JAMP_CGAME_SOURCES})
 add_isolated_module(ui       ui    UI_BUILD ${JAMP_UI_SOURCES})
 
-set(MP_GXM_SOURCES
-  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_device.cpp
-  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_texture.cpp
-  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_state.cpp
-  ${CMAKE_SOURCE_DIR}/src/codemp/rd-gxm/gxm_backend.cpp
-  ${CMAKE_SOURCE_DIR}/src/codemp/rd-vanilla/tr_gxm_bridge.cpp
-)
-
 add_executable(JAMPVITA.elf
   ${JAMP_ENGINE_SOURCES}
   ${JAMP_PLATFORM_SOURCES}
-  ${MP_GXM_SOURCES}
+  ${GXM_SOURCES}
+  ${CMAKE_SOURCE_DIR}/src/codemp/rd-vanilla/tr_gxm_bridge.cpp
   ${jampgame_MODULE_OBJECT}
   ${cgame_MODULE_OBJECT}
   ${ui_MODULE_OBJECT}

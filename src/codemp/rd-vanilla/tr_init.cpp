@@ -26,7 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "tr_local.h"
 
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/gxm_device.h"	// GXM_ReadPixels
+#include "rd-gxm/gxm_device.h"	// GXM_ReadPixels
 #endif
 
 #include <algorithm>

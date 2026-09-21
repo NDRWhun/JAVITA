@@ -31,7 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "mdx_format.h"
 #include "qgl.h"
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_backend.h"
 #endif
 
 #ifdef VITA

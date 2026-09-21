@@ -29,7 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "ghoul2/ghoul2_shared.h" //rwwRMG - added
 #include "qgl.h"
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_backend.h"
 #endif
 
 #ifdef VITA

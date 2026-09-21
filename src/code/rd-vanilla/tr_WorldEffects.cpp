@@ -41,7 +41,7 @@ extern void			SetViewportAndScissor( void );
 #include "tr_local.h"
 #include "tr_WorldEffects.h"
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_backend.h"
 #endif
 #include "../Ravl/CVec.h"
 #include "../Ratl/vector_vs.h"

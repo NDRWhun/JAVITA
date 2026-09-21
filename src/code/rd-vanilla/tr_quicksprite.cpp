@@ -27,7 +27,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 #include "tr_quicksprite.h"
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_backend.h"
 
 // GL_QUADS has no GXM primitive, so the quads are indexed as triangle pairs
 static glIndex_t *QS_QuadIndexes( void )

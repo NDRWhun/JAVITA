@@ -631,6 +631,8 @@ void GXM_ImmEnd( void );
 #define qglStencilMask(m) GXM_SetStencilMask((unsigned int)(m))
 #undef qglStencilOp
 #define qglStencilOp(sf, df, dp) GXM_SetStencilOp((unsigned int)(sf), (unsigned int)(df), (unsigned int)(dp))
+#undef qglStencilOpSeparate
+#define qglStencilOpSeparate GXM_SetStencilOpSeparate
 #undef qglTexCoord1d
 #define qglTexCoord1d(...) ((void)0)
 #undef qglTexCoord1dv
@@ -792,7 +794,6 @@ void GXM_ImmEnd( void );
 
 // used as calls AND as bare pointer tests, so these need real symbols
 void GXM_NoOpMultiTexCoord2f( unsigned int, float, float );
-void GXM_NoOpStencilOpSeparate( unsigned int, unsigned int, unsigned int, unsigned int );
 void GXM_NoOpTexUnit( unsigned int );
 #undef qglActiveTextureARB
 #define qglActiveTextureARB GXM_NoOpTexUnit
@@ -800,8 +801,6 @@ void GXM_NoOpTexUnit( unsigned int );
 #define qglClientActiveTextureARB GXM_NoOpTexUnit
 #undef qglMultiTexCoord2fARB
 #define qglMultiTexCoord2fARB GXM_NoOpMultiTexCoord2f
-#undef qglStencilOpSeparate
-#define qglStencilOpSeparate GXM_SetStencilOpSeparate
 
 // called directly, never through a qgl macro
 #define glActiveTextureARB(...) ((void)0)
@@ -810,6 +809,7 @@ void GXM_NoOpTexUnit( unsigned int );
 #define glBindRenderbuffer(...) ((void)0)
 #define glBindTexture(...) ((void)0)
 #define glBufferData(...) ((void)0)
+#define glBufferSubData(...) ((void)0)
 #define glCheckFramebufferStatus(...) (0)
 #define glClientActiveTextureARB(...) ((void)0)
 #define glDeleteBuffers(...) ((void)0)

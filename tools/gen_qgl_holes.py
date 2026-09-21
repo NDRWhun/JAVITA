@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate src/code/rd-gxm/qgl_gxm.h from the GL entry points the renderer uses.
+"""Generate src/rd-gxm/qgl_gxm.h from the GL entry points both renderers use.
 
 Native GXM build: GL entry points become holes, not a translation layer. Rerun
 after deleting call sites so the header shrinks as the port progresses.
@@ -37,8 +37,10 @@ GPL_HEADER = [
 ]
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QGL_H = os.path.join(HERE, "src", "codemp","rd-vanilla", "qgl.h")
-DST = os.path.join(HERE, "src", "codemp","rd-gxm", "qgl_gxm.h")
+# one backend serves both games, so the header holes the union of their GL surfaces
+TREES = ("code", "codemp")
+QGL_HEADERS = [os.path.join(HERE, "src", t, "rd-vanilla", "qgl.h") for t in TREES]
+DST = os.path.join(HERE, "src", "rd-gxm", "qgl_gxm.h")
 SCAN_DIRS = ("rd-vanilla", "rd-common")
 
 # the only qgl entry points whose return value is read anywhere
@@ -77,7 +79,7 @@ DEFINED_LOCALLY = {"glTexParameterfv", "glDrawBuffer", "glArrayElement"}
 qgl_re = re.compile(r"#define\s+(qgl[A-Za-z0-9_]+)\s")
 direct_re = re.compile(r"\b(gl[A-Z][A-Za-z0-9_]*)\s*\(")
 
-qgl_h_text = io.open(QGL_H, encoding="latin1").read()
+qgl_h_text = "\n".join(io.open(p, encoding="latin1").read() for p in QGL_HEADERS)
 qgl_names = sorted(set(qgl_re.findall(qgl_h_text)))
 
 # qgl.h also declares extension entry points as extern function pointers. Most are
@@ -102,8 +104,8 @@ KEEP_LOCAL_ALIASES = {"qglArrayElement", "qglTexParameterfv", "qglDrawBuffer"}
 qgl_names = [n for n in qgl_names if n not in POINTER_NOOPS and n not in KEEP_LOCAL_ALIASES]
 
 direct = set()
-for d in SCAN_DIRS:
-    dirpath = os.path.join(HERE, "src", "codemp",d)
+for t, d in [(t, d) for t in TREES for d in SCAN_DIRS]:
+    dirpath = os.path.join(HERE, "src", t, d)
     if not os.path.isdir(dirpath):
         continue
     for fn in sorted(os.listdir(dirpath)):

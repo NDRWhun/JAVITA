@@ -24,7 +24,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "tr_local.h"
 
 #ifdef USE_GXM_NATIVE
-#include "../rd-gxm/gxm_device.h"	// GXM_Sync
+#include "rd-gxm/gxm_device.h"	// GXM_Sync
 #endif
 
 
