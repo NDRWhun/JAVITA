@@ -1817,7 +1817,7 @@ void R_Register( void )
 	r_shadows							= ri.Cvar_Get( "cg_shadows",						"1",						CVAR_NONE, "" );
 #ifdef VITA
 	if ( r_shadows->integer == 2 ) {
-		ri.Cvar_Set( "cg_shadows", "1" );	// stencil volumes emit via glBegin, which vitaGL doesn't draw
+		ri.Cvar_Set( "cg_shadows", "1" );	// blob shadows; revisit now the backend expands immediate mode
 		r_shadows->integer = 1;
 	}
 #endif

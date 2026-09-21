@@ -413,8 +413,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define GL_RGB8 GL_RGB
 // ARB alias for the core multitexture coord
 #define qglMultiTexCoord2fARB glMultiTexCoord2f
-// internal-format enums vitaGL doesn't define. real GL values keep the
-// format-select switch cases distinct; vitaGL ignores them and picks the GXM
+// internal-format enums the Vita GL vocabulary lacks. real GL values keep the
+// format-select switch cases distinct; the backend ignores them and picks the GXM
 // format from format/type anyway.
 #ifndef GL_RGBA4
 #define GL_RGBA4 0x8056
@@ -444,7 +444,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifndef GL_TEXTURE_RECTANGLE_ARB
 #define GL_TEXTURE_RECTANGLE_ARB 0x84F5
 #endif
-// typedefs + null pointers for extensions vitaGL lacks (NV combiners, ARB
+// typedefs + null pointers for extensions the Vita lacks (NV combiners, ARB
 // programs, EXT compiled arrays) plus a glTexParameterfv shim, so the gated
 // call sites still compile
 #include "gl_vita_ext.h"

@@ -1822,7 +1822,7 @@ void R_CreateBuiltinImages( void ) {
 	qglDisable( GL_TEXTURE_RECTANGLE_ARB );
 	qglEnable( GL_TEXTURE_2D );
 #else
-	// vitaGL/GXM has no GL_TEXTURE_RECTANGLE_ARB target, and dynamic glow is off on the
+	// GXM has no GL_TEXTURE_RECTANGLE_ARB target, and dynamic glow is off on the
 	// Vita anyway (tr_init.cpp), so skip these rectangle textures entirely. Creating them
 	// just spammed GL_INVALID_ENUM and gave a corrupt frame.
 	tr.screenGlow = 0;

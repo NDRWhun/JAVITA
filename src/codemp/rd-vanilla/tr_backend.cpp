@@ -1942,7 +1942,7 @@ static qboolean RB_RenderScaleBegin( void ) {
 static void RB_RenderScaleEnd( void ) {
 	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
 
-	// vitaGL's glBlitFramebuffer can't reliably stretch to the default framebuffer,
+	// glBlitFramebuffer can't reliably stretch to the default framebuffer here,
 	// so upscale with a plain full-screen textured quad instead.
 	const int   w = glConfig.vidWidth, h = glConfig.vidHeight;
 	const float u = (float)rs_scaledW / (float)w;

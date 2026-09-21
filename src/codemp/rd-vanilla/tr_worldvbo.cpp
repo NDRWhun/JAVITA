@@ -74,7 +74,7 @@ static struct {
 } s_wvbo;
 
 // backend-thread-only batch state; a run stages indices and flushes as one draw
-// (per-surface draws drown in vitaGL's per-draw shader re-patch cost)
+// (per-surface draws drown in per-draw state and program churn)
 #define WVBO_STAGE_MAX 32768
 static glIndex_t	s_wvboStage[WVBO_STAGE_MAX];
 static int			s_wvboStaged;
@@ -188,7 +188,7 @@ void R_FreeWorldVBO( void )
 	}
 #else
 	if ( s_wvbo.vbo ) {
-		// vitaGL keeps per-array vbo references (written through at draw); re-point
+		// the GL path kept per-array vbo references (written through at draw); re-point
 		// the arrays we used before deleting so no dangling buffer pointer survives.
 		glBindBuffer( GL_ARRAY_BUFFER, 0 );
 		qglVertexPointer( 3, GL_FLOAT, 16, NULL );
