@@ -212,6 +212,7 @@ qboolean	WIN_GL_ExtensionSupported( const char *extension );
 
 #ifdef VITA
 void		Sys_BootMark( const char *s );	// unbuffered boot-milestone trail (sys_modules.cpp)
+void		Sys_SyncVolume( void );			// flush the card so a power-off keeps what was written
 #endif
 
 uint8_t ConvertUTF32ToExpectedCharset( uint32_t utf32 );

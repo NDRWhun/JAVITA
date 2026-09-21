@@ -1371,6 +1371,9 @@ void Com_WriteConfigToFile( const char *filename ) {
 	Key_WriteBindings (f);
 	Cvar_WriteVariables (f);
 	FS_FCloseFile( f );
+#ifdef VITA
+	Sys_SyncVolume();	// the card buffers writes; a power-off would drop the settings
+#endif
 }
 
 
