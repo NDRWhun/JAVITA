@@ -1349,7 +1349,11 @@ void R_DebugPolygon( int color, int numPoints, float *points ) {
 	// draw solid shade
 
 	qglColor3f( color&1, (color>>1)&1, (color>>2)&1 );
+#ifdef USE_GXM_NATIVE
+	qglBegin( GL_TRIANGLE_FAN );	// the imm path expands fans, not GL_POLYGON
+#else
 	qglBegin( GL_POLYGON );
+#endif
 	for ( i = 0 ; i < numPoints ; i++ ) {
 		qglVertex3fv( points + i * 3 );
 	}
@@ -1359,7 +1363,11 @@ void R_DebugPolygon( int color, int numPoints, float *points ) {
 	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
 	qglDepthRange( 0, 0 );
 	qglColor3f( 1, 1, 1 );
+#ifdef USE_GXM_NATIVE
+	qglBegin( GL_TRIANGLE_FAN );	// the imm path expands fans, not GL_POLYGON
+#else
 	qglBegin( GL_POLYGON );
+#endif
 	for ( i = 0 ; i < numPoints ; i++ ) {
 		qglVertex3fv( points + i * 3 );
 	}
