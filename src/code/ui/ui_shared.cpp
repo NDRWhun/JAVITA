@@ -6014,6 +6014,17 @@ void Menu_PaintAll(void)
 	{
 		captureFunc(captureData);
 	}
+#ifdef VITA
+	// the on-screen keyboard is modal, so the engine only raises it while a field takes text
+	{
+		static qboolean published = qfalse;
+		if ( published != g_editingField )
+		{
+			published = g_editingField;
+			DC->setCVar( "cl_vitaTextInput", published ? "1" : "0" );
+		}
+	}
+#endif
 
 	for (i = 0; i < menuCount; i++)
 	{

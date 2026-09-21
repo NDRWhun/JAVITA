@@ -31,6 +31,7 @@ qboolean cl_vitaHideMenuCursor = qfalse;	// menu pointer visibility; single play
 #endif
 #include <psp2/touch.h>		// rear touch panel -> A_AUX combo zones
 static cvar_t *vita_rearTouch = NULL;
+static cvar_t *cl_vitaTextInput = NULL;	// the menus raise this while a field is taking text
 #endif
 
 static cvar_t *in_keyboardDebug     = NULL;
@@ -684,6 +685,7 @@ void IN_Init( void *windowData )
 	//   Triangle=JOY1 Circle=JOY2 Cross=JOY3 Square=JOY4 L=JOY5 R=JOY6
 	//   Down=JOY7 Left=JOY8 Up=JOY9 Right=JOY10 Select=JOY11 Start=JOY12
 	vita_rearTouch = Cvar_Get( "vita_rearTouch", "1", CVAR_ARCHIVE );	// rear-panel zones on/off
+	cl_vitaTextInput = Cvar_Get( "cl_vitaTextInput", "0", CVAR_TEMP );	// set by the ui, never archived
 
 
 	// first run only; IN_Init also runs on vid_restart and would overwrite the player's binds
@@ -1391,14 +1393,15 @@ void IN_Frame (void) {
 	qboolean loading;
 
 #ifdef VITA
-	// On-screen keyboard follows the console: SDL_StartTextInput pops the IME, whose
-	// text and Enter feed the console field. Reopen if it closed itself after Enter.
+	// On-screen keyboard follows the console and any menu field taking text: SDL_StartTextInput
+	// pops the IME, whose text and Enter feed that field. Reopen if it closed itself after Enter.
 	{
-		qboolean consoleDown   = (qboolean)( ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0 );
+		qboolean wantsText     = (qboolean)( ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0
+								|| ( cl_vitaTextInput && cl_vitaTextInput->integer ) );
 		qboolean keyboardShown = (qboolean)( SDL_IsScreenKeyboardShown( SDL_window ) == SDL_TRUE );
-		if ( consoleDown && !keyboardShown )
+		if ( wantsText && !keyboardShown )
 			SDL_StartTextInput();
-		else if ( !consoleDown && keyboardShown )
+		else if ( !wantsText && keyboardShown )
 			SDL_StopTextInput();
 	}
 #endif

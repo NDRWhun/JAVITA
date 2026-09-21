@@ -9375,11 +9375,31 @@ int Menu_Count() {
 	return menuCount;
 }
 
+#ifdef VITA
+/*
+===============
+UI_PublishTextInputState
+
+The on-screen keyboard is modal, so the engine only raises it while a field takes text.
+===============
+*/
+static void UI_PublishTextInputState( void ) {
+	static qboolean published = qfalse;
+	if ( published != g_editingField ) {
+		published = g_editingField;
+		DC->setCVar( "cl_vitaTextInput", published ? "1" : "0" );
+	}
+}
+#endif
+
 void Menu_PaintAll() {
 	int i;
 	if (captureFunc) {
 		captureFunc(captureData);
 	}
+#ifdef VITA
+	UI_PublishTextInputState();
+#endif
 
 	for (i = 0; i < Menu_Count(); i++) {
 		Menu_Paint(&Menus[i], qfalse);
