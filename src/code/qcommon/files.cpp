@@ -2804,6 +2804,9 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	}
 
 	for ( i = 0 ; i < numfiles ; i++ ) {
+		// files beginning with "dl_" are multiplayer server downloads
+		if ( !Q_stricmpn( pakfiles[i], "dl_", 3 ) )
+			continue;
 		pakfile = FS_BuildOSPath( path, dir, pakfiles[i] );
 		if ( ( pak = FS_LoadZipFile( pakfile, pakfiles[i] ) ) == 0 )
 			continue;
