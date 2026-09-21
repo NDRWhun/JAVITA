@@ -581,7 +581,7 @@ Upload32
 #ifdef VITA
 // DXT cache on ux0: encode once, later loads upload the pre-compressed mip chain.
 // Gated by r_texCacheCompressed; any failure falls back to the stock RGBA path.
-#define TEXCACHE_MAGIC_DXT 0x41435456u	// "VTCA"; per-game so JK2-baked files never validate here. Bump to invalidate.
+#define TEXCACHE_MAGIC_DXT 0x41435456u	// "VTCA"; shared with multiplayer, bump to invalidate
 #define TEXCACHE_MAX_MIPS  16
 enum { TEXCACHE_FMT_DXT1 = 1, TEXCACHE_FMT_DXT5 = 5 };
 typedef struct {					// 32-byte LE header, native Vita byte order
@@ -591,7 +591,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 	unsigned int height;
 	unsigned int mipCount;			// 1..TEXCACHE_MAX_MIPS
 	unsigned int picmip;			// r_picmip it was baked with; mismatch = rebuild
-	unsigned int texbits;			// r_texturebits it was baked with; mismatch = rebuild
+	unsigned int texbits;			// always 0; the DXT payload never depends on r_texturebits
 	unsigned int totalSize;			// sum of per-mip sizes
 } texCacheHdrDxt_t;
 
@@ -895,7 +895,7 @@ static void Upload32( unsigned *data,
 			    hdr.height    = (unsigned)height;
 			    hdr.mipCount  = (unsigned)mipCount;
 			    hdr.picmip    = (unsigned)( r_picmip ? r_picmip->integer : 0 );
-			    hdr.texbits   = (unsigned)( r_texturebits ? r_texturebits->integer : 0 );
+			    hdr.texbits   = 0;
 			    hdr.totalSize = (unsigned)blobOfs;
 #ifdef USE_GXM_NATIVE
 			    GXM_TexUploadDxt( glState.currenttextures[glState.currenttmu], blob, (unsigned)blobOfs,
@@ -1352,8 +1352,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		|| hdr.width == 0 || hdr.height == 0
 		|| ( hdr.width & ( hdr.width - 1 ) ) || ( hdr.height & ( hdr.height - 1 ) )
 		|| (int)hdr.width > glConfig.maxTextureSize || (int)hdr.height > glConfig.maxTextureSize
-		|| hdr.picmip != (unsigned)( r_picmip ? r_picmip->integer : 0 )
-		|| hdr.texbits != (unsigned)( r_texturebits ? r_texturebits->integer : 0 ) )
+		|| hdr.picmip != (unsigned)( r_picmip ? r_picmip->integer : 0 ) )
 	{
 		sceIoClose( fd );
 		return NULL;
