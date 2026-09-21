@@ -1226,12 +1226,18 @@ public:
 		// Enable And Disable Things
 		//---------------------------
 		qglEnable(GL_TEXTURE_2D);
+#ifdef USE_GXM_NATIVE
+		GXM_SetTexUnitCount( 1 );	// no texture enable on gxm; the unit count carries it
+#endif
 		//qglDisable(GL_CULL_FACE);
 		//naughty, you are making the assumption that culling is on when you get here. -rww
 		GL_Cull(CT_TWO_SIDED);
 
 		qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (mFilterMode==0)?(GL_LINEAR):(GL_NEAREST));
 		qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (mFilterMode==0)?(GL_LINEAR):(GL_NEAREST));
+#ifdef USE_GXM_NATIVE
+		if ( mImage ) GXM_TexFilter( mImage->texnum, mFilterMode == 0, mImage->wrapClampMode != GL_REPEAT );
+#endif
 
 
 		// Setup Matrix Mode And Translation
@@ -1396,6 +1402,9 @@ void RB_RenderWorldEffects(void)
 	SetViewportAndScissor();
 	qglMatrixMode(GL_MODELVIEW);
 	qglLoadMatrixf(backEnd.viewParms.world.modelMatrix);
+#ifdef USE_GXM_NATIVE
+	GXM_SetModelView( backEnd.viewParms.world.modelMatrix );
+#endif
 
 
 	// Calculate Elapsed Time For Scale Purposes
