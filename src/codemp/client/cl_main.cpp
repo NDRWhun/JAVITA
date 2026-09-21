@@ -1338,11 +1338,9 @@ Called when all downloading has been completed
 void CL_DownloadsComplete( void ) {
 	clc.downloadMenuActive = qfalse;
 
-	// if we downloaded files we need to restart the file system
+	// downloaded paks are already mounted, so only the gamestate needs refreshing
 	if (clc.downloadRestart) {
 		clc.downloadRestart = qfalse;
-
-		FS_Restart(clc.checksumFeed); // We possibly downloaded a pak, restart the file system to load it
 
 		// inform the server so we get new gamestate info
 		CL_AddReliableCommand( "donedl", qfalse );
@@ -1449,13 +1447,10 @@ void CL_NextDownload(void) {
 
 	clc.downloadWaitingOnUser = qfalse;
 
-	// A download has finished, check whether this matches a referenced checksum
+	// A download has finished, mount it if it matches a referenced checksum
 	if(*clc.downloadName && clc.downloadSize)
 	{
-		char *zippath = FS_BuildOSPath(Cvar_VariableString("fs_homepath"), clc.downloadName, "");
-		zippath[strlen(zippath)-1] = '\0';
-
-		if(!FS_CompareZipChecksum(zippath))
+		if(!FS_MountDownloadedPak(clc.downloadName))
 			Com_Error(ERR_DROP, "Incorrect checksum for file: %s", clc.downloadName);
 	}
 

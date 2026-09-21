@@ -600,7 +600,7 @@ void FS_HomeRmdir( const char *homePath, qboolean recursive );
 qboolean FS_FileExists( const char *file );
 
 char   *FS_BuildOSPath( const char *base, const char *game, const char *qpath );
-qboolean FS_CompareZipChecksum(const char *zipfile);
+qboolean FS_MountDownloadedPak( const char *localName );
 
 int		FS_GetFileList(  const char *path, const char *extension, char *listbuf, int bufsize );
 int		FS_GetModList(  char *listbuf, int bufsize );

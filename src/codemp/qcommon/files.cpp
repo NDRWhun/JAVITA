@@ -2258,35 +2258,6 @@ void FS_FreePak(pack_t *thepak)
 }
 
 /*
-=================
-FS_GetZipChecksum
-
-Compares whether the given pak file matches a referenced checksum
-=================
-*/
-qboolean FS_CompareZipChecksum(const char *zipfile)
-{
-	pack_t *thepak;
-	int index, checksum;
-
-	thepak = FS_LoadZipFile(zipfile, "");
-
-	if(!thepak)
-		return qfalse;
-
-	checksum = thepak->checksum;
-	FS_FreePak(thepak);
-
-	for(index = 0; index < fs_numServerReferencedPaks; index++)
-	{
-		if(checksum == fs_serverReferencedPaks[index])
-			return qtrue;
-	}
-
-	return qfalse;
-}
-
-/*
 =================================================================================
 
 DIRECTORY SCANNING FUNCTIONS
@@ -3615,6 +3586,71 @@ static void FS_ReorderPurePaks()
 			p_previous = &s->next;
 		}
 	}
+}
+
+/*
+=================
+FS_MountDownloadedPak
+
+Adds a pk3 the client just downloaded to the search path without a restart; false unless its checksum is one the server referenced
+=================
+*/
+qboolean FS_MountDownloadedPak( const char *localName ) {
+	char			gamedir[MAX_OSPATH], curpath[MAX_OSPATH + 1];
+	const char		*pakname, *slash;
+	pack_t			*pak;
+	searchpath_t	*search, **link;
+	int				j;
+
+	slash = strchr( localName, '/' );
+	if ( !slash )
+		return qfalse;
+	Q_strncpyz( gamedir, localName, Q_min( (int)( slash - localName ) + 1, (int)sizeof( gamedir ) ) );
+	pakname = slash + 1;
+
+	pak = FS_LoadZipFile( FS_BuildOSPath( fs_homepath->string, gamedir, pakname ), pakname );
+	if ( !pak )
+		return qfalse;
+
+	for ( j = 0; j < fs_numServerReferencedPaks; j++ ) {
+		if ( pak->checksum == fs_serverReferencedPaks[j] )
+			break;
+	}
+	if ( j == fs_numServerReferencedPaks ) {
+		FS_FreePak( pak );
+		return qfalse;
+	}
+
+	// a restart only scans the mounted game directories, so an unmounted one stays on disk only
+	for ( link = &fs_searchpaths; *link; link = &( *link )->next ) {
+		search = *link;
+		if ( ( search->pack && !Q_stricmp( search->pack->pakGamename, gamedir ) ) ||
+			 ( search->dir && !Q_stricmp( search->dir->gamedir, gamedir ) ) )
+			break;
+	}
+	if ( !*link ) {
+		FS_FreePak( pak );
+		return qtrue;
+	}
+	if ( fs_dirbeforepak && fs_dirbeforepak->integer && ( *link )->dir )
+		link = &( *link )->next;
+
+	Q_strncpyz( curpath, FS_BuildOSPath( fs_homepath->string, gamedir, "" ), sizeof( curpath ) );
+	curpath[strlen( curpath ) - 1] = '\0';
+	Q_strncpyz( pak->pakPathname, curpath, sizeof( pak->pakPathname ) );
+	Q_strncpyz( pak->pakGamename, gamedir, sizeof( pak->pakGamename ) );
+	if ( Q_stricmpn( pak->pakGamename, BASEGAME, (int)strlen( BASEGAME ) ) )
+		pak->referenced |= FS_GENERAL_REF;
+	fs_packFiles += pak->numfiles;
+
+	// downloaded paks sort ahead of the rest of their game directory
+	search = (searchpath_t *)Z_Malloc( sizeof( searchpath_t ), TAG_FILESYS, qtrue );
+	search->pack = pak;
+	search->next = *link;
+	*link = search;
+
+	FS_ReorderPurePaks();
+	return qtrue;
 }
 
 /**
