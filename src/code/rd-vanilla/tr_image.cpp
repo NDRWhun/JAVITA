@@ -925,6 +925,8 @@ static void Upload32( unsigned *data,
 	    qglTexImage2D (GL_TEXTURE_2D, 0, *pformat, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
 #ifdef USE_GXM_NATIVE
 	    GXM_TexUpload( glState.currenttextures[glState.currenttmu], data, width, height );
+	    // the GXM RGBA upload keeps level 0 only, so the chain below would be thrown away
+	    goto done;
 #endif
 
 	    if (mipmap)
