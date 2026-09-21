@@ -61,6 +61,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
 #include <psp2/sysmodule.h>
+#include <psp2/kernel/threadmgr.h>
 #endif
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -120,6 +121,17 @@ static struct sockaddr_in	socksRelayAddr;
 
 static SOCKET	ip_socket = INVALID_SOCKET;
 static SOCKET	socks_socket = INVALID_SOCKET;
+
+#ifdef VITA
+// the game socket is a raw sceNet id so epoll and the buffer options apply to it
+static int		vita_epoll = -1;
+
+static void NET_CloseIPSocket( SOCKET s ) {
+	sceNetSocketClose( s );
+}
+#else
+#define NET_CloseIPSocket closesocket
+#endif
 
 #define	MAX_IPS		16
 static	int		numIP;
@@ -327,14 +339,29 @@ qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, fd_set *fdr ) {
 	socklen_t fromlen;
 	struct sockaddr_in from;
 
+#ifdef VITA
+	if ( ip_socket == INVALID_SOCKET ) {
+		return qfalse;
+	}
+#else
 	if ( ip_socket == INVALID_SOCKET || !FD_ISSET(ip_socket, fdr) ) {
 		return qfalse;
 	}
+#endif
 
 	fromlen = sizeof( from );
 #ifdef _DEBUG
 	recvfromCount++;		// performance check
 #endif
+#ifdef VITA
+	ret = sceNetRecvfrom( ip_socket, net_message->data, net_message->maxsize, 0, (SceNetSockaddr *)&from, (unsigned int *)&fromlen );
+
+	if ( ret < 0 ) {
+		if ( ret != SCE_NET_ERROR_EAGAIN && ret != SCE_NET_ERROR_ECONNRESET )
+			Com_Printf( "NET_GetPacket: 0x%08x\n", ret );
+		return qfalse;
+	}
+#else
 	ret = recvfrom( ip_socket, (char *)net_message->data, net_message->maxsize, 0, (struct sockaddr *)&from, &fromlen );
 
 	if ( ret == SOCKET_ERROR ) {
@@ -346,6 +373,7 @@ qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, fd_set *fdr ) {
 		Com_Printf( "NET_GetPacket: %s\n", NET_ErrorString() );
 		return qfalse;
 	}
+#endif
 
 	memset( from.sin_zero, 0, 8 );
 
@@ -410,8 +438,17 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 		ret = sendto( ip_socket, socksBuf, length+10, 0, (sockaddr *)&socksRelayAddr, sizeof(socksRelayAddr) );
 	}
 	else {
+#ifdef VITA
+		ret = sceNetSendto( ip_socket, data, length, 0, (const SceNetSockaddr *)&addr, sizeof(addr) );
+#else
 		ret = sendto( ip_socket, (const char *)data, length, 0, (sockaddr *)&addr, sizeof(addr) );
+#endif
 	}
+#ifdef VITA
+	if ( ret < 0 && ret != SCE_NET_ERROR_EAGAIN && !( ret == SCE_NET_ERROR_EADDRNOTAVAIL && to->type == NA_BROADCAST ) ) {
+		Com_Printf( "NET_SendPacket: 0x%08x\n", ret );
+	}
+#else
 	if( ret == SOCKET_ERROR ) {
 		int err = socketError;
 
@@ -427,6 +464,7 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 
 		Com_Printf( "NET_SendPacket: %s\n", NET_ErrorString() );
 	}
+#endif
 }
 
 //=============================================================================
@@ -508,6 +546,32 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 		Com_Printf( "Opening IP socket: localhost:%i\n", port );
 	}
 
+#ifdef VITA
+	if ( ( newsocket = sceNetSocket( "jamp_udp", SCE_NET_AF_INET, SCE_NET_SOCK_DGRAM, SCE_NET_IPPROTO_UDP ) ) < 0 ) {
+		*err = newsocket;
+		Com_Printf( "WARNING: NET_IPSocket: sceNetSocket: 0x%08x\n", newsocket );
+		return INVALID_SOCKET;
+	}
+
+	// make it non-blocking
+	if ( ( *err = sceNetSetsockopt( newsocket, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &i, sizeof( i ) ) ) < 0 ) {
+		Com_Printf( "WARNING: NET_IPSocket: SO_NBIO: 0x%08x\n", *err );
+		NET_CloseIPSocket( newsocket );
+		return INVALID_SOCKET;
+	}
+
+	// make it broadcast capable
+	if ( sceNetSetsockopt( newsocket, SCE_NET_SOL_SOCKET, SCE_NET_SO_BROADCAST, &i, sizeof( i ) ) < 0 ) {
+		Com_Printf( "WARNING: NET_IPSocket: SO_BROADCAST failed\n" );
+	}
+
+	// explicit socket buffers instead of the undocumented stack default
+	i = 64 * 1024;
+	if ( sceNetSetsockopt( newsocket, SCE_NET_SOL_SOCKET, SCE_NET_SO_RCVBUF, &i, sizeof( i ) ) < 0 ||
+		 sceNetSetsockopt( newsocket, SCE_NET_SOL_SOCKET, SCE_NET_SO_SNDBUF, &i, sizeof( i ) ) < 0 ) {
+		Com_Printf( "WARNING: NET_IPSocket: socket buffers left at the default\n" );
+	}
+#else
 	if( ( newsocket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP ) ) == INVALID_SOCKET ) {
 		*err = socketError;
 		Com_Printf( "WARNING: NET_IPSocket: socket: %s\n", NET_ErrorString() );
@@ -526,6 +590,7 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 	if( setsockopt( newsocket, SOL_SOCKET, SO_BROADCAST, (char *)&i, sizeof(i) ) == SOCKET_ERROR ) {
 		Com_Printf( "WARNING: NET_IPSocket: setsockopt SO_BROADCAST: %s\n", NET_ErrorString() );
 	}
+#endif
 
 	if( !net_interface || !net_interface[0] || !Q_stricmp(net_interface, "localhost") ) {
 		memset( &address, 0, sizeof( address ) );
@@ -534,7 +599,7 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 	}
 	else {
 		if ( !Sys_StringToSockaddr( net_interface, &address ) ) {
-			closesocket( newsocket );
+			NET_CloseIPSocket( newsocket );
 			return INVALID_SOCKET;
 		}
 	}
@@ -546,15 +611,57 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 		address.sin_port = htons( (short)port );
 	}
 
+#ifdef VITA
+	if ( ( *err = sceNetBind( newsocket, (const SceNetSockaddr *)&address, sizeof( address ) ) ) < 0 ) {
+		Com_Printf( "WARNING: NET_IPSocket: sceNetBind: 0x%08x\n", *err );
+		NET_CloseIPSocket( newsocket );
+		return INVALID_SOCKET;
+	}
+#else
 	if( bind( newsocket, (const struct sockaddr *)&address, sizeof(address) ) == SOCKET_ERROR ) {
 		Com_Printf( "WARNING: NET_IPSocket: bind: %s\n", NET_ErrorString() );
 		*err = socketError;
 		closesocket( newsocket );
 		return INVALID_SOCKET;
 	}
+#endif
 
 	return newsocket;
 }
+
+#ifdef VITA
+/*
+====================
+NET_VitaEpollOpen
+
+One persistent wait set on the game socket; newlib's select builds and tears one down per call
+====================
+*/
+static void NET_VitaEpollClose( void ) {
+	if ( vita_epoll >= 0 )
+		sceNetEpollDestroy( vita_epoll );
+	vita_epoll = -1;
+}
+
+static void NET_VitaEpollOpen( void ) {
+	SceNetEpollEvent ev;
+
+	NET_VitaEpollClose();
+	vita_epoll = sceNetEpollCreate( "jamp_net", 0 );
+	if ( vita_epoll < 0 ) {
+		Com_Printf( "WARNING: sceNetEpollCreate: 0x%08x\n", vita_epoll );
+		vita_epoll = -1;
+		return;
+	}
+	memset( &ev, 0, sizeof( ev ) );
+	ev.events = SCE_NET_EPOLLIN;
+	ev.data.fd = ip_socket;
+	if ( sceNetEpollControl( vita_epoll, SCE_NET_EPOLL_CTL_ADD, ip_socket, &ev ) < 0 ) {
+		Com_Printf( "WARNING: sceNetEpollControl failed, polling the socket instead\n" );
+		NET_VitaEpollClose();
+	}
+}
+#endif
 
 /*
 ====================
@@ -918,6 +1025,9 @@ void NET_OpenIP( void )
 			ip_socket = NET_IPSocket( net_ip->string, port + i, &err );
 			if ( ip_socket != INVALID_SOCKET ) {
 				Cvar_SetValue( "net_port", port + i );
+#ifdef VITA
+				NET_VitaEpollOpen();
+#endif
 
 				if ( net_socksEnabled->integer )
 					NET_OpenSocks( port + i );
@@ -1028,7 +1138,10 @@ void NET_Config( qboolean enableNetworking ) {
 
 	if ( stop ) {
 		if ( ip_socket != INVALID_SOCKET ) {
-			closesocket( ip_socket );
+#ifdef VITA
+			NET_VitaEpollClose();
+#endif
+			NET_CloseIPSocket( ip_socket );
 			ip_socket = INVALID_SOCKET;
 		}
 
@@ -1149,6 +1262,25 @@ void NET_Sleep( int msec ) {
 
 	if (msec < 0)
 		msec = 0;
+
+#ifdef VITA
+	if ( vita_epoll >= 0 ) {
+		SceNetEpollEvent ev;
+
+		retval = sceNetEpollWait( vita_epoll, &ev, 1, msec * 1000 );
+		if ( retval > 0 )
+			NET_Event( NULL );
+		else if ( retval < 0 && retval != SCE_NET_ERROR_ETIMEDOUT )
+			Com_Printf( "Warning: sceNetEpollWait: 0x%08x\n", retval );
+		return;
+	}
+	// no wait set: drain whatever is queued, then sleep out the slot
+	if ( ip_socket != INVALID_SOCKET )
+		NET_Event( NULL );
+	if ( msec > 0 )
+		sceKernelDelayThread( msec * 1000 );
+	return;
+#endif
 
 	FD_ZERO(&fdset);
 	if (ip_socket != INVALID_SOCKET) {
