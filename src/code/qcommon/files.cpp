@@ -1859,6 +1859,28 @@ Creates a new pak_t in the search chain for the contents
 of a zip file.
 =================
 */
+// central directory entry layout
+#define ZIP_CDIR_SIG		0x02014b50
+#define ZIP_CDIR_HEADER		46
+
+static unsigned FS_ZipU16( const byte *p ) {
+	return p[0] | ( p[1] << 8 );
+}
+
+static unsigned FS_ZipU32( const byte *p ) {
+	return p[0] | ( p[1] << 8 ) | ( p[2] << 16 ) | ( (unsigned)p[3] << 24 );
+}
+
+// size of the central directory entry at p, 0 once the walk hits the end or a bad entry
+static unsigned FS_ZipEntrySize( const byte *p, const byte *end ) {
+	unsigned total;
+
+	if ( p + ZIP_CDIR_HEADER > end || FS_ZipU32( p ) != ZIP_CDIR_SIG )
+		return 0;
+	total = ZIP_CDIR_HEADER + FS_ZipU16( p + 28 ) + FS_ZipU16( p + 30 ) + FS_ZipU16( p + 32 );
+	return ( p + total > end ) ? 0 : total;
+}
+
 static pack_t *FS_LoadZipFile( const char *zipfile, const char *basename )
 {
 	fileInPack_t	*buildBuffer;
@@ -1867,13 +1889,15 @@ static pack_t *FS_LoadZipFile( const char *zipfile, const char *basename )
 	int				err;
 	unz_global_info gi;
 	char			filename_inzip[MAX_ZPATH];
-	unz_file_info	file_info;
 	int				len;
 	size_t			i;
 	long			hash;
 	int				fs_numHeaderLongs;
 	int				*fs_headerLongs;
 	char			*namePtr;
+	ZPOS64_T		cdOffset, cdSize, cdEntries;
+	byte			*cd, *end, *p;
+	unsigned		entrySize = 0, nameLen;
 
 	fs_numHeaderLongs = 0;
 
@@ -1883,16 +1907,22 @@ static pack_t *FS_LoadZipFile( const char *zipfile, const char *basename )
 	if (err != UNZ_OK)
 		return NULL;
 
+	// the central directory is read once and walked in memory
+	unzGetCentralDirectoryInfo( uf, &cdOffset, &cdSize, &cdEntries );
+	cd = (byte *)Z_Malloc( (int)cdSize, TAG_FILESYS, qfalse );
+	if ( unzReadCentralDirectory( uf, cd, (unsigned)cdSize ) != UNZ_OK ) {
+		Z_Free( cd );
+		unzClose( uf );
+		return NULL;
+	}
+	end = cd + cdSize;
+
 	len = 0;
-	unzGoToFirstFile(uf);
-	for (i = 0; i < gi.number_entry; i++)
+	for ( p = cd, i = 0; i < gi.number_entry; i++, p += entrySize )
 	{
-		err = unzGetCurrentFileInfo(uf, &file_info, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0);
-		if (err != UNZ_OK) {
+		if ( !( entrySize = FS_ZipEntrySize( p, end ) ) )
 			break;
-		}
-		len += strlen(filename_inzip) + 1;
-		unzGoToNextFile(uf);
+		len += Q_min( FS_ZipU16( p + 28 ), MAX_ZPATH - 1 ) + 1;
 	}
 
 	buildBuffer = (struct fileInPack_s *)Z_Malloc( (gi.number_entry * sizeof( fileInPack_t )) + len, TAG_FILESYS, qtrue );
@@ -1923,35 +1953,35 @@ static pack_t *FS_LoadZipFile( const char *zipfile, const char *basename )
 	}
 
 	pack->handle = uf;
-	pack->numfiles = gi.number_entry;
-	unzGoToFirstFile(uf);
 
-	for (i = 0; i < gi.number_entry; i++)
+	for ( p = cd, i = 0; i < gi.number_entry; i++, p += entrySize )
 	{
-		err = unzGetCurrentFileInfo(uf, &file_info, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0);
-		if (err != UNZ_OK) {
+		if ( !( entrySize = FS_ZipEntrySize( p, end ) ) )
 			break;
+		if ( FS_ZipU32( p + 24 ) > 0 ) {
+			fs_headerLongs[fs_numHeaderLongs++] = LittleLong( FS_ZipU32( p + 16 ) );
 		}
-		if (file_info.uncompressed_size > 0) {
-			fs_headerLongs[fs_numHeaderLongs++] = LittleLong(file_info.crc);
-		}
+		nameLen = Q_min( FS_ZipU16( p + 28 ), MAX_ZPATH - 1 );
+		memcpy( filename_inzip, p + ZIP_CDIR_HEADER, nameLen );
+		filename_inzip[nameLen] = '\0';
 		Q_strlwr( filename_inzip );
 		hash = FS_HashFileName(filename_inzip, pack->hashSize);
 		buildBuffer[i].name = namePtr;
 		strcpy( buildBuffer[i].name, filename_inzip );
 		namePtr += strlen(filename_inzip) + 1;
 		// store the file position in the zip
-		buildBuffer[i].pos = unzGetOffset(uf);
-		buildBuffer[i].len = file_info.uncompressed_size;
+		buildBuffer[i].pos = (unsigned long)( cdOffset + ( p - cd ) );
+		buildBuffer[i].len = FS_ZipU32( p + 24 );
 		buildBuffer[i].next = pack->hashTable[hash];
 		pack->hashTable[hash] = &buildBuffer[i];
-		unzGoToNextFile(uf);
 	}
+	pack->numfiles = i;
 
 	pack->checksum = Com_BlockChecksum( fs_headerLongs, sizeof(*fs_headerLongs) * fs_numHeaderLongs );
 	pack->checksum = LittleLong( pack->checksum );
 
 	Z_Free(fs_headerLongs);
+	Z_Free(cd);
 
 	pack->buildBuffer = buildBuffer;
 	return pack;
