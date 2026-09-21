@@ -48,8 +48,18 @@ include_directories(
   ${CMAKE_SOURCE_DIR}/src/lib/minizip/include
   ${CMAKE_SOURCE_DIR}/src/lib/minizip/include/minizip
   ${CMAKE_BINARY_DIR}/generated
-  $ENV{VITASDK}/arm-vita-eabi/include/SDL2
 )
+
+# Build SDL2 from the submodule with the vitaGL video driver off: the SDK's prebuilt
+# SDL2 pulls SDL_vitagles_vgl.c, which references vgl* symbols we no longer link
+set(VIDEO_VITA_VGL OFF CACHE BOOL "" FORCE)
+set(VIDEO_VITA_PVR OFF CACHE BOOL "" FORCE)
+set(VIDEO_VITA_PIB OFF CACHE BOOL "" FORCE)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SDL-vitagl EXCLUDE_FROM_ALL)
 
 set(GIT_TAG "JAMPVITA-0.1")
 set(SOURCE_DATE "${CMAKE_BUILD_TYPE}")
@@ -144,24 +154,15 @@ add_executable(${PROJECT_NAME}.elf
   ${ui_MODULE_OBJECT}
 )
 
-# while the port runs, both renderers stay buildable; ON drops vitaGL entirely
-option(GXM_NATIVE "Render through the native sceGxm backend instead of vitaGL" OFF)
-if(GXM_NATIVE)
-  target_compile_definitions(${PROJECT_NAME}.elf PRIVATE USE_GXM_NATIVE)
-endif()
+target_compile_definitions(${PROJECT_NAME}.elf PRIVATE USE_GXM_NATIVE)
 
 target_link_libraries(${PROJECT_NAME}.elf
-  SDL2
-  vitaGL
-  vitashark
-  SceShaccCgExt
+  SDL2-static
   jpeg
   png16
   z
   mathneon
   stdc++
-  taihen_stub
-  SceShaccCg_stub
   SceGxm_stub
   SceDisplay_stub
   SceCtrl_stub
