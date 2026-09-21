@@ -557,10 +557,11 @@ void CL_InitCGame( void ) {
 	re->EndRegistration();
 
 	// make sure everything is paged in
-//	if (!Sys_LowPhysicalMemory())
+#ifndef VITA
 	{
 		Com_TouchMemory();
 	}
+#endif
 
 	// clear anything that got printed
 	Con_ClearNotify ();
