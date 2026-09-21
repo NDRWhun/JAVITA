@@ -51,6 +51,8 @@ extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
 #endif
 void R_StartRenderThread( void );
 void R_StopRenderThread( void );
+void R_BakeDrainAll( void );	// tr_image.cpp: wait out every background texture bake
+void R_BakeDrainReady( void );	// tr_image.cpp: upload the bakes that have finished
 // tess is thread-local: frontend and render backend each pick their own
 // tessArray slot via the ARM user-RW TLS register
 static inline unsigned int vita_get_tls_reg( void ) {

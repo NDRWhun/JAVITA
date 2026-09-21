@@ -493,6 +493,10 @@ for each RE_EndFrame
 void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	drawBufferCommand_t	*cmd = NULL;
 
+#ifdef VITA
+	R_BakeDrainReady();	// textures registered during play land as their bakes finish
+#endif
+
 	if ( !tr.registered ) {
 		return;
 	}

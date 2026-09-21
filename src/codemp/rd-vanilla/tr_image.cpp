@@ -643,6 +643,283 @@ static int R_DxtEncodeUploadAppend( int level, GLenum glFmt, int w, int h, const
 	qglCompressedTexImage2D( GL_TEXTURE_2D, level, glFmt, w, h, 0, mipSize, blob + blobOfs );
 	return mipSize;
 }
+
+// ---- background bake: main reads and decodes, two workers build and encode the mip chain ----
+#define BAKE_WORKERS		2
+#define BAKE_QUEUE			16
+#define BAKE_INFLIGHT_MAX	( 13 * 1024 * 1024 )	// two 1024² jobs plus the decoder's next buffer fit the temp arena
+#define BAKE_MIN_PIXELS		( 128 * 128 )			// anything smaller is quicker inline than queued
+
+typedef struct bakeJob_s {
+	image_t		*image;
+	unsigned	*pic;						// RGBA at the source size, freed by main once retired
+	byte		*blob;						// the DXT chain, freed by main once uploaded
+	int			blobCap;
+	int			srcWidth, srcHeight;
+	int			width, height;				// after picmip and the size clamp
+	int			halvings;					// mip passes that take srcWidth to width
+	int			mipmap;
+	int			clampMode;
+	int			bytes;						// pic + blob, against BAKE_INFLIGHT_MAX
+	char		key[MAX_QPATH];
+	// written by the worker
+	int			isDxt5;
+	int			mipCount;
+	int			blobSize;
+	unsigned	mipSizes[TEXCACHE_MAX_MIPS];
+} bakeJob_t;
+
+static bakeJob_t	s_bakeJobs[BAKE_QUEUE];
+static int			s_bakeFree[BAKE_QUEUE], s_bakeNumFree;
+static int			s_bakeReq[BAKE_QUEUE], s_bakeReqHead, s_bakeReqTail;
+static int			s_bakeDone[BAKE_QUEUE], s_bakeDoneHead, s_bakeDoneTail;
+static int			s_bakePending;				// enqueued and not yet retired
+static int			s_bakeInflight;				// bytes held by pending jobs
+static SceUID		s_bakeMutex = -1, s_bakeWake = -1, s_bakeDoneSema = -1;
+static SceUID		s_bakeThid[BAKE_WORKERS] = { -1, -1 };
+static qboolean		s_bakeTookPic;				// set when a job took the caller's pic, so R_FindImageFile leaves it
+
+/*
+===============
+R_BakeChain
+
+Worker side: picmip, gamma, the mip chain and the DXT encode, then the cache file. No GL, no allocator.
+===============
+*/
+static void R_BakeChain( bakeJob_t *job )
+{
+	unsigned	*data = job->pic;
+	int			w = job->srcWidth, h = job->srcHeight;
+
+	for ( int i = 0; i < job->halvings; i++ ) {
+		R_MipMap( (byte *)data, w, h );
+		w >>= 1; h >>= 1;
+		if ( w < 1 ) w = 1;
+		if ( h < 1 ) h = 1;
+	}
+
+	// opaque textures take DXT1; any alpha texel means DXT5
+	job->isDxt5 = 0;
+	{
+		const byte *scan = (const byte *)data;
+		const int c = w * h;
+		for ( int i = 0; i < c; i++ ) {
+			if ( scan[i * 4 + 3] != 255 ) { job->isDxt5 = 1; break; }
+		}
+	}
+	const GLenum fmt = job->isDxt5 ? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+
+	if ( job->mipmap )
+		R_LightScaleTexture( data, w, h, qfalse );
+
+	int ofs = 0, level = 0;
+	job->mipSizes[0] = R_DxtEncodeUploadAppend( 0, fmt, w, h, (byte *)data, job->blob, 0 );
+	ofs += job->mipSizes[0];
+	job->mipCount = 1;
+	if ( job->mipmap ) {
+		while ( ( w > 1 || h > 1 ) && job->mipCount < TEXCACHE_MAX_MIPS ) {
+			R_MipMap( (byte *)data, w, h );
+			w >>= 1; h >>= 1;
+			if ( w < 1 ) w = 1;
+			if ( h < 1 ) h = 1;
+			level++;
+			if ( r_colorMipLevels->integer )
+				R_BlendOverTexture( (byte *)data, w * h, mipBlendColors[level] );
+			job->mipSizes[job->mipCount] = R_DxtEncodeUploadAppend( level, fmt, w, h, (byte *)data, job->blob, ofs );
+			ofs += job->mipSizes[job->mipCount];
+			job->mipCount++;
+		}
+	}
+	job->blobSize = ofs;
+
+	// the cache file is plain kernel io, so it is written here rather than on main
+	texCacheHdrDxt_t hdr;
+	hdr.magic     = TEXCACHE_MAGIC_DXT;
+	hdr.format    = job->isDxt5 ? TEXCACHE_FMT_DXT5 : TEXCACHE_FMT_DXT1;
+	hdr.width     = (unsigned)job->width;
+	hdr.height    = (unsigned)job->height;
+	hdr.mipCount  = (unsigned)job->mipCount;
+	hdr.picmip    = (unsigned)( r_picmip ? r_picmip->integer : 0 );
+	hdr.texbits   = (unsigned)( r_texturebits ? r_texturebits->integer : 0 );
+	hdr.totalSize = (unsigned)job->blobSize;
+	R_TexCacheStoreDxt( job->key, &hdr, job->mipSizes, job->blob );
+}
+
+static int R_BakeWorker( SceSize argc, void *argv )
+{
+	for ( ;; ) {
+		sceKernelWaitSema( s_bakeWake, 1, NULL );
+
+		sceKernelLockMutex( s_bakeMutex, 1, NULL );
+		const int j = s_bakeReq[s_bakeReqTail];
+		s_bakeReqTail = ( s_bakeReqTail + 1 ) % BAKE_QUEUE;
+		sceKernelUnlockMutex( s_bakeMutex, 1 );
+
+		R_BakeChain( &s_bakeJobs[j] );
+
+		sceKernelLockMutex( s_bakeMutex, 1, NULL );
+		s_bakeDone[s_bakeDoneHead] = j;
+		s_bakeDoneHead = ( s_bakeDoneHead + 1 ) % BAKE_QUEUE;
+		sceKernelUnlockMutex( s_bakeMutex, 1 );
+		sceKernelSignalSema( s_bakeDoneSema, 1 );
+	}
+	return sceKernelExitDeleteThread( 0 );
+}
+
+static qboolean R_BakeEnsurePool( void )
+{
+	if ( s_bakeThid[0] >= 0 )
+		return qtrue;
+	s_bakeMutex    = sceKernelCreateMutex( "tex_bake_mtx", 0, 0, NULL );
+	s_bakeWake     = sceKernelCreateSema( "tex_bake_wake", 0, 0, BAKE_QUEUE, NULL );
+	s_bakeDoneSema = sceKernelCreateSema( "tex_bake_done", 0, 0, BAKE_QUEUE, NULL );
+	if ( s_bakeMutex < 0 || s_bakeWake < 0 || s_bakeDoneSema < 0 )
+		return qfalse;
+	for ( int i = 0; i < BAKE_QUEUE; i++ )
+		s_bakeFree[i] = i;
+	s_bakeNumFree = BAKE_QUEUE;
+	// main is on core 1; these take the two idle cores, below the mixer so audio never skips
+	const int cores[BAKE_WORKERS] = { SCE_KERNEL_CPU_MASK_USER_0, SCE_KERNEL_CPU_MASK_USER_2 };
+	for ( int i = 0; i < BAKE_WORKERS; i++ ) {
+		s_bakeThid[i] = sceKernelCreateThread( "tex_bake", R_BakeWorker, 0x10000101, 0x8000, 0, cores[i], NULL );
+		if ( s_bakeThid[i] < 0 )
+			return qfalse;
+		sceKernelStartThread( s_bakeThid[i], 0, NULL );
+	}
+	return qtrue;
+}
+
+/*
+===============
+R_BakeRetire
+
+Main side: the upload and the frees, once a worker is done with the job.
+===============
+*/
+static void R_BakeRetire( bakeJob_t *job )
+{
+	image_t *image = job->image;
+
+	image->internalFormat = job->isDxt5 ? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+#ifdef USE_GXM_NATIVE
+	if ( !GXM_TexUploadDxt( image->texnum, job->blob, (unsigned)job->blobSize,
+			(unsigned)job->width, (unsigned)job->height, (unsigned)job->mipCount, job->isDxt5 ) ) {
+		ri.Printf( PRINT_WARNING, "GXM_TexUploadDxt failed: %s\n", job->key );
+	}
+	GXM_TexFilter( image->texnum, 1, job->clampMode != GL_REPEAT );
+#endif
+	Z_Free( job->blob );
+	Z_Free( job->pic );
+	s_bakeInflight -= job->bytes;
+	s_bakePending--;
+	s_bakeFree[s_bakeNumFree++] = (int)( job - s_bakeJobs );
+}
+
+// retires finished jobs on main; waitOne blocks for the first, all blocks for every pending job
+static void R_BakeDrain( qboolean waitOne, qboolean all )
+{
+	qboolean parked = qfalse;
+
+	while ( s_bakePending ) {
+		if ( all || waitOne ) {
+			sceKernelWaitSema( s_bakeDoneSema, 1, NULL );
+			waitOne = qfalse;
+		} else if ( sceKernelPollSema( s_bakeDoneSema, 1 ) < 0 ) {
+			break;
+		}
+		sceKernelLockMutex( s_bakeMutex, 1, NULL );
+		const int j = s_bakeDone[s_bakeDoneTail];
+		s_bakeDoneTail = ( s_bakeDoneTail + 1 ) % BAKE_QUEUE;
+		sceKernelUnlockMutex( s_bakeMutex, 1 );
+
+		if ( !parked ) {
+			// the upload touches the texture table the backend binds from
+			if ( r_renderThread && r_renderThread->integer )
+				R_IssuePendingRenderCommands();
+			parked = qtrue;
+		}
+		R_BakeRetire( &s_bakeJobs[j] );
+	}
+}
+
+void R_BakeDrainAll( void )   { R_BakeDrain( qfalse, qtrue ); }
+void R_BakeDrainReady( void ) { if ( s_bakePending ) R_BakeDrain( qfalse, qfalse ); }
+
+/*
+===============
+R_BakeEnqueue
+
+Hands a cacheable image to the workers. The image gets its final dimensions now and its texels later.
+===============
+*/
+static qboolean R_BakeEnqueue( image_t *image, unsigned *pic, int width, int height, qboolean mipmap,
+							   qboolean allowPicmip, qboolean allowTC, int clampMode, const char *key )
+{
+	if ( !key[0] || !allowTC || !r_texCacheCompressed || !r_texCacheCompressed->integer
+		|| glConfig.textureCompression != TC_S3TC_DXT || width * height < BAKE_MIN_PIXELS ) {
+		return qfalse;
+	}
+	if ( !R_BakeEnsurePool() )
+		return qfalse;
+
+	// the dimensions Upload32 would arrive at, so the image reports them before the chain exists
+	int w = width, h = height, halvings = 0;
+	if ( allowPicmip ) {
+		for ( int i = 0; i < r_picmip->integer; i++ ) {
+			w >>= 1; h >>= 1;
+			if ( w < 1 ) w = 1;
+			if ( h < 1 ) h = 1;
+			halvings++;
+		}
+	}
+	while ( w > glConfig.maxTextureSize || h > glConfig.maxTextureSize ) {
+		w >>= 1; h >>= 1;
+		halvings++;
+	}
+
+	const int blobCap = w * h * 2 + 4096;	// a full DXT5 chain is under w*h*4/3
+	const int bytes   = width * height * 4 + blobCap;
+
+	// the decoder shares the temp arena, so earlier jobs are waited out rather than piled up
+	while ( s_bakePending && s_bakeInflight + bytes > BAKE_INFLIGHT_MAX )
+		R_BakeDrain( qtrue, qfalse );
+	R_BakeDrain( qfalse, qfalse );
+	if ( !s_bakeNumFree )
+		R_BakeDrain( qtrue, qfalse );
+
+	byte *blob = (byte *)Z_Malloc( blobCap, TAG_TEMP_WORKSPACE, qfalse );
+	if ( !blob )
+		return qfalse;
+
+	const int j = s_bakeFree[--s_bakeNumFree];
+	bakeJob_t *job = &s_bakeJobs[j];
+	job->image     = image;
+	job->pic       = pic;
+	job->blob      = blob;
+	job->blobCap   = blobCap;
+	job->srcWidth  = width;
+	job->srcHeight = height;
+	job->width     = w;
+	job->height    = h;
+	job->halvings  = halvings;
+	job->mipmap    = mipmap;
+	job->clampMode = clampMode;
+	job->bytes     = bytes;
+	Q_strncpyz( job->key, key, sizeof( job->key ) );
+
+	image->width  = (word)w;
+	image->height = (word)h;
+
+	sceKernelLockMutex( s_bakeMutex, 1, NULL );
+	s_bakeReq[s_bakeReqHead] = j;
+	s_bakeReqHead = ( s_bakeReqHead + 1 ) % BAKE_QUEUE;
+	sceKernelUnlockMutex( s_bakeMutex, 1 );
+	s_bakePending++;
+	s_bakeInflight += bytes;
+	s_bakeTookPic = qtrue;
+	sceKernelSignalSema( s_bakeWake, 1 );
+	return qtrue;
+}
 #endif // VITA
 
 static void Upload32( unsigned *data,
@@ -937,6 +1214,9 @@ static void GL_ResetBinds(void)
 //
 void R_Images_DeleteLightMaps(void)
 {
+#ifdef VITA
+	R_BakeDrainAll();
+#endif
 	for (AllocatedImages_t::iterator itImage = AllocatedImages.begin(); itImage != AllocatedImages.end(); /* empty */)
 	{
 		image_t *pImage = (*itImage).second;
@@ -960,6 +1240,9 @@ void R_Images_DeleteLightMaps(void)
 //
 void R_Images_DeleteImage(image_t *pImage)
 {
+#ifdef VITA
+	R_BakeDrainAll();
+#endif
 	// Even though we supply the image handle, we need to get the corresponding iterator entry...
 	//
 	AllocatedImages_t::iterator itImage = AllocatedImages.find(pImage->imgName);
@@ -978,6 +1261,9 @@ void R_Images_DeleteImage(image_t *pImage)
 //
 void R_Images_Clear(void)
 {
+#ifdef VITA
+	R_BakeDrainAll();
+#endif
 	image_t *pImage;
 	//	int iNumImages =
 					  R_Images_StartIteration();
@@ -1016,6 +1302,9 @@ void RE_RegisterImages_Info_f( void )
 //
 qboolean RE_RegisterImages_LevelLoadEnd(void)
 {
+#ifdef VITA
+	R_BakeDrainAll();	// every image of this level is uploaded before anything can be purged
+#endif
 	ri.Printf( PRINT_DEVELOPER, S_COLOR_RED "RE_RegisterImages_LevelLoadEnd():\n");
 
 //	int iNumImages = AllocatedImages.size();	// more for curiosity, really.
@@ -1133,6 +1422,7 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 	}
 
 #ifdef VITA
+	s_bakeTookPic = qfalse;
 	// waits out the backend before this main-thread GL upload (no-op before tr.registered)
 	if ( r_renderThread && r_renderThread->integer ) {
 		R_IssuePendingRenderCommands();
@@ -1203,8 +1493,12 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 		Q_strncpyz( s_uploadDxtKey, name, sizeof( s_uploadDxtKey ) );
 	else
 		s_uploadDxtKey[0] = '\0';
-#endif
 
+	// a cacheable image bakes on the worker cores and gets its texels when they finish
+	const qboolean baked = (qboolean)( format == GL_RGBA && !isLightmap && R_BakeEnqueue( image, (unsigned *)pic,
+		width, height, (qboolean)image->mipmap, allowPicmip, allowTC, glWrapClampMode, s_uploadDxtKey ) );
+	if ( !baked )
+#endif
 	Upload32( (unsigned *)pic,	format,
 								(qboolean)image->mipmap,
 								allowPicmip,
@@ -1473,6 +1767,9 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 	}
 
 	image = R_CreateImage( ( char * ) name, pic, width, height, GL_RGBA, mipmap, allowPicmip, allowTC, glWrapClampMode );
+#ifdef VITA
+	if ( !s_bakeTookPic )	// otherwise a worker still reads it; main frees it at retire
+#endif
 	Z_Free( pic );
 	return image;
 }
