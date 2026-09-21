@@ -600,6 +600,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 								const unsigned *mipSizes, const byte *blob );	// defined with the RGBA cache below
 static char s_uploadDxtKey[MAX_QPATH];	// asset name of the in-flight Upload32, set by R_CreateImage
+static qboolean s_texCacheKeep;			// the cache file validated but its upload failed, so the rebuild must not overwrite it
 
 // Encode one mip as row-major, edge-clamped 4x4 DXT blocks into blob+blobOfs, upload it
 // pre-compressed, return the level's byte size.
@@ -901,7 +902,8 @@ static void Upload32( unsigned *data,
 			    GXM_TexUploadDxt( glState.currenttextures[glState.currenttmu], blob, (unsigned)blobOfs,
 				    (unsigned)width, (unsigned)height, (unsigned)mipCount, isDxt5 != 0 );
 #endif
-			    R_TexCacheStoreDxt( s_uploadDxtKey, &hdr, mipSizes, blob );
+			    if ( !s_texCacheKeep )
+				    R_TexCacheStoreDxt( s_uploadDxtKey, &hdr, mipSizes, blob );
 			    R_Free( blob );
 			    goto done;
 		    }
@@ -1284,6 +1286,7 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 
 #ifdef VITA
 	s_uploadDxtKey[0] = '\0';	// clear it so a later upload can't reuse this name
+	s_texCacheKeep = qfalse;
 #endif
 
 	qglTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glWrapClampMode );
@@ -1426,6 +1429,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		qglBindTexture( GL_TEXTURE_2D, 0 );
 		glState.currenttextures[glState.currenttmu] = 0;
 		R_Free( image );
+		s_texCacheKeep = qtrue;
 		return NULL;
 	}
 
@@ -1511,6 +1515,7 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 
 	// DXT cache hit: build straight from the cached mip chain, no decode/encode/picmip. A miss
 	// or mismatch returns NULL and falls through to the normal load below.
+	s_texCacheKeep = qfalse;
 	if ( r_texCacheCompressed && r_texCacheCompressed->integer && allowTC && name[0] != '$' && name[0] != '*' ) {
 		image = R_CreateImageFromDxtCache( name, mipmap, allowPicmip, allowTC, glWrapClampMode );
 		if ( image ) {

@@ -606,6 +606,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 								const unsigned *mipSizes, const byte *blob );
 static char s_uploadDxtKey[MAX_QPATH];	// asset name of the in-flight Upload32, set by R_CreateImage
+static qboolean s_texCacheKeep;			// the cache file validated but its upload failed, so the rebuild must not overwrite it
 
 // Encode one mip as row-major, edge-clamped 4x4 DXT blocks into blob+blobOfs, upload it
 // pre-compressed, return the level's byte size.
@@ -661,6 +662,7 @@ typedef struct bakeJob_s {
 	int			mipmap;
 	int			allowPicmip;
 	int			clampMode;
+	int			store;						// write the cache file when done
 	int			bytes;						// pic + blob, against BAKE_INFLIGHT_MAX
 	char		key[MAX_QPATH];
 	// written by the worker
@@ -743,7 +745,8 @@ static void R_BakeChain( bakeJob_t *job )
 	hdr.picmip    = (unsigned)( job->allowPicmip && r_picmip ? r_picmip->integer : 0 );
 	hdr.texbits   = 0;
 	hdr.totalSize = (unsigned)job->blobSize;
-	R_TexCacheStoreDxt( job->key, &hdr, job->mipSizes, job->blob );
+	if ( job->store )
+		R_TexCacheStoreDxt( job->key, &hdr, job->mipSizes, job->blob );
 }
 
 static int R_BakeWorker( SceSize argc, void *argv )
@@ -906,6 +909,7 @@ static qboolean R_BakeEnqueue( image_t *image, unsigned *pic, int width, int hei
 	job->mipmap    = mipmap;
 	job->allowPicmip = allowPicmip;
 	job->clampMode = clampMode;
+	job->store     = !s_texCacheKeep;
 	job->bytes     = bytes;
 	Q_strncpyz( job->key, key, sizeof( job->key ) );
 
@@ -1120,7 +1124,8 @@ static void Upload32( unsigned *data,
 				GXM_TexUploadDxt( glState.currenttextures[glState.currenttmu], blob, (unsigned)blobOfs,
 					(unsigned)width, (unsigned)height, (unsigned)mipCount, isDxt5 != 0 );
 #endif
-				R_TexCacheStoreDxt( s_uploadDxtKey, &hdr, mipSizes, blob );
+				if ( !s_texCacheKeep )
+					R_TexCacheStoreDxt( s_uploadDxtKey, &hdr, mipSizes, blob );
 				Z_Free( blob );
 				goto done;
 			}
@@ -1512,6 +1517,7 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 
 #ifdef VITA
 	s_uploadDxtKey[0] = '\0';	// clear it so a later upload can't reuse this name
+	s_texCacheKeep = qfalse;
 #endif
 
 	qglTexParameterf( uiTarget, GL_TEXTURE_WRAP_S, glWrapClampMode );
@@ -1646,6 +1652,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		qglBindTexture( GL_TEXTURE_2D, 0 );
 		glState.currenttextures[glState.currenttmu] = 0;
 		Z_Free( image );
+		s_texCacheKeep = qtrue;
 		return NULL;
 	}
 
@@ -1742,6 +1749,7 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		}
 	}
 	// DXT cache hit: build straight from the cached mip chain, no decode/encode/picmip
+	s_texCacheKeep = qfalse;
 	if ( r_texCacheCompressed && r_texCacheCompressed->integer && allowTC && name[0] != '$' && name[0] != '*' ) {
 		image = R_CreateImageFromDxtCache( name, mipmap, allowPicmip, allowTC, glWrapClampMode );
 		if ( image ) {
