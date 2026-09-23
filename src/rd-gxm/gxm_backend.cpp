@@ -577,6 +577,17 @@ void GXM_SetFog( int enabled, float start, float end, const float *color )
 	gxm_uniformsDirty = true;
 }
 
+// gates fog without losing its range or colour, for passes that must not fog twice
+int GXM_FogEnabled( void )
+{
+	return gxm_fogOn;
+}
+
+void GXM_SetFogEnabled( int enabled )
+{
+	gxm_fogOn = enabled;
+}
+
 // xyz is 4 floats per vertex, uv 2, rgba 4 bytes; cleared by the next draw
 void GXM_SetVertexArrays( const float *xyz, const float *uv0, const float *uv1,
 						  const unsigned char *rgba )

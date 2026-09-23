@@ -916,11 +916,18 @@ static void ProjectDlightTexture2( void ) {
 			tr.world &&
 			(tess.fogNum == tr.world->globalFog || tess.fogNum == tr.world->numfogs))
 		{
+#ifdef USE_GXM_NATIVE
+			fogging = GXM_FogEnabled();
+#else
 			fogging = qglIsEnabled(GL_FOG);
+#endif
 
 			if (fogging)
 			{
 				qglDisable(GL_FOG);
+#ifdef USE_GXM_NATIVE
+				GXM_SetFogEnabled( 0 );
+#endif
 			}
 		}
 		else
@@ -1030,6 +1037,9 @@ static void ProjectDlightTexture2( void ) {
 		if (fogging)
 		{
 			qglEnable(GL_FOG);
+#ifdef USE_GXM_NATIVE
+			GXM_SetFogEnabled( 1 );
+#endif
 		}
 #endif
 
@@ -1288,11 +1298,18 @@ static void ProjectDlightTexture( void ) {
 			tr.world &&
 			(tess.fogNum == tr.world->globalFog || tess.fogNum == tr.world->numfogs))
 		{
+#ifdef USE_GXM_NATIVE
+			fogging = GXM_FogEnabled();
+#else
 			fogging = qglIsEnabled(GL_FOG);
+#endif
 
 			if (fogging)
 			{
 				qglDisable(GL_FOG);
+#ifdef USE_GXM_NATIVE
+				GXM_SetFogEnabled( 0 );
+#endif
 			}
 		}
 		else
@@ -1388,6 +1405,9 @@ static void ProjectDlightTexture( void ) {
 		if (fogging)
 		{
 			qglEnable(GL_FOG);
+#ifdef USE_GXM_NATIVE
+			GXM_SetFogEnabled( 1 );
+#endif
 		}
 #endif
 
