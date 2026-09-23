@@ -50,7 +50,7 @@ void GXM_SetTessArraysHook( gxmTessArraysFn_t fn )
 #define GXM_TEXMAP_SIZE		8192		// power of two, kept under half full
 #define GXM_SLOT_NONE		(-1)
 #define GXM_SLOT_DEAD		(-2)		// tombstone; probing must walk past it
-#define GXM_MAX_PROGRAMS	256
+#define GXM_MAX_PROGRAMS	1024		// exhausting this drops draws, so it is sized well past what a map needs
 
 // one interleaved stream; the limit is 16, but packing keeps the program count down
 typedef struct {
@@ -708,6 +708,9 @@ static SceGxmFragmentProgram *ResolveFragment( int ntex, int env, int vcol, int 
 		}
 	}
 	if ( gxm_progCount >= GXM_MAX_PROGRAMS ) {
+		if ( !gxm_statProgFail ) {
+			GXM_LogStatsLine( "GXM: fragment program cache full, draws are being dropped\n" );
+		}
 		gxm_statProgFail++;
 		return NULL;
 	}
@@ -797,6 +800,9 @@ void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexe
 	gxmVert_t *v = (gxmVert_t *)GXM_RingAlloc( numVertexes * sizeof(gxmVert_t), 4 );
 	unsigned short *idx = (unsigned short *)GXM_RingAlloc( numIndexes * sizeof(unsigned short), 2 );
 	if ( !v || !idx ) {
+		if ( !gxm_statRingFail ) {
+			GXM_LogStatsLine( "GXM: vertex ring exhausted, draws are being dropped\n" );
+		}
 		gxm_statRingFail++;
 		return;	// ring exhausted; dropping the draw beats scribbling on the GPU
 	}
