@@ -3625,6 +3625,13 @@ static volatile int   s_lightEntNext = 0;
 void R_QueueEntityLightJob( trRefEntity_t *ent )
 {
 	if ( r_renderThread && r_renderThread->integer && s_lightEntCount < G2MT_MAX_LIGHT_ENTS ) {
+		// a mirror or portal view re-adds the same entity, and two workers accumulating
+		// into one entity would double its light, so it is queued once
+		for ( int i = 0; i < s_lightEntCount; i++ ) {
+			if ( s_lightEnts[i] == ent ) {
+				return;
+			}
+		}
 		s_lightEnts[s_lightEntCount++] = ent;
 		return;
 	}
