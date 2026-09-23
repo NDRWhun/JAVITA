@@ -1758,7 +1758,7 @@ void R_Register( void )
 	ri.Cvar_Set( "r_primitives", "2" );	// no compiled vertex arrays; auto would pick the per-vertex glArrayElement path
 	// 1 = backend on a dedicated render thread (default), 0 = inline on main
 	r_renderThread       = ri.Cvar_Get( "r_renderThread",       "1", CVAR_ARCHIVE | CVAR_LATCH, "" );
-	r_worldVBO           = ri.Cvar_Get( "r_worldVBO",           "0", CVAR_ARCHIVE, "" );	// takes effect on next map load
+	r_worldVBO           = ri.Cvar_Get( "r_worldVBO",           "1", CVAR_ARCHIVE, "" );	// takes effect on next map load
 	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
 	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE, "" );
