@@ -1664,6 +1664,36 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 		}
 		qglEnable(GL_FOG);
 		UseGLFog = true;
+#ifdef USE_GXM_NATIVE
+		// the fragment programs carry the fog curve, so the uniform is armed here
+		if ( !( r_forceFog && r_forceFog->value > 0.0f ) )
+		{
+			float fStart = 0.0f, fEnd = fog->parms.depthForOpaque;
+			if ( tr.rangedFog )
+			{
+				fStart = fog->parms.depthForOpaque;
+				fEnd = tr.distanceCull;
+				if ( tr.rangedFog < 0.0f )
+				{
+					fStart = -tr.rangedFog;
+					fEnd = fog->parms.depthForOpaque;
+					if ( fStart >= fEnd )
+					{
+						fStart = fEnd - 1.0f;
+					}
+				}
+				else if ( ( tr.distanceCull - fStart ) < tr.rangedFog )
+				{
+					fStart = tr.distanceCull - tr.rangedFog;
+					if ( fStart < 16.0f )
+					{
+						fStart = 16.0f;
+					}
+				}
+			}
+			GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+		}
+#endif
 	}
 
 	for ( stage = 0; stage < input->shader->numUnfoggedPasses; stage++ )
@@ -1819,6 +1849,12 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 	{
 		qglFogfv(GL_FOG_COLOR, fog->parms.color);
 	}
+#ifdef USE_GXM_NATIVE
+	if ( UseGLFog && !( r_forceFog && r_forceFog->value > 0.0f ) )
+	{
+		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+	}
+#endif
 }
 
 
