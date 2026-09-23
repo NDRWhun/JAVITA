@@ -1062,9 +1062,28 @@ void G2_CreateMatrixFromQuaterion(mdxaBone_t *mat, vec4_t quat)
     mat->matrix[0][3]  = mat->matrix[1][3] = mat->matrix[2][3] = 0;
 }
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 // nasty little matrix multiply going on here..
 void Multiply_3x4Matrix(mdxaBone_t *out, mdxaBone_t *in2, mdxaBone_t *in)
 {
+#if defined(__ARM_NEON)
+	// out = in2 * in (3x4 affine); 9 FMAs instead of 36 mults and 24 adds
+	const float32x4_t b0 = vld1q_f32( in->matrix[0] );
+	const float32x4_t b1 = vld1q_f32( in->matrix[1] );
+	const float32x4_t b2 = vld1q_f32( in->matrix[2] );
+	for ( int i = 0; i < 3; i++ )
+	{
+		const float *ar = in2->matrix[i];
+		float32x4_t r = vmulq_n_f32( b0, ar[0] );
+		r = vmlaq_n_f32( r, b1, ar[1] );
+		r = vmlaq_n_f32( r, b2, ar[2] );
+		r = vsetq_lane_f32( vgetq_lane_f32( r, 3 ) + ar[3], r, 3 );	// add in2's translation
+		vst1q_f32( out->matrix[i], r );
+	}
+#else
 	// first row of out
 	out->matrix[0][0] = (in2->matrix[0][0] * in->matrix[0][0]) + (in2->matrix[0][1] * in->matrix[1][0]) + (in2->matrix[0][2] * in->matrix[2][0]);
 	out->matrix[0][1] = (in2->matrix[0][0] * in->matrix[0][1]) + (in2->matrix[0][1] * in->matrix[1][1]) + (in2->matrix[0][2] * in->matrix[2][1]);
@@ -1080,6 +1099,7 @@ void Multiply_3x4Matrix(mdxaBone_t *out, mdxaBone_t *in2, mdxaBone_t *in)
 	out->matrix[2][1] = (in2->matrix[2][0] * in->matrix[0][1]) + (in2->matrix[2][1] * in->matrix[1][1]) + (in2->matrix[2][2] * in->matrix[2][1]);
 	out->matrix[2][2] = (in2->matrix[2][0] * in->matrix[0][2]) + (in2->matrix[2][1] * in->matrix[1][2]) + (in2->matrix[2][2] * in->matrix[2][2]);
 	out->matrix[2][3] = (in2->matrix[2][0] * in->matrix[0][3]) + (in2->matrix[2][1] * in->matrix[1][3]) + (in2->matrix[2][2] * in->matrix[2][3]) + in2->matrix[2][3];
+#endif
 }
 
 
