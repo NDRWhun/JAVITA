@@ -83,10 +83,12 @@ void GL_Bind( image_t *image ) {
 		image->frameUsed = tr.frameCount;
 		glState.currenttextures[glState.currenttmu] = texnum;
 		qglBindTexture (GL_TEXTURE_2D, texnum);
-#ifdef USE_GXM_NATIVE
-		GXM_TexBind( glState.currenttmu, texnum );
-#endif
 	}
+#ifdef USE_GXM_NATIVE
+	// unconditional: a texture bound before its bake finished has no slot yet, and the
+	// GL-side cache would otherwise never let it resolve
+	GXM_TexBind( glState.currenttmu, texnum );
+#endif
 }
 
 /*
