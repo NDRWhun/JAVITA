@@ -3787,6 +3787,11 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 			rs->boneMats = g->snap;
 			const size_t vneed = (size_t)rs->surfaceData->numVerts * 6 * sizeof(float);
 			if ( !s_g2SkinArena[buf] || s_g2SkinUsed[buf] + vneed > G2_SKIN_ARENA_SIZE ) {
+				static qboolean s_skinArenaWarn = qfalse;
+				if ( s_g2SkinArena[buf] && !s_skinArenaWarn ) {
+					s_skinArenaWarn = qtrue;
+					ri.Printf( PRINT_ALL, "^3[MT] ghoul2 pre-skin arena full at %u bytes; the rest of the frame skins on the render thread\n", (unsigned)s_g2SkinUsed[buf] );
+				}
 				continue;	// preSkinned stays NULL -> backend skins from the snapshot
 			}
 			rs->preSkinned = (float *)( s_g2SkinArena[buf] + s_g2SkinUsed[buf] );
