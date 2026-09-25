@@ -604,6 +604,17 @@ void GXM_SetFogEnabled( int enabled )
 	gxm_fogOn = enabled;
 }
 
+// swaps the fog colour without touching its range, for a stage that fogs to black or white
+void GXM_SetFogColor( const float *color )
+{
+	if ( !color ) {
+		return;
+	}
+	gxm_fogColor[0] = color[0]; gxm_fogColor[1] = color[1];
+	gxm_fogColor[2] = color[2]; gxm_fogColor[3] = 1.0f;
+	gxm_fragUniformsDirty = true;
+}
+
 // xyz is 4 floats per vertex, uv 2, rgba 4 bytes; cleared by the next draw
 void GXM_SetVertexArrays( const float *xyz, const float *uv0, const float *uv1,
 						  const unsigned char *rgba )

@@ -1767,12 +1767,25 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 			if (pStage->mGLFogColorOverride)
 			{
 				qglFogfv(GL_FOG_COLOR, GLFogOverrideColors[pStage->mGLFogColorOverride]);
+#ifdef USE_GXM_NATIVE
+				// the fragment programs carry the fog colour, so the override is applied here
+				if ( !( r_forceFog && r_forceFog->value > 0.0f ) )
+				{
+					GXM_SetFogColor( GLFogOverrideColors[pStage->mGLFogColorOverride] );
+				}
+#endif
 				FogColorChange = true;
 			}
 			else if (FogColorChange && fog)
 			{
 				FogColorChange = false;
 				qglFogfv(GL_FOG_COLOR, fog->parms.color);
+#ifdef USE_GXM_NATIVE
+				if ( !( r_forceFog && r_forceFog->value > 0.0f ) )
+				{
+					GXM_SetFogColor( fog->parms.color );
+				}
+#endif
 			}
 		}
 

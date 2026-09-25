@@ -72,6 +72,7 @@ void GXM_SetTexEnv( int env );				// GXM_TEXENV_*
 void GXM_SetFog( int enabled, float start, float end, const float *color );
 int  GXM_FogEnabled( void );				// current gate, for passes that must not fog twice
 void GXM_SetFogEnabled( int enabled );		// gates fog, keeping its range and colour
+void GXM_SetFogColor( const float *color );	// swaps the fog colour, keeping its range
 // draw the next tess from these arrays rather than tess itself
 void GXM_SetVertexArrays( const float *xyz, const float *uv0, const float *uv1,
 						  const unsigned char *rgba );
