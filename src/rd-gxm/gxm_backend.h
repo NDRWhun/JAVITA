@@ -87,7 +87,7 @@ void GXM_SetDepthBias( float factor, float units );	// zero is the off state
 void GXM_SetStatsLogPath( const char *dir );
 
 // one line describing what the backend actually did; also appended to gxm_stats.log
-void GXM_ReportStats( char *out, int outSize );
+void GXM_ReportStats( char *out, int outSize, int frames );
 
 // append a caller's own stats line to the same file
 void GXM_LogStatsLine( const char *line );

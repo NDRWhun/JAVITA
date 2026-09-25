@@ -1845,8 +1845,8 @@ const void	*RB_SwapBuffers( const void *data ) {
 	if ( r_gxmStats && r_gxmStats->integer > 0 ) {
 		static int gxmReportFrame = 0;
 		if ( ( ++gxmReportFrame % r_gxmStats->integer ) == 0 ) {
-			char line[192];
-			GXM_ReportStats( line, sizeof( line ) );
+			char line[256];
+			GXM_ReportStats( line, sizeof( line ), r_gxmStats->integer );
 			ri.Printf( PRINT_ALL, "%s", line );
 			R_WorldVBO_Stats( line, sizeof( line ) );
 			ri.Printf( PRINT_ALL, "%s", line );

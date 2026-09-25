@@ -1203,15 +1203,16 @@ void GXM_LogStatsLine( const char *line )
 }
 
 // a picture of what the backend actually did, for r_gxmStats
-void GXM_ReportStats( char *out, int outSize )
+void GXM_ReportStats( char *out, int outSize, int frames )
 {
 	extern int gxm_texAllocFail, gxm_texInitFail;
 	extern unsigned int gxm_texBytes;
+	const int n = ( frames > 0 ) ? frames : 1;	// the draw counters are sums since the last report
 	snprintf( out, outSize,
-		"GXM: uploads=%d dxt=%d allocfail=%d initfail=%d slotfail=%d texfrees=%d texmem=%uMB | draws=%d imm=%d textured=%d notex=%d ringfail=%d ring=%uKB/%uKB | progs=%d/%d progfail=%d fragusse=%uKB\n",
+		"GXM: uploads=%d dxt=%d allocfail=%d initfail=%d slotfail=%d texfrees=%d texmem=%uMB | draws=%d imm=%d textured=%d notex=%d ringfail=%d ringpeak=%uKB/%uKB | progs=%d/%d progfail=%d fragusse=%uKB\n",
 		gxm_statUploads, gxm_statDxtUploads, gxm_texAllocFail, gxm_texInitFail,
 		gxm_statSlotFail, gxm_statTexFrees, gxm_texBytes / ( 1024 * 1024 ),
-		gxm_statDraws, gxm_statImmDraws, gxm_statTextured, gxm_statNoTex,
+		gxm_statDraws / n, gxm_statImmDraws / n, gxm_statTextured / n, gxm_statNoTex / n,
 		gxm_statRingFail, GXM_RingUsedLastFrame() / 1024, GXM_RingBytesPerFrame() / 1024,
 		gxm_progCount, GXM_MAX_PROGRAMS, gxm_statProgFail,
 		(unsigned)( sceGxmShaderPatcherGetFragmentUsseMemAllocated( GXM_ShaderPatcher() ) / 1024 ) );
