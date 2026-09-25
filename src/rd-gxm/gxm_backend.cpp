@@ -32,6 +32,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "shaders/gxm_shaders.h"
 
 #include <string.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
@@ -59,6 +60,11 @@ typedef struct {
 	float			uv1[2];
 	unsigned char	rgba[4];
 } gxmVert_t;
+
+// BuildVertexProgram writes these offsets as literals, and the world VBO bakes to them
+static_assert( sizeof(gxmVert_t) == 32 && offsetof(gxmVert_t, uv0) == 12
+	&& offsetof(gxmVert_t, uv1) == 20 && offsetof(gxmVert_t, rgba) == 28,
+	"gxmVert_t must match the vertex attribute offsets" );
 
 typedef struct {
 	unsigned int			key;
