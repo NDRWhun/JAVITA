@@ -191,6 +191,7 @@ static gxmDepthState_t			gxm_curDepth;
 static bool						gxm_depthKnown;
 static bool						gxm_uniformsDirty = true;
 static bool						gxm_fragUniformsDirty = true;
+static bool						gxm_stencilDirty = true;
 
 // what the backend actually did this run, reported by r_gxmStats
 static int	gxm_statUploads, gxm_statDraws, gxm_statTextured, gxm_statNoTex, gxm_statRingFail;
@@ -355,6 +356,7 @@ void GXM_InvalidateStateShadow( void )
 	gxm_curFragProg = NULL;
 	gxm_curTex[0] = gxm_curTex[1] = NULL;
 	gxm_depthKnown = false;
+	gxm_stencilDirty = true;
 	gxm_uniformsDirty = true;
 	gxm_fragUniformsDirty = true;
 }
@@ -484,8 +486,10 @@ void GXM_SetModelView( const float *m )
 void GXM_SetStateBits( unsigned int stateBits )	{ gxm_stateBits = stateBits; }
 
 // --- stencil / colour mask, driven from tr_shadows through the qgl shim ---
-static gxmStencilState_t	gxm_stencil;
-static bool					gxm_stencilDirty = true;
+static gxmStencilState_t	gxm_stencil = { false, SCE_GXM_STENCIL_FUNC_ALWAYS,
+	SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP,
+	SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP,
+	0, 0xff, 0xff };	// GL's stencil masks default to all ones
 static bool					gxm_colorMaskNone;
 
 static SceGxmStencilFunc GXM_StencilFuncFromGL( unsigned int f )
