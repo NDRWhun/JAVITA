@@ -380,6 +380,10 @@ static void DrawTris (shaderCommands_t *input)
 			GLimp_LogComment( "glLockArraysEXT\n" );
 		}
 
+#ifdef USE_GXM_NATIVE
+		// the wireframe takes the constant colour, not the stage's vertex colours
+		GXM_SetVertexArrays( &input->xyz[0][0], NULL, NULL, NULL );
+#endif
 		R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
 
 		if ( qglUnlockArraysEXT )
@@ -409,6 +413,9 @@ static void DrawTris (shaderCommands_t *input)
 			GLimp_LogComment( "glLockArraysEXT\n" );
 		}
 
+#ifdef USE_GXM_NATIVE
+		GXM_SetVertexArrays( &input->xyz[0][0], NULL, NULL, NULL );
+#endif
 		R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
 
 		if (qglUnlockArraysEXT) {
