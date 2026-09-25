@@ -3957,6 +3957,15 @@ void RB_SurfaceGhoul( CRenderableSurface *surf )
 		if ( !( s_dropWarn++ & 255 ) ) {
 			ri.Printf( PRINT_ALL, "^3[MT] RB_SurfaceGhoul: dropped surface without bone snapshot #%d\n", s_dropWarn );
 		}
+#ifdef _G2_GORE
+		// the glow pass renders this surface again, so only that pass frees it
+		extern bool g_bRenderGlowingObjects;
+		extern bool g_bDynamicGlowSupported;
+		if ( !tess.shader->hasGlow || g_bRenderGlowingObjects || !g_bDynamicGlowSupported || !r_DynamicGlow->integer )
+#endif
+		{
+			delete surf;
+		}
 		return;
 	}
 #endif
