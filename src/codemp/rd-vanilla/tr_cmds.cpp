@@ -311,6 +311,13 @@ R_AddDrawSurfCmd
 void	R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	drawSurfsCommand_t	*cmd;
 
+#ifdef VITA
+	// ahead of the command fetch, so a dropped command still drains the queued light jobs
+	if ( r_renderThread && r_renderThread->integer ) {
+		RB_PrepGhoulSkinMT( drawSurfs, numDrawSurfs );
+	}
+#endif
+
 	cmd = (drawSurfsCommand_t *) R_GetCommandBuffer( sizeof( *cmd ) );
 	if ( !cmd ) {
 		return;
@@ -322,14 +329,6 @@ void	R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	cmd->refdef = tr.refdef;
 	cmd->viewParms = tr.viewParms;
-
-#ifdef VITA
-	// Render-thread mode: snapshot this view's Ghoul2 bone matrices NOW, on the
-	// frontend, while the bone caches still hold this frame's skeletons.
-	if ( r_renderThread && r_renderThread->integer ) {
-		RB_PrepGhoulSkinMT( drawSurfs, numDrawSurfs );
-	}
-#endif
 }
 
 
