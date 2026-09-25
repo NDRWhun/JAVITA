@@ -144,6 +144,23 @@ set(GXM_SOURCES
   ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_backend.cpp
 )
 
+# warn when a .cg source no longer matches the committed gxm_shaders.h
+set(GXM_SHADER_DIR ${CMAKE_SOURCE_DIR}/src/rd-gxm/shaders)
+file(STRINGS ${GXM_SHADER_DIR}/gxm_shaders.h GXM_SHADER_STAMPS REGEX "^// src-sha256 ")
+foreach(stamp IN LISTS GXM_SHADER_STAMPS)
+  if(stamp MATCHES "^// src-sha256 ([^ ]+) ([0-9a-f]+)")
+    set(cg_name ${CMAKE_MATCH_1})
+    set(cg_want ${CMAKE_MATCH_2})
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GXM_SHADER_DIR}/${cg_name})
+    file(READ ${GXM_SHADER_DIR}/${cg_name} cg_text)
+    string(REPLACE "\r" "" cg_text "${cg_text}")
+    string(SHA256 cg_have "${cg_text}")
+    if(NOT cg_have STREQUAL cg_want)
+      message(WARNING "${cg_name} changed since gxm_shaders.h was generated: re-run src/rd-gxm/shaders/build_shaders.py --cgc <psp2cgc>")
+    endif()
+  endif()
+endforeach()
+
 #============================================================================
 # Single player: JAVITA.elf
 #============================================================================
