@@ -125,6 +125,12 @@ static int TexClaim( unsigned int texnum )
 		}
 		i = ( i + 1 ) & ( GXM_TEXMAP_SIZE - 1 );
 	}
+	// no empty entry is left, so a tombstone is the only place to insert
+	if ( dead >= 0 ) {
+		gxm_mapKey[dead]  = texnum;
+		gxm_mapSlot[dead] = gxm_freeSlots[--gxm_numFree];
+		return gxm_mapSlot[dead];
+	}
 	return GXM_SLOT_NONE;
 }
 
