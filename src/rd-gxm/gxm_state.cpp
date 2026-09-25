@@ -93,6 +93,19 @@ static SceGxmBlendFactor DstFactor( unsigned int bits )
 	}
 }
 
+// GL's alpha factor is the colour factor's alpha component, and one for alpha saturate
+static SceGxmBlendFactor AlphaFactor( SceGxmBlendFactor f )
+{
+	switch ( f ) {
+	case SCE_GXM_BLEND_FACTOR_SRC_COLOR:			return SCE_GXM_BLEND_FACTOR_SRC_ALPHA;
+	case SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_COLOR:	return SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	case SCE_GXM_BLEND_FACTOR_DST_COLOR:			return SCE_GXM_BLEND_FACTOR_DST_ALPHA;
+	case SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_COLOR:	return SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+	case SCE_GXM_BLEND_FACTOR_SRC_ALPHA_SATURATE:	return SCE_GXM_BLEND_FACTOR_ONE;
+	default:										return f;
+	}
+}
+
 static gxmAlphaTest_t AlphaTest( unsigned int bits )
 {
 	switch ( bits & GLS_ATEST_BITS ) {
@@ -114,10 +127,12 @@ void GXM_TranslateState( unsigned int stateBits, gxmProgramKey_t *key, gxmDepthS
 		key->blend.colorMask = SCE_GXM_COLOR_MASK_ALL;
 		key->blend.colorFunc = SCE_GXM_BLEND_FUNC_ADD;
 		key->blend.alphaFunc = SCE_GXM_BLEND_FUNC_ADD;
-		key->blend.colorSrc  = SrcFactor( stateBits );
-		key->blend.colorDst  = DstFactor( stateBits );
-		key->blend.alphaSrc  = key->blend.colorSrc;
-		key->blend.alphaDst  = key->blend.colorDst;
+		const SceGxmBlendFactor src = SrcFactor( stateBits );
+		const SceGxmBlendFactor dst = DstFactor( stateBits );
+		key->blend.colorSrc  = src;
+		key->blend.colorDst  = dst;
+		key->blend.alphaSrc  = AlphaFactor( src );
+		key->blend.alphaDst  = AlphaFactor( dst );
 	}
 
 	key->alphaTest = AlphaTest( stateBits );
