@@ -1633,6 +1633,60 @@ static vec4_t	GLFogOverrideColors[GLFOGOVERRIDE_MAX] =
 
 static const float logtestExp2 = (sqrt( -log( 1.0 / 255.0 ) ));
 extern bool tr_stencilled; //tr_backend.cpp
+
+#ifdef USE_GXM_NATIVE
+// true when a batch's fog is the global one, which the fragment programs carry
+qboolean RB_GxmVolumeFogPass( int fogNum, const shader_t *shader )
+{
+	if ( !fogNum || !shader || !shader->fogPass || !tr.world || r_drawfog->value != 2 ) {
+		return qfalse;
+	}
+	if ( fogNum != tr.world->globalFog && fogNum != tr.world->numfogs ) {
+		return qfalse;
+	}
+	if ( r_forceFog && r_forceFog->value > 0.0f ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+// arms the global-fog uniform for a batch that never reaches the tess path
+qboolean RB_GxmVolumeFog( int fogNum, const shader_t *shader )
+{
+	if ( !RB_GxmVolumeFogPass( fogNum, shader ) ) {
+		return qfalse;
+	}
+
+	const fog_t *fog = tr.world->fogs + fogNum;
+	float fStart = 0.0f, fEnd = fog->parms.depthForOpaque;
+
+	if ( tr.rangedFog ) {
+		fStart = fog->parms.depthForOpaque;
+		fEnd = tr.distanceCull;
+		if ( tr.rangedFog < 0.0f ) {
+			fStart = -tr.rangedFog;
+			fEnd = fog->parms.depthForOpaque;
+			if ( fStart >= fEnd ) {
+				fStart = fEnd - 1.0f;
+			}
+		} else if ( ( tr.distanceCull - fStart ) < tr.rangedFog ) {
+			fStart = tr.distanceCull - tr.rangedFog;
+			if ( fStart < 16.0f ) {
+				fStart = 16.0f;
+			}
+		}
+	}
+
+	GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+	return qtrue;
+}
+
+void RB_GxmVolumeFogOff( void )
+{
+	GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+}
+#endif
+
 static void RB_IterateStagesGeneric( shaderCommands_t *input )
 {
 	int stage;

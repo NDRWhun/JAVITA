@@ -39,6 +39,10 @@ typedef struct {
 	float	st1[2];
 	byte	rgba[4];
 } wvboVert_t;
+// the backend's vertex program reads this exact layout
+static_assert( sizeof(wvboVert_t) == 32 && offsetof(wvboVert_t, st0) == 12
+	&& offsetof(wvboVert_t, st1) == 20 && offsetof(wvboVert_t, rgba) == 28,
+	"wvboVert_t must match the gxm vertex stream" );
 #define WVBO_STRIDE		((GLsizei)sizeof(wvboVert_t))
 #define WVBO_OFS_XYZ	((const GLvoid *)0)
 #define WVBO_OFS_ST0	((const GLvoid *)12)
@@ -80,6 +84,8 @@ static glIndex_t	s_wvboStage[WVBO_STAGE_MAX];
 static int			s_wvboStaged;
 static qboolean		s_wvboBatch;
 static shader_t		*s_wvboBatchShader;
+static int			s_wvboBatchFog;			// part of the batch key: one fog per run
+static qboolean		s_wvboBatchFogArmed;	// this batch armed the global-fog uniform
 
 static void WorldVbo_Flush( void )
 {
@@ -209,6 +215,8 @@ void R_FreeWorldVBO( void )
 	s_wvboStaged = 0;
 	s_wvboBatch = qfalse;
 	s_wvboBatchShader = NULL;
+	s_wvboBatchFog = 0;
+	s_wvboBatchFogArmed = qfalse;
 }
 
 // Two passes (count, then fill) select the identical surface set. Caller must have
@@ -229,7 +237,8 @@ void R_BuildWorldVBO( world_t *w )
 #endif
 	for ( int i = surfFirst; i < surfLast; i++ ) {
 		msurface_t *s = &w->surfaces[i];
-		if ( s->fogIndex != 0 || !s->data ) continue;
+		// a bounded fog volume needs the tess fog pass; the global fog is a uniform
+		if ( ( s->fogIndex != 0 && s->fogIndex != w->globalFog ) || !s->data ) continue;
 		surfaceType_t t = *(surfaceType_t *)s->data;
 		if ( !WorldVbo_Eligible( s->shader, t ) ) continue;
 		if ( t == SF_FACE ) {
@@ -264,7 +273,8 @@ void R_BuildWorldVBO( world_t *w )
 	int vCount = 0, iCount = 0, rCount = 0;
 	for ( int i = surfFirst; i < surfLast; i++ ) {
 		msurface_t *s = &w->surfaces[i];
-		if ( s->fogIndex != 0 || !s->data ) continue;
+		// a bounded fog volume needs the tess fog pass; the global fog is a uniform
+		if ( ( s->fogIndex != 0 && s->fogIndex != w->globalFog ) || !s->data ) continue;
 		surfaceType_t t = *(surfaceType_t *)s->data;
 		if ( !WorldVbo_Eligible( s->shader, t ) ) continue;
 
@@ -375,13 +385,17 @@ static wvboSurf_t *WorldVbo_Lookup( const void *surfData )
 
 // Mirror DrawMultitextured's per-surface GL, but with the vertex VBO bound and byte
 // offsets. Indices stay client-side (staged), so ELEMENT_ARRAY is never bound.
-static void WorldVbo_SetupBatch( shader_t *sh )
+static void WorldVbo_SetupBatch( shader_t *sh, int fogNum )
 {
 	const shaderStage_t *st = &sh->stages[0];
 
 	WorldVbo_Flush();	// stale staged indices must not draw with the new shader's state
 	GL_Cull( sh->cullType );
 #ifdef USE_GXM_NATIVE
+	if ( s_wvboBatchFogArmed ) {	// the previous batch's fog must not carry into this one
+		RB_GxmVolumeFogOff();
+		s_wvboBatchFogArmed = qfalse;
+	}
 	// the backend reads the interleaved buffer directly, so only state and bindings move
 	GL_State( st->stateBits );
 
@@ -397,6 +411,7 @@ static void WorldVbo_SetupBatch( shader_t *sh )
 	GXM_SetConstantColor( 1.0f, 1.0f, 1.0f, 1.0f );
 	GXM_SetTexUnitCount( st->bundle[1].image ? 2 : 1 );
 	GXM_SetStateBits( glState.glStateBits );
+	s_wvboBatchFogArmed = RB_GxmVolumeFog( fogNum, sh );
 #else
 	glBindBuffer( GL_ARRAY_BUFFER, s_wvbo.vbo );
 
@@ -424,6 +439,7 @@ static void WorldVbo_SetupBatch( shader_t *sh )
 
 	s_wvboBatch = qtrue;
 	s_wvboBatchShader = sh;
+	s_wvboBatchFog = fogNum;
 }
 
 // End the current VBO batch: flush staged indices, undo the tmu1 enable and
@@ -436,6 +452,9 @@ void RB_EndWorldVBO( void )
 	// the next tess draw picks its own unit count, but leave the shadow single-textured
 	GXM_SetTexUnitCount( 1 );
 	GL_SelectTexture( 0 );
+	if ( s_wvboBatchFogArmed ) {
+		RB_GxmVolumeFogOff();
+	}
 #else
 	if ( s_wvboBatchShader && s_wvboBatchShader->stages[0].bundle[1].image ) {
 		GL_SelectTexture( 1 );
@@ -446,6 +465,8 @@ void RB_EndWorldVBO( void )
 #endif
 	s_wvboBatch = qfalse;
 	s_wvboBatchShader = NULL;
+	s_wvboBatchFog = 0;
+	s_wvboBatchFogArmed = qfalse;
 }
 
 // Returns qtrue if the surface was staged for the VBO; qfalse -> caller draws via tess.
@@ -453,18 +474,30 @@ void RB_EndWorldVBO( void )
 qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlighted, int entityNum )
 {
 	if ( !s_wvbo.ready || !r_worldVBO->integer
-		|| entityNum != REFENTITYNUM_WORLD || dlighted || fogNum || g_bRenderGlowingObjects
+		|| entityNum != REFENTITYNUM_WORLD || dlighted || g_bRenderGlowingObjects
 		|| r_lightmap->integer || r_showtris->integer || r_shownormals->integer || r_fullbright->integer ) {
 		RB_EndWorldVBO();
 		return qfalse;
 	}
+#ifdef USE_GXM_NATIVE
+	// only the global fog rides the uniform; a bounded volume needs its own tess pass
+	if ( fogNum && !RB_GxmVolumeFogPass( fogNum, shader ) ) {
+		RB_EndWorldVBO();
+		return qfalse;
+	}
+#else
+	if ( fogNum ) {
+		RB_EndWorldVBO();
+		return qfalse;
+	}
+#endif
 	wvboSurf_t *rec = WorldVbo_Lookup( surface );
 	if ( !rec || rec->shader != shader ) {
 		RB_EndWorldVBO();
 		return qfalse;
 	}
-	if ( !s_wvboBatch || s_wvboBatchShader != shader ) {
-		WorldVbo_SetupBatch( shader );
+	if ( !s_wvboBatch || s_wvboBatchShader != shader || s_wvboBatchFog != fogNum ) {
+		WorldVbo_SetupBatch( shader, fogNum );
 	}
 	if ( s_wvboStaged + rec->numIndexes > WVBO_STAGE_MAX ) {
 		WorldVbo_Flush();

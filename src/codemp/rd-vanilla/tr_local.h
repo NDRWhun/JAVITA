@@ -1788,6 +1788,9 @@ void RB_SurfaceGhoul( CRenderableSurface *surface );
 void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_ResetGhoulSkinArena( void );
 void R_FreeGhoulSkinArena( void );
+qboolean	RB_GxmVolumeFogPass( int fogNum, const shader_t *shader );	// the global-fog uniform covers this batch
+qboolean	RB_GxmVolumeFog( int fogNum, const shader_t *shader );	// arm the global-fog uniform for a non-tess batch
+void		RB_GxmVolumeFogOff( void );
 // static world VBO (tr_worldvbo.cpp)
 void R_BuildWorldVBO( world_t *world );
 void R_FreeWorldVBO( void );
