@@ -3506,7 +3506,7 @@ static inline float G2_GetVertBoneWeightNotSlow( const mdxmVertex_t *pVert, cons
 // Render-thread Ghoul2 split: the frontend snapshots each visible character's bone
 // matrices (the only G2 state whose lazy Eval mutates the CBoneCache) and the backend
 // skins from that immutable snapshot, overlapped with the next frame's scene build.
-#define G2MT_MAX_CHARS			96
+#define G2MT_MAX_CHARS			192		// past this a character's surfaces drop for the frame
 #define G2MT_MAX_SURFS_PER_CHAR	128
 #define G2MT_MAX_BONES			512		// per-cache dedup bitmask range
 
