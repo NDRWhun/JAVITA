@@ -63,7 +63,8 @@ CQuickSpriteSystem::CQuickSpriteSystem() :
 	mGLStateBits(0),
 	mFogIndex(-1),
 	mUseFog(qfalse),
-	mNextVert(0)
+	mNextVert(0),
+	mOldCull(CT_TWO_SIDED)
 {
 	int i;
 
@@ -220,7 +221,9 @@ void CQuickSpriteSystem::StartGroup(textureBundle_t *bundle, uint32_t glbits, in
 		mUseFog = qfalse;
 	}
 
-	qglDisable(GL_CULL_FACE);
+	// sprite quads keep a fixed winding, so the group is drawn two-sided
+	mOldCull = glState.faceCulling;
+	GL_Cull( CT_TWO_SIDED );
 }
 
 
@@ -229,7 +232,7 @@ void CQuickSpriteSystem::EndGroup(void)
 	Flush();
 
 	qglColor4ub(255,255,255,255);
-	qglEnable(GL_CULL_FACE);
+	GL_Cull( mOldCull );
 }
 
 

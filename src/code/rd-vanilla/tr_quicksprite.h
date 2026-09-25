@@ -41,7 +41,7 @@ private:
 			vec2_t			mFogTextureCoords[SHADER_MAX_VERTEXES];
 			uint32_t		mColors[SHADER_MAX_VERTEXES];
 			int				mNextVert;
-			qboolean		mTurnCullBackOn;
+			int				mOldCull;
 
 			void Flush(void);
 
