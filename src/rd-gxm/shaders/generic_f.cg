@@ -37,8 +37,9 @@ uniform sampler2D uTex1 : TEXUNIT1;
 uniform float4 uFogColor;
 #endif
 
-float4 main(
-	float4 vColor : COLOR0
+// the colour path is half: the texture unit then samples straight into the f16 registers
+half4 main(
+	half4 vColor : COLOR0
 #if NTEX >= 1
 	, float2 vTexCoord0 : TEXCOORD0
 #endif
@@ -50,16 +51,16 @@ float4 main(
 #endif
 	) : COLOR
 {
-	float4 c = vColor;
+	half4 c = vColor;
 
 #if NTEX >= 1
-	c *= tex2D( uTex0, vTexCoord0 );
+	c *= (half4)tex2D( uTex0, vTexCoord0 );
 #endif
 #if NTEX >= 2
-	float4 t1 = tex2D( uTex1, vTexCoord1 );
+	half4 t1 = (half4)tex2D( uTex1, vTexCoord1 );
   #if ENV == 1
 	// GL_ADD sums rgb but multiplies alpha; a plain c+t1 is wrong
-	c = float4( c.rgb + t1.rgb, c.a * t1.a );
+	c = half4( c.rgb + t1.rgb, c.a * t1.a );
   #elif ENV == 2
 	c = t1;						// GL_REPLACE discards everything under it
   #else
@@ -79,9 +80,9 @@ float4 main(
 
 #if FOG
   #if FOG == 2
-	c.rgb = lerp( c.rgb, uFogColor.rgb, vFog );		// GL_LINEAR, what ranged fog asks for
+	c.rgb = lerp( c.rgb, (half3)uFogColor.rgb, (half)vFog );	// GL_LINEAR, what ranged fog asks for
   #else
-	c.rgb = lerp( c.rgb, uFogColor.rgb, saturate( 1.0f - exp2( -7.98f * vFog * vFog ) ) );
+	c.rgb = lerp( c.rgb, (half3)uFogColor.rgb, (half)saturate( 1.0f - exp2( -7.98f * vFog * vFog ) ) );
   #endif
 #endif
 

@@ -47,7 +47,7 @@ void main(
 #if FOG
 	out float  vFog      : TEXCOORD2,
 #endif
-	out float4 vColor    : COLOR0,
+	out half4 vColor     : COLOR0,		// matches the fragment program's half colour path
 	out float4 vPosition : POSITION )
 {
 	vPosition = mul( float4( aPosition, 1.0f ), uMVP );
