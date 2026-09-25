@@ -569,13 +569,13 @@ void RB_BeginDrawingView (void) {
 		qglFogf( GL_FOG_END,   r_forceFog->value );
 		qglEnable( GL_FOG );
 #ifdef USE_GXM_NATIVE
-		GXM_SetFog( 1, r_forceFog->value * 0.5f, r_forceFog->value, fogClr );
+		GXM_SetFog( 1, r_forceFog->value * 0.5f, r_forceFog->value, fogClr, 0 );
 #endif
 	}
 #ifdef USE_GXM_NATIVE
 	else
 	{
-		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+		GXM_SetFog( 0, 0.0f, 0.0f, NULL, 0 );
 	}
 #endif
 #endif
@@ -1365,7 +1365,7 @@ void	RB_SetGL2D (void) {
 #ifdef VITA
 	qglDisable( GL_FOG );	// no fog on HUD/menus
 #ifdef USE_GXM_NATIVE
-	GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+	GXM_SetFog( 0, 0.0f, 0.0f, NULL, 0 );
 #endif
 #endif
 

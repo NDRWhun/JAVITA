@@ -61,7 +61,7 @@ for _nuv in (0, 1, 2):
 for _ntex in (0, 1, 2):
     for _env in ((0,) if _ntex < 2 else (0, 1, 2)):
         for _atest in range(5):
-            for _fog in (0, 1):
+            for _fog in (0, 1, 2):		# 0 off, 1 GL_EXP2, 2 GL_LINEAR
                 SHADERS["generic_f_t%d_e%d_a%d_f%d" % (_ntex, _env, _atest, _fog)] = (
                     "generic_f.cg", "sce_fp_psp2",
                     ["NTEX=%d" % _ntex, "ENV=%d" % _env, "ATEST=%d" % _atest, "FOG=%d" % _fog])

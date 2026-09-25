@@ -78,7 +78,11 @@ float4 main(
 #endif
 
 #if FOG
+  #if FOG == 2
+	c.rgb = lerp( c.rgb, uFogColor.rgb, vFog );		// GL_LINEAR, what ranged fog asks for
+  #else
 	c.rgb = lerp( c.rgb, uFogColor.rgb, saturate( 1.0f - exp2( -7.98f * vFog * vFog ) ) );
+  #endif
 #endif
 
 	return c;

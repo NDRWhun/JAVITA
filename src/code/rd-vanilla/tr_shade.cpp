@@ -1946,13 +1946,13 @@ qboolean RB_GxmVolumeFog( int fogNum, const shader_t *shader )
 		}
 	}
 
-	GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+	GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color, tr.rangedFog ? 1 : 0 );
 	return qtrue;
 }
 
 void RB_GxmVolumeFogOff( void )
 {
-	GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+	GXM_SetFog( 0, 0.0f, 0.0f, NULL, 0 );
 }
 #endif
 
@@ -2026,7 +2026,7 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 #ifdef USE_GXM_NATIVE
 		// the fragment programs carry the fog curve; a forced fog owns the uniform for the view
 		if ( !( r_forceFog && r_forceFog->value > 0.0f ) ) {
-			GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color );
+			GXM_SetFog( 1, fStart, fEnd, g_bRenderGlowingObjects ? vec3_origin : fog->parms.color, tr.rangedFog ? 1 : 0 );
 		}
 #endif
 	}
@@ -2223,7 +2223,7 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 	}
 #if defined(USE_GXM_NATIVE)
 	if ( UseGLFog && !( r_forceFog && r_forceFog->value > 0.0f ) ) {
-		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+		GXM_SetFog( 0, 0.0f, 0.0f, NULL, 0 );
 	}
 #endif
 #endif
@@ -2378,7 +2378,7 @@ void RB_StageIteratorGeneric( void )
 	{
 		qglDisable(GL_FOG);
 #ifdef USE_GXM_NATIVE
-		GXM_SetFog( 0, 0.0f, 0.0f, NULL );
+		GXM_SetFog( 0, 0.0f, 0.0f, NULL, 0 );
 #endif
 	}
 #endif

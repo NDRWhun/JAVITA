@@ -69,7 +69,7 @@ int  GXM_ColorMaskIsNone( void );
 void GXM_SetTexUnitCount( int count );
 void GXM_SetVertexColorEnabled( int enabled );
 void GXM_SetTexEnv( int env );				// GXM_TEXENV_*
-void GXM_SetFog( int enabled, float start, float end, const float *color );
+void GXM_SetFog( int enabled, float start, float end, const float *color, int linear );
 int  GXM_FogEnabled( void );				// current gate, for passes that must not fog twice
 void GXM_SetFogEnabled( int enabled );		// gates fog, keeping its range and colour
 void GXM_SetFogColor( const float *color );	// swaps the fog colour, keeping its range
