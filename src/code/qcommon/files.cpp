@@ -195,7 +195,7 @@ static const uint32_t bonuspak_checksum = 0u;*/
 
 #define MAX_ZPATH			256
 #define	MAX_SEARCH_PATHS	4096
-#define MAX_FILEHASH_SIZE	1024
+#define MAX_FILEHASH_SIZE	16384	// assets0 holds 15346 entries; 1024 chained 7.5 deep
 
 typedef struct fileInPack_s {
 	char					*name;		// name of the file
