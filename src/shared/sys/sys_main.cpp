@@ -719,6 +719,18 @@ void Sys_SigHandler( int signal )
 {
 	static qboolean signalcaught = qfalse;
 
+#ifdef VITA
+	// the teardown below is indistinguishable from a normal quit in the trail,
+	// so name the signal before anything else runs
+	{
+		extern void Sys_BootMark( const char *s );
+		extern char g_lastBootMark[64];
+		char msg[128];
+		snprintf( msg, sizeof( msg ), "SIGNAL %d caught (last mark: %s)", signal, g_lastBootMark );
+		Sys_BootMark( msg );
+	}
+#endif
+
 	if( signalcaught )
 	{
 		fprintf( stderr, "DOUBLE SIGNAL FAULT: Received signal %d, exiting...\n",
