@@ -1344,6 +1344,15 @@ static unsigned R_TexCacheDxt_Path( const char *name, char *out, int outSize )
 	return shard;
 }
 
+// where entries baked before the sharding lived; a card full of them still reads
+static void R_TexCacheDxt_PathFlat( const char *name, char *out, int outSize )
+{
+	unsigned long long h = 14695981039346656037ULL;
+	for ( const char *p = name; *p; ++p ) { h ^= (unsigned char)*p; h *= 1099511628211ULL; }
+	Com_sprintf( out, outSize, "%s/texcache_dxt/%016llx.bin",
+		ri.Cvar_VariableString( "fs_homepath" ), h );
+}
+
 // Build an image_t straight from a cached DXT mip chain, no decode or encode. Returns NULL on a
 // miss, version/picmip mismatch, or corruption so the caller falls back to the load path.
 static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qboolean allowPicmip,
@@ -1360,6 +1369,10 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	char path[256];
 	R_TexCacheDxt_Path( name, path, sizeof(path) );
 	SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
+	if ( fd < 0 ) {
+		R_TexCacheDxt_PathFlat( name, path, sizeof(path) );
+		fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
+	}
 	if ( fd < 0 ) return NULL;
 
 	texCacheHdrDxt_t hdr;
