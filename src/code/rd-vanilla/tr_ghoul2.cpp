@@ -3071,6 +3071,7 @@ void G2_SkinWorkerShutdown( void )
 static qboolean G2_EnsureSkinWorker( void )
 {
 	if ( s_g2WorkerThid >= 0 ) return qtrue;
+	s_g2Quit = 0;		// a worker restarting after a shutdown must not exit immediately
 	s_g2WorkSema = sceKernelCreateSema( "g2skin_in",  0, 0, 1, NULL );
 	s_g2DoneSema = sceKernelCreateSema( "g2skin_out", 0, 0, 1, NULL );
 	s_g2WorkerThid = sceKernelCreateThread( "g2skin", G2_SkinWorker, 0x100000FF, 0x10000, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL );	// above the mixer: anim jobs gate the frame

@@ -813,6 +813,7 @@ static qboolean R_BakeEnsurePool( void )
 {
 	if ( s_bakeThid[0] >= 0 )
 		return qtrue;
+	s_bakeQuit     = 0;		// a pool restarting after a shutdown must not exit immediately
 	s_bakeMutex    = sceKernelCreateMutex( "tex_bake_mtx", 0, 0, NULL );
 	s_bakeWake     = sceKernelCreateSema( "tex_bake_wake", 0, 0, BAKE_QUEUE, NULL );
 	s_bakeDoneSema = sceKernelCreateSema( "tex_bake_done", 0, 0, BAKE_QUEUE, NULL );

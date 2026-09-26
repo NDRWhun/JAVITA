@@ -689,6 +689,7 @@ static qboolean R_DxtEnsurePool( void )
 	if ( s_dxtThid[0] >= 0 ) return qtrue;
 	if ( tried ) return qfalse;
 	tried = 1;
+	s_dxtQuit = 0;		// a pool restarting after a shutdown must not exit immediately
 	s_dxtGo   = sceKernelCreateSema( "dxt_go",   0, 0, DXT_WORKERS, NULL );
 	s_dxtDone = sceKernelCreateSema( "dxt_done", 0, 0, DXT_WORKERS, NULL );
 	const int cores[DXT_WORKERS] = { SCE_KERNEL_CPU_MASK_USER_0, SCE_KERNEL_CPU_MASK_USER_2 };
