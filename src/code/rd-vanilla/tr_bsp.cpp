@@ -101,6 +101,18 @@ static void HSVtoRGB( float h, float s, float v, float rgb[3] )
 	}
 }
 
+// 255/max as a fixed point reciprocal; this core has no integer divide instruction
+static int s_normRecip[511];
+
+static void R_InitNormRecip( void ) {
+	if ( s_normRecip[510] ) {
+		return;
+	}
+	for ( int m = 1; m < 511; m++ ) {
+		s_normRecip[m] = ( 255 * ( 1 << 20 ) + m - 1 ) / m;
+	}
+}
+
 /*
 ===============
 R_ColorShiftLightingBytes
@@ -122,11 +134,13 @@ void R_ColorShiftLightingBytes( const byte in[4], byte out[4] ) {
 	if ( (r|g|b) > 255 ) {
 		int		max;
 
+		R_InitNormRecip();
 		max = r > g ? r : g;
 		max = max > b ? max : b;
-		r = r * 255 / max;
-		g = g * 255 / max;
-		b = b * 255 / max;
+		const int recip = s_normRecip[max];
+		r = ( r * recip ) >> 20;
+		g = ( g * recip ) >> 20;
+		b = ( b * recip ) >> 20;
 	}
 
 	out[0] = r;
@@ -156,11 +170,13 @@ void R_ColorShiftLightingBytes( byte in[3] ) {
 	if ( (r|g|b) > 255 ) {
 		int		max;
 
+		R_InitNormRecip();
 		max = r > g ? r : g;
 		max = max > b ? max : b;
-		r = r * 255 / max;
-		g = g * 255 / max;
-		b = b * 255 / max;
+		const int recip = s_normRecip[max];
+		r = ( r * recip ) >> 20;
+		g = ( g * recip ) >> 20;
+		b = ( b * recip ) >> 20;
 	}
 
 	in[0] = r;
