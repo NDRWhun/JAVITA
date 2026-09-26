@@ -103,6 +103,12 @@ static int Sys_StallWatchdog( SceSize argc, void *argv )
 	for ( ;; ) {
 		sceKernelDelayThread( 5 * 1000 * 1000 );
 		const unsigned int now = g_vitaMainTicks;
+		// unconditional, so a quiet trail means idle rather than uninstrumented
+		{
+			char tick[64];
+			snprintf( tick, sizeof( tick ), "tick frames %u", now );
+			Sys_ProfMark( tick );
+		}
 		if ( now == last && now != 0 ) {
 			stalledFor += 5;
 			char msg[128];

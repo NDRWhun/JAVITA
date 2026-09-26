@@ -2052,13 +2052,14 @@ static void UI_DrawMapPreview(rectDef_t *rect, float scale, vec4_t color, qboole
 
 	if (uiInfo.mapList[map].levelShot == -1) {
 		uiInfo.mapList[map].levelShot = trap->R_RegisterShaderNoMip(uiInfo.mapList[map].imageName);
+		if (!uiInfo.mapList[map].levelShot) {
+			// a failed register returns 0, not -1, so the fallback is cached here
+			// rather than re-registered on every paint
+			uiInfo.mapList[map].levelShot = trap->R_RegisterShaderNoMip("menu/art/unknownmap_mp");
+		}
 	}
 
-	if (uiInfo.mapList[map].levelShot > 0) {
-		UI_DrawHandlePic( rect->x, rect->y, rect->w, rect->h, uiInfo.mapList[map].levelShot);
-	} else {
-		UI_DrawHandlePic( rect->x, rect->y, rect->w, rect->h, trap->R_RegisterShaderNoMip("menu/art/unknownmap_mp"));
-	}
+	UI_DrawHandlePic( rect->x, rect->y, rect->w, rect->h, uiInfo.mapList[map].levelShot);
 }
 
 static void UI_DrawMapCinematic(rectDef_t *rect, float scale, vec4_t color, qboolean net) {
@@ -2326,7 +2327,12 @@ static void UI_DrawNetMapPreview(rectDef_t *rect, float scale, vec4_t color) {
 	if (uiInfo.serverStatus.currentServerPreview > 0) {
 		UI_DrawHandlePic( rect->x, rect->y, rect->w, rect->h, uiInfo.serverStatus.currentServerPreview);
 	} else {
-		UI_DrawHandlePic( rect->x, rect->y, rect->w, rect->h, trap->R_RegisterShaderNoMip("menu/art/unknownmap_mp"));
+		// registered once instead of on every paint
+		static qhandle_t unknownMap = 0;
+		if (!unknownMap) {
+			unknownMap = trap->R_RegisterShaderNoMip("menu/art/unknownmap_mp");
+		}
+		UI_DrawHandlePic( rect->x, rect->y, rect->w, rect->h, unknownMap);
 	}
 }
 
