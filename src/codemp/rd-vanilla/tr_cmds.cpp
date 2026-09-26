@@ -99,6 +99,9 @@ volatile qboolean pendingCtxInit = qfalse;
 static SceUID rend_thid = -1;
 static volatile qboolean rend_should_exit = qfalse;
 static volatile int rend_handedBuffer = 0;	// index of the frame being handed off; written before Signal(in), read after Wait(in)
+// the backend raises Com_Error, which throws; on this thread an escaping throw
+// reaches std::terminate, so it is parked here and re-raised on main
+static volatile int rend_pendingError = 0;
 
 /*
 Render-thread semaphore protocol (all created at 0; R = render thread, M = main):
@@ -151,7 +154,16 @@ static int renderThread( SceSize argc, void *argv ) {
 		}
 		rendBackEnd = rend_handedBuffer;	// adopt the handed index; mispairing is structurally impossible
 		set_tessPtr( &tessArray[rendBackEnd] );
-		RB_ExecuteRenderCommands( backEndDataPtr[rendBackEnd]->commands.cmds );
+		try {
+			RB_ExecuteRenderCommands( backEndDataPtr[rendBackEnd]->commands.cmds );
+		} catch ( int code ) {
+			rend_pendingError = code ? code : ERR_DROP;
+			Sys_BootMark( "rt: backend raised an error" );
+		} catch ( ... ) {
+			rend_pendingError = ERR_DROP;
+			Sys_BootMark( "rt: backend raised an unknown error" );
+		}
+		// signalled even on error, or main waits on a frame that never completes
 		sceKernelSignalSema( rend_mutex_out, 1 );
 	}
 	// plain exit: R_StopRenderThread joins and then deletes, and a self-delete
@@ -165,6 +177,7 @@ void R_StartRenderThread( void ) {
 	}
 	rend_should_exit = qfalse;
 	pendingCtxInit   = qfalse;
+	rend_pendingError = 0;
 	rend_init_done = sceKernelCreateSema( "rend_init", 0, 0, 2, NULL );
 	rend_mutex_in  = sceKernelCreateSema( "rend_in",   0, 0, 1, NULL );
 	rend_mutex_out = sceKernelCreateSema( "rend_out",  0, 0, 1, NULL );
@@ -222,6 +235,12 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 	if ( r_renderThread && r_renderThread->integer ) {
 		// hand the frame to the render thread, flip the frontend to the other buffer
 		sceKernelWaitSema( rend_mutex_out, 1, NULL );
+		if ( rend_pendingError ) {
+			const int code = rend_pendingError;
+			rend_pendingError = 0;
+			sceKernelSignalSema( rend_mutex_out, 1 );	// keep the token balance intact
+			ri.Error( code, "render backend error" );
+		}
 		// backend parked between Wait(out) and Signal(in): its counters are stable here
 		if ( runPerformanceCounters ) {
 			R_PerformanceCounters();
@@ -269,6 +288,12 @@ void R_IssuePendingRenderCommands( void ) {
 	if ( r_renderThread && r_renderThread->integer ) {
 		sceKernelWaitSema( rend_mutex_out, 1, NULL );
 		sceKernelSignalSema( rend_mutex_out, 1 );
+		// re-raised here because main is the only thread with a handler for it
+		if ( rend_pendingError ) {
+			const int code = rend_pendingError;
+			rend_pendingError = 0;
+			ri.Error( code, "render backend error" );
+		}
 	}
 #endif
 }
