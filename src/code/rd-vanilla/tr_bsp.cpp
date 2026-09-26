@@ -101,14 +101,16 @@ static void HSVtoRGB( float h, float s, float v, float rgb[3] )
 	}
 }
 
-// 255/max as a fixed point reciprocal; this core has no integer divide instruction
-static int s_normRecip[511];
+// 255/max as a fixed point reciprocal; this core has no integer divide instruction.
+// Sized for a shift of 2, the largest r_mapOverBrightBits the engine uses.
+#define NORM_RECIP_SIZE 1021
+static int s_normRecip[NORM_RECIP_SIZE];
 
 static void R_InitNormRecip( void ) {
-	if ( s_normRecip[510] ) {
+	if ( s_normRecip[NORM_RECIP_SIZE - 1] ) {
 		return;
 	}
-	for ( int m = 1; m < 511; m++ ) {
+	for ( int m = 1; m < NORM_RECIP_SIZE; m++ ) {
 		s_normRecip[m] = ( 255 * ( 1 << 20 ) + m - 1 ) / m;
 	}
 }
@@ -124,6 +126,7 @@ void R_ColorShiftLightingBytes( const byte in[4], byte out[4] ) {
 
 	// shift the color data based on overbright range
 	shift = Q_max( 0, r_mapOverBrightBits->integer - tr.overbrightBits );
+	shift = Q_min( shift, 2 );	// keeps max within the reciprocal table
 
 	// shift the data based on overbright range
 	r = in[0] << shift;
@@ -160,6 +163,7 @@ void R_ColorShiftLightingBytes( byte in[3] ) {
 
 	// shift the color data based on overbright range
 	shift = Q_max( 0, r_mapOverBrightBits->integer - tr.overbrightBits );
+	shift = Q_min( shift, 2 );	// keeps max within the reciprocal table
 
 	// shift the data based on overbright range
 	r = in[0] << shift;
