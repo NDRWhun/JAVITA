@@ -762,10 +762,15 @@ static void R_BakeChain( bakeJob_t *job )
 		R_TexCacheStoreDxt( job->key, &hdr, job->mipSizes, job->blob );
 }
 
+static volatile int s_bakeQuit;
+
 static int R_BakeWorker( SceSize argc, void *argv )
 {
 	for ( ;; ) {
 		sceKernelWaitSema( s_bakeWake, 1, NULL );
+		if ( s_bakeQuit ) {
+			break;
+		}
 
 		sceKernelLockMutex( s_bakeMutex, 1, NULL );
 		const int j = s_bakeReq[s_bakeReqTail];
@@ -780,7 +785,28 @@ static int R_BakeWorker( SceSize argc, void *argv )
 		sceKernelUnlockMutex( s_bakeMutex, 1 );
 		sceKernelSignalSema( s_bakeDoneSema, 1 );
 	}
-	return sceKernelExitDeleteThread( 0 );
+	// plain exit; R_BakeShutdown joins and deletes, and a self-delete races that
+	return sceKernelExitThread( 0 );
+}
+
+// these can be inside a cache write when the process exits, which wedges teardown
+void R_BakeShutdown( void )
+{
+	if ( s_bakeThid[0] < 0 ) {
+		return;
+	}
+	R_BakeDrainAll();
+	s_bakeQuit = 1;
+	for ( int i = 0; i < BAKE_WORKERS; i++ ) {
+		sceKernelSignalSema( s_bakeWake, 1 );
+	}
+	for ( int i = 0; i < BAKE_WORKERS; i++ ) {
+		if ( s_bakeThid[i] < 0 ) continue;
+		SceUInt tmo = 3 * 1000 * 1000;
+		sceKernelWaitThreadEnd( s_bakeThid[i], NULL, &tmo );
+		sceKernelDeleteThread( s_bakeThid[i] );
+		s_bakeThid[i] = -1;
+	}
 }
 
 static qboolean R_BakeEnsurePool( void )

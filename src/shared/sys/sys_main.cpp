@@ -187,6 +187,11 @@ void Sys_Init( void ) {
 }
 
 static void NORETURN Sys_Exit( int ex ) {
+#ifdef VITA
+	// the watchdog writes to the card on a timer; a thread mid-syscall wedges process exit
+	extern void Sys_StopStallWatchdog( void );
+	Sys_StopStallWatchdog();
+#endif
 	IN_Shutdown();
 #ifndef DEDICATED
 	SDL_Quit();

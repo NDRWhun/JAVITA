@@ -95,13 +95,21 @@ void Sys_ProfMark( const char *tag )
 
 // main-loop stall watchdog: names any main-thread freeze in the trail
 volatile unsigned int g_vitaMainTicks = 0;
+static volatile int s_wdQuit;
+static SceUID s_wdThid = -1;
 
 static int Sys_StallWatchdog( SceSize argc, void *argv )
 {
 	unsigned int last = 0;
 	int stalledFor = 0;
-	for ( ;; ) {
-		sceKernelDelayThread( 5 * 1000 * 1000 );
+	while ( !s_wdQuit ) {
+		// sliced, so a quit is noticed promptly instead of up to five seconds later
+		for ( int i = 0; i < 20 && !s_wdQuit; i++ ) {
+			sceKernelDelayThread( 250 * 1000 );
+		}
+		if ( s_wdQuit ) {
+			break;
+		}
 		const unsigned int now = g_vitaMainTicks;
 		// unconditional, so a quiet trail means idle rather than uninstrumented
 		{
@@ -120,13 +128,27 @@ static int Sys_StallWatchdog( SceSize argc, void *argv )
 		}
 		last = now;
 	}
-	return 0;
+	return sceKernelExitThread( 0 );
 }
 
 void Sys_StartStallWatchdog( void )
 {
-	SceUID t = sceKernelCreateThread( "stall_wd", Sys_StallWatchdog, 0x10000100, 0x4000, 0, 0, NULL );
-	if ( t >= 0 ) sceKernelStartThread( t, 0, NULL );
+	s_wdQuit = 0;
+	s_wdThid = sceKernelCreateThread( "stall_wd", Sys_StallWatchdog, 0x10000100, 0x4000, 0, 0, NULL );
+	if ( s_wdThid >= 0 ) sceKernelStartThread( s_wdThid, 0, NULL );
+}
+
+// a thread still writing to the card blocks process exit, so it is joined before teardown
+void Sys_StopStallWatchdog( void )
+{
+	if ( s_wdThid < 0 ) {
+		return;
+	}
+	s_wdQuit = 1;
+	SceUInt tmo = 3 * 1000 * 1000;
+	sceKernelWaitThreadEnd( s_wdThid, NULL, &tmo );
+	sceKernelDeleteThread( s_wdThid );
+	s_wdThid = -1;
 }
 
 #ifndef SP_GAME

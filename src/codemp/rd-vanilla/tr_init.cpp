@@ -2085,6 +2085,10 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 #ifdef VITA
 			// vid_restart: stop + join the GXM-owning thread so the remaining
 			// teardown GL runs single-threaded
+			{
+				extern void R_BakeShutdown( void );
+				R_BakeShutdown();
+			}
 			if ( r_renderThread && r_renderThread->integer ) {
 				R_StopRenderThread();
 			}

@@ -154,7 +154,9 @@ static int renderThread( SceSize argc, void *argv ) {
 		RB_ExecuteRenderCommands( backEndDataPtr[rendBackEnd]->commands.cmds );
 		sceKernelSignalSema( rend_mutex_out, 1 );
 	}
-	return sceKernelExitDeleteThread( 0 );
+	// plain exit: R_StopRenderThread joins and then deletes, and a self-delete
+	// would leave that join waiting on a thid the kernel may already have reused
+	return sceKernelExitThread( 0 );
 }
 
 void R_StartRenderThread( void ) {
@@ -181,9 +183,17 @@ void R_StopRenderThread( void ) {
 	if ( rend_thid < 0 ) {
 		return;
 	}
+	extern void Sys_BootMark( const char *s );
+	Sys_BootMark( "rt: stop" );
 	rend_should_exit = qtrue;
 	sceKernelSignalSema( rend_mutex_in, 1 );
-	sceKernelWaitThreadEnd( rend_thid, NULL, NULL );
+	// bounded, so a backend stuck in gxm reports itself instead of hanging teardown
+	SceUInt tmo = 5 * 1000 * 1000;
+	if ( sceKernelWaitThreadEnd( rend_thid, NULL, &tmo ) < 0 ) {
+		Sys_BootMark( "rt: join timed out" );
+	}
+	sceKernelDeleteThread( rend_thid );
+	Sys_BootMark( "rt: stopped" );
 	if ( rend_init_done >= 0 ) { sceKernelDeleteSema( rend_init_done ); rend_init_done = -1; }
 	if ( rend_mutex_in  >= 0 ) { sceKernelDeleteSema( rend_mutex_in );  rend_mutex_in  = -1; }
 	if ( rend_mutex_out >= 0 ) { sceKernelDeleteSema( rend_mutex_out ); rend_mutex_out = -1; }
