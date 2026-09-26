@@ -2631,6 +2631,11 @@ static void FixRenderCommandList( int newShader ) {
 	}
 }
 
+// inside the opaque band a discard primitive makes the tiler flush, so those draw last
+static float ShaderSortKey( const shader_t *sh ) {
+	return ( sh->sort == SS_OPAQUE && sh->alphaTested ) ? SS_OPAQUE + 0.5f : sh->sort;
+}
+
 /*
 ==============
 SortNewShader
@@ -2648,10 +2653,10 @@ static void SortNewShader( void ) {
 	shader_t	*newShader;
 
 	newShader = tr.shaders[ tr.numShaders - 1 ];
-	sort = newShader->sort;
+	sort = ShaderSortKey( newShader );
 
 	for ( i = tr.numShaders - 2 ; i >= 0 ; i-- ) {
-		if ( tr.sortedShaders[ i ]->sort <= sort ) {
+		if ( ShaderSortKey( tr.sortedShaders[ i ] ) <= sort ) {
 			break;
 		}
 		tr.sortedShaders[i+1] = tr.sortedShaders[i];
@@ -3138,6 +3143,13 @@ static shader_t *FinishShader( void ) {
 
 		stageIndex++; //rwwRMG - needed for AGEN_BLEND
 		stage++;
+	}
+
+	for ( int i = 0; i < stage; i++ ) {
+		if ( stages[i].stateBits & GLS_ATEST_BITS ) {
+			shader.alphaTested = true;
+			break;
+		}
 	}
 
 	// there are times when you will need to manually apply a sort to

@@ -497,6 +497,7 @@ typedef struct shader_s {
 	bool		noMipMaps;				// for console fonts, 2D elements, etc.
 	bool		noPicMip;				// for images that must always be full resolution
 	bool		noTC;					// for images that don't want to be texture compressed (namely skies)
+	bool		alphaTested;			// some stage discards, which orders it apart from plain opaques
 
 	fogPass_t	fogPass;				// draw a blended pass, possibly with depth test equals
 
