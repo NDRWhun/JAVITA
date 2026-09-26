@@ -166,7 +166,7 @@ void R_StartRenderThread( void ) {
 	rend_init_done = sceKernelCreateSema( "rend_init", 0, 0, 2, NULL );
 	rend_mutex_in  = sceKernelCreateSema( "rend_in",   0, 0, 1, NULL );
 	rend_mutex_out = sceKernelCreateSema( "rend_out",  0, 0, 1, NULL );
-	// main/frontend on core 0, backend owns core 2 (core 3 is system-reserved)
+	// main/frontend is pinned to core 1, backend owns core 2 (core 3 is system-reserved)
 	rend_thid = sceKernelCreateThread( "Renderer Thread", renderThread, 0x10000100, 0x40000, 0, SCE_KERNEL_CPU_MASK_USER_2, NULL );
 	sceKernelStartThread( rend_thid, 0, NULL );
 }
