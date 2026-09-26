@@ -443,9 +443,16 @@ static bool GXM_InitSwapChain( void )
 		return false;
 	}
 
-	return (bool)( sceGxmDepthStencilSurfaceInit( &gxm_depthSurface,
-		SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24, SCE_GXM_DEPTH_STENCIL_SURFACE_TILED,
-		alignedW, depthData, NULL ) >= 0 );
+	if ( sceGxmDepthStencilSurfaceInit( &gxm_depthSurface,
+			SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24, SCE_GXM_DEPTH_STENCIL_SURFACE_TILED,
+			alignedW, depthData, NULL ) < 0 ) {
+		return false;
+	}
+
+	// force load defaults off, so every tile starts from these and the scene needs no clear draw
+	sceGxmDepthStencilSurfaceSetBackgroundDepth( &gxm_depthSurface, 1.0f );
+	sceGxmDepthStencilSurfaceSetBackgroundStencil( &gxm_depthSurface, 0 );
+	return true;
 }
 
 static bool GXM_InitPatcher( void )
@@ -594,7 +601,8 @@ void GXM_BeginFrame( void )
 		NULL, NULL, gxm_buffers[gxm_backBuffer].sync,
 		&gxm_buffers[gxm_backBuffer].surface, &gxm_depthSurface );
 
-	GXM_ClearBuffers( 1, 1, 1 );
+	// depth and stencil arrive from the surface background values, so only colour is drawn
+	GXM_ClearBuffers( 1, 0, 0 );
 }
 
 /*
