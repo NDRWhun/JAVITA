@@ -25,6 +25,17 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 
+#ifdef VITA
+#include <psp2/kernel/processmgr.h>
+// time inside shader registration, so the boot trail can separate it from module work
+unsigned int s_rsUs, s_rsCalls;
+#define RS_TIME_BEGIN	const SceUInt64 rsT0 = sceKernelGetProcessTimeWide()
+#define RS_TIME_END		do { s_rsUs += (unsigned)( sceKernelGetProcessTimeWide() - rsT0 ); s_rsCalls++; } while(0)
+#else
+#define RS_TIME_BEGIN	do {} while(0)
+#define RS_TIME_END		do {} while(0)
+#endif
+
 static char *s_shaderText;
 static qboolean s_shaderTextHasHash;	// a '#' token is absent from the hash table, so it needs the scan
 
@@ -3736,7 +3747,9 @@ qhandle_t RE_RegisterShader( const char *name ) {
 		return 0;
 	}
 
+	RS_TIME_BEGIN;
 	sh = R_FindShader( name, lightmaps2d, stylesDefault, qtrue );
+	RS_TIME_END;
 
 	// we want to return 0 if the shader failed to
 	// load for some reason, but R_FindShader should
@@ -3766,7 +3779,9 @@ qhandle_t RE_RegisterShaderNoMip( const char *name ) {
 		return 0;
 	}
 
+	RS_TIME_BEGIN;
 	sh = R_FindShader( name, lightmaps2d, stylesDefault, qfalse );
+	RS_TIME_END;
 
 	// we want to return 0 if the shader failed to
 	// load for some reason, but R_FindShader should

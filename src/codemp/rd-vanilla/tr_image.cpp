@@ -1834,9 +1834,10 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		static int s_imgCount = 0;
 		if ( !( ++s_imgCount & 31 ) ) {
 			char tick[128];
-			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d picmip %d mip %d | cache %ums park %ums upload %ums",
-				s_imgCount, s_tcHit, s_tcNoFile, s_tcPicmip, s_tcFlags,
-				s_tcUsTotal / 1000, s_tcUsPark / 1000, s_tcUsUpload / 1000 );
+			extern unsigned int s_rsUs, s_rsCalls;
+			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d | cache %ums upload %ums | regshader %ums x%u",
+				s_imgCount, s_tcHit, s_tcNoFile,
+				s_tcUsTotal / 1000, s_tcUsUpload / 1000, s_rsUs / 1000, s_rsCalls );
 			Sys_BootMark( tick );
 		}
 	}
