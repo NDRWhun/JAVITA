@@ -170,7 +170,9 @@ static int renderThread( SceSize argc, void *argv ) {
 		}
 		sceKernelSignalSema( rend_mutex_out, 1 );
 	}
-	return sceKernelExitDeleteThread( 0 );
+	// plain exit: R_StopRenderThread joins and then deletes, and a self-delete
+	// would leave that join waiting on a thid the kernel may already have reused
+	return sceKernelExitThread( 0 );
 }
 
 // so Com_Error can throw to main instead of shutting down from the backend
@@ -207,7 +209,10 @@ void R_StopRenderThread( void ) {
 	}
 	rend_should_exit = qtrue;
 	sceKernelSignalSema( rend_mutex_in, 1 );
-	sceKernelWaitThreadEnd( rend_thid, NULL, NULL );
+	// bounded, so a backend stuck in gxm reports itself instead of hanging teardown
+	SceUInt tmo = 5 * 1000 * 1000;
+	sceKernelWaitThreadEnd( rend_thid, NULL, &tmo );
+	sceKernelDeleteThread( rend_thid );
 	if ( rend_init_done >= 0 ) { sceKernelDeleteSema( rend_init_done ); rend_init_done = -1; }
 	if ( rend_mutex_in  >= 0 ) { sceKernelDeleteSema( rend_mutex_in );  rend_mutex_in  = -1; }
 	if ( rend_mutex_out >= 0 ) { sceKernelDeleteSema( rend_mutex_out ); rend_mutex_out = -1; }

@@ -3038,14 +3038,34 @@ static void G2_DrainSkinJobs( void )
 	}
 }
 
+static volatile int s_g2Quit;
+
 static int G2_SkinWorker( SceSize argc, void *argv )
 {
 	for ( ;; ) {
 		sceKernelWaitSema( s_g2WorkSema, 1, NULL );
+		if ( s_g2Quit ) {
+			break;
+		}
 		G2_DrainSkinJobs();
 		sceKernelSignalSema( s_g2DoneSema, 1 );
 	}
-	return sceKernelExitDeleteThread( 0 );
+	// plain exit; G2_SkinWorkerShutdown joins and deletes, and a self-delete races that
+	return sceKernelExitThread( 0 );
+}
+
+// a worker still running when the process exits wedges teardown
+void G2_SkinWorkerShutdown( void )
+{
+	if ( s_g2WorkerThid < 0 ) {
+		return;
+	}
+	s_g2Quit = 1;
+	sceKernelSignalSema( s_g2WorkSema, 1 );
+	SceUInt tmo = 3 * 1000 * 1000;
+	sceKernelWaitThreadEnd( s_g2WorkerThid, NULL, &tmo );
+	sceKernelDeleteThread( s_g2WorkerThid );
+	s_g2WorkerThid = -1;
 }
 
 static qboolean G2_EnsureSkinWorker( void )

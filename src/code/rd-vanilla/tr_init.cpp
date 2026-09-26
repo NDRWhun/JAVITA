@@ -2145,6 +2145,13 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
 #ifdef VITA
+		// workers first: one still running when the process exits wedges teardown
+		{
+			extern void R_DxtShutdown( void );
+			extern void G2_SkinWorkerShutdown( void );
+			R_DxtShutdown();
+			G2_SkinWorkerShutdown();
+		}
 		// the render thread owns the GXM context; join it before the window goes away
 		R_StopRenderThread();
 #endif

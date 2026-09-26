@@ -648,14 +648,39 @@ static void R_DxtDrainRows( void )
 	}
 }
 
+static volatile int s_dxtQuit;
+
 static int R_DxtWorker( SceSize argc, void *argv )
 {
 	for ( ;; ) {
 		sceKernelWaitSema( s_dxtGo, 1, NULL );
+		if ( s_dxtQuit ) {
+			break;
+		}
 		R_DxtDrainRows();
 		sceKernelSignalSema( s_dxtDone, 1 );
 	}
-	return sceKernelExitDeleteThread( 0 );
+	// plain exit; R_DxtShutdown joins and deletes, and a self-delete races that
+	return sceKernelExitThread( 0 );
+}
+
+// a worker still running when the process exits wedges teardown
+void R_DxtShutdown( void )
+{
+	if ( s_dxtThid[0] < 0 ) {
+		return;
+	}
+	s_dxtQuit = 1;
+	for ( int i = 0; i < DXT_WORKERS; i++ ) {
+		sceKernelSignalSema( s_dxtGo, 1 );
+	}
+	for ( int i = 0; i < DXT_WORKERS; i++ ) {
+		if ( s_dxtThid[i] < 0 ) continue;
+		SceUInt tmo = 3 * 1000 * 1000;
+		sceKernelWaitThreadEnd( s_dxtThid[i], NULL, &tmo );
+		sceKernelDeleteThread( s_dxtThid[i] );
+		s_dxtThid[i] = -1;
+	}
 }
 
 static qboolean R_DxtEnsurePool( void )
