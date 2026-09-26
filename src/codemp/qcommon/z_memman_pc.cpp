@@ -96,6 +96,16 @@ cvar_t	*com_validateZone;
 zone_t	TheZone = {};
 
 #ifdef VITA
+// the sound mixer allocates from core 0 while everything else allocates from core 1
+static volatile unsigned char s_zoneLock = 0;
+static inline void Zone_Lock(void)   { while (__atomic_test_and_set(&s_zoneLock, __ATOMIC_ACQUIRE)) {} }
+static inline void Zone_Unlock(void) { __atomic_clear(&s_zoneLock, __ATOMIC_RELEASE); }
+#else
+static inline void Zone_Lock(void)   {}
+static inline void Zone_Unlock(void) {}
+#endif
+
+#ifdef VITA
 // Boot-reserved contiguous arena for the multi-MB transient decode workspaces;
 // the fragmented load-time heap can't provide those holes.
 #define ARENA_MAGIC			0x41524E41u		// 'ARNA' — in use
@@ -322,10 +332,13 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 	zoneHeader_t *pMemory = NULL;
 	while (pMemory == NULL)
 	{
+#ifndef VITA
+		// newlib hands the freed blocks straight back, so there is nothing to wait for
 		if (gbMemFreeupOccured)
 		{
 			Sys_Sleep(1000);	// sleep for a second, so Windows has a chance to shuffle mem to de-swiss-cheese it
 		}
+#endif
 
 		if (bZeroit) {
 			pMemory = (zoneHeader_t *) calloc ( iRealSize, 1 );
@@ -418,6 +431,13 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 	pMemory->iMagic	= ZONE_MAGIC;
 	pMemory->eTag	= eTag;
 	pMemory->iSize	= iSize;
+	//
+	// add tail...
+	//
+	ZoneTailFromHeader(pMemory)->iMagic = ZONE_MAGIC;
+
+	// the block is private until it is linked, so only the list and stats need the lock
+	Zone_Lock();
 	pMemory->pNext  = TheZone.Header.pNext;
 	TheZone.Header.pNext = pMemory;
 	if (pMemory->pNext)
@@ -425,10 +445,6 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 		pMemory->pNext->pPrev = pMemory;
 	}
 	pMemory->pPrev = &TheZone.Header;
-	//
-	// add tail...
-	//
-	ZoneTailFromHeader(pMemory)->iMagic = ZONE_MAGIC;
 
 	// Update stats...
 	//
@@ -441,6 +457,7 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 	{
 		TheZone.Stats.iPeak	= TheZone.Stats.iCurrent;
 	}
+	Zone_Unlock();
 
 #ifdef DETAILED_ZONE_DEBUG_CODE
 	mapAllocatedZones[pMemory]++;
@@ -488,6 +505,8 @@ void Z_MorphMallocTag( void *pvAddress, memtag_t eDesiredTag )
 		return;	// won't get here
 	}
 
+	Zone_Lock();
+
 	// DEC existing tag stats...
 	//
 //	TheZone.Stats.iCurrent	- unchanged
@@ -505,31 +524,43 @@ void Z_MorphMallocTag( void *pvAddress, memtag_t eDesiredTag )
 //	TheZone.Stats.iCount	- unchanged
 	TheZone.Stats.iSizesPerTag	[pMemory->eTag] += pMemory->iSize;
 	TheZone.Stats.iCountsPerTag	[pMemory->eTag]++;
+
+	Zone_Unlock();
+}
+
+// list surgery and stats only; the caller holds the lock and frees outside it
+static void Zone_UnlinkLocked(zoneHeader_t *pMemory)
+{
+	// Update stats...
+	//
+	TheZone.Stats.iCount--;
+	TheZone.Stats.iCurrent -= pMemory->iSize;
+	TheZone.Stats.iSizesPerTag	[pMemory->eTag] -= pMemory->iSize;
+	TheZone.Stats.iCountsPerTag	[pMemory->eTag]--;
+
+	// Sanity checks...
+	//
+	assert(pMemory->pPrev->pNext == pMemory);
+	assert(!pMemory->pNext || (pMemory->pNext->pPrev == pMemory));
+
+	// Unlink...
+	//
+	pMemory->pPrev->pNext = pMemory->pNext;
+	if(pMemory->pNext)
+	{
+		pMemory->pNext->pPrev = pMemory->pPrev;
+	}
 }
 
 static void Zone_FreeBlock(zoneHeader_t *pMemory)
 {
 	if (pMemory->eTag != TAG_STATIC)	// belt and braces, should never hit this though
 	{
-		// Update stats...
-		//
-		TheZone.Stats.iCount--;
-		TheZone.Stats.iCurrent -= pMemory->iSize;
-		TheZone.Stats.iSizesPerTag	[pMemory->eTag] -= pMemory->iSize;
-		TheZone.Stats.iCountsPerTag	[pMemory->eTag]--;
+		// free() takes the heap lock, so it must not run under ours
+		Zone_Lock();
+		Zone_UnlinkLocked(pMemory);
+		Zone_Unlock();
 
-		// Sanity checks...
-		//
-		assert(pMemory->pPrev->pNext == pMemory);
-		assert(!pMemory->pNext || (pMemory->pNext->pPrev == pMemory));
-
-		// Unlink and free...
-		//
-		pMemory->pPrev->pNext = pMemory->pNext;
-		if(pMemory->pNext)
-		{
-			pMemory->pNext->pPrev = pMemory->pPrev;
-		}
 		free (pMemory);
 
 
@@ -639,15 +670,29 @@ void Z_TagFree(memtag_t eTag)
 //	int iZoneBlocks = TheZone.Stats.iCount;
 //#endif
 
+	// unlink everything in one locked pass, then free outside the lock
+	zoneHeader_t *pPending = NULL;
+
+	Zone_Lock();
 	zoneHeader_t *pMemory = TheZone.Header.pNext;
 	while (pMemory)
 	{
 		zoneHeader_t *pNext = pMemory->pNext;
-		if ( (eTag == TAG_ALL) || (pMemory->eTag == eTag))
+		if ( ((eTag == TAG_ALL) || (pMemory->eTag == eTag)) && pMemory->eTag != TAG_STATIC )
 		{
-			Zone_FreeBlock(pMemory);
+			Zone_UnlinkLocked(pMemory);
+			pMemory->pNext = pPending;	// unlinked, so the link is free to chain on
+			pPending = pMemory;
 		}
 		pMemory = pNext;
+	}
+	Zone_Unlock();
+
+	while (pPending)
+	{
+		zoneHeader_t *pNext = pPending->pNext;
+		free(pPending);
+		pPending = pNext;
 	}
 
 // these stupid pragmas don't work here???!?!?!
