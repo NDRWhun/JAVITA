@@ -34,7 +34,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // unbuffered boot-milestone trail; survives a hang + forced power-off
 char g_lastBootMark[64] = "none";
 
-void Sys_BootMark( const char *s )
+// appends without claiming to be a milestone, so the watchdog cannot erase the real one
+static void Sys_BootWrite( const char *s )
 {
 	static int first = 1;
 	if ( first ) {
@@ -42,11 +43,16 @@ void Sys_BootMark( const char *s )
 	}
 	SceUID fd = sceIoOpen( "ux0:data/JAVITA/mpboot.log",
 		SCE_O_WRONLY | SCE_O_CREAT | ( first ? SCE_O_TRUNC : SCE_O_APPEND ), 0666 );
+	if ( fd < 0 ) return;		// leave first set, so a later call still truncates
 	first = 0;
-	if ( fd < 0 ) return;
 	sceIoWrite( fd, s, strlen( s ) );
 	sceIoWrite( fd, "\n", 1 );
 	sceIoClose( fd );
+}
+
+void Sys_BootMark( const char *s )
+{
+	Sys_BootWrite( s );
 	strncpy( g_lastBootMark, s, sizeof( g_lastBootMark ) - 1 );
 }
 
@@ -64,9 +70,9 @@ static int Sys_StallWatchdog( SceSize argc, void *argv )
 			stalledFor += 5;
 			char msg[128];
 			snprintf( msg, sizeof( msg ), "STALL %ds (last mark: %s)", stalledFor, g_lastBootMark );
-			Sys_BootMark( msg );
+			Sys_BootWrite( msg );
 		} else {
-			if ( stalledFor ) Sys_BootMark( "stall recovered" );
+			if ( stalledFor ) Sys_BootWrite( "stall recovered" );
 			stalledFor = 0;
 		}
 		last = now;
