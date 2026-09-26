@@ -150,14 +150,14 @@ static void TexRelease( unsigned int texnum )
 	}
 }
 
-static SceGxmShaderPatcherId	gxm_vertIds[3][2][2];	// [texcoord sets][vertex colour][fog]
+static SceGxmShaderPatcherId	gxm_vertIds[3][2][3];	// [texcoord sets][vertex colour][fog mode]
 // resolved once; the names are fixed at build time and the search is by string
-static const SceGxmProgramParameter	*gxm_pMVP[3][2][2], *gxm_pColor[3][2][2], *gxm_pFogParams[3][2][2];
-static const SceGxmProgramParameter	*gxm_pFogColor[3][3][5][3];
-static SceGxmVertexProgram		*gxm_vertProgs[3][2][2];
-static const SceGxmProgram		*gxm_vertBlobs[3][2][2];
-static SceGxmShaderPatcherId	gxm_fragIds[3][3][5][3];	// [textures][env][alpha test][fog mode]
-static const SceGxmProgram		*gxm_fragBlobs[3][3][5][3];
+static const SceGxmProgramParameter	*gxm_pMVP[3][2][3], *gxm_pColor[3][2][3], *gxm_pFogParams[3][2][3];
+static const SceGxmProgramParameter	*gxm_pFogColor[3][3][5][2];
+static SceGxmVertexProgram		*gxm_vertProgs[3][2][3];
+static const SceGxmProgram		*gxm_vertBlobs[3][2][3];
+static SceGxmShaderPatcherId	gxm_fragIds[3][3][5][2];	// [textures][env][alpha test][fog on]
+static const SceGxmProgram		*gxm_fragBlobs[3][3][5][2];
 
 static gxmProgCache_t	gxm_progCache[GXM_MAX_PROGRAMS];
 static int				gxm_progCount;
@@ -204,10 +204,13 @@ static int	gxm_statProgFail;	// draws dropped because no fragment program resolv
 
 static const SceGxmProgram *VertBlob( int nuv, int vcol, int fog )
 {
-	static const unsigned char *v[3][2][2] = {
-		{ { gxs_generic_v_u0_c0_f0, gxs_generic_v_u0_c0_f1 }, { gxs_generic_v_u0_c1_f0, gxs_generic_v_u0_c1_f1 } },
-		{ { gxs_generic_v_u1_c0_f0, gxs_generic_v_u1_c0_f1 }, { gxs_generic_v_u1_c1_f0, gxs_generic_v_u1_c1_f1 } },
-		{ { gxs_generic_v_u2_c0_f0, gxs_generic_v_u2_c0_f1 }, { gxs_generic_v_u2_c1_f0, gxs_generic_v_u2_c1_f1 } },
+	static const unsigned char *v[3][2][3] = {
+		{ { gxs_generic_v_u0_c0_f0, gxs_generic_v_u0_c0_f1, gxs_generic_v_u0_c0_f2 },
+		  { gxs_generic_v_u0_c1_f0, gxs_generic_v_u0_c1_f1, gxs_generic_v_u0_c1_f2 } },
+		{ { gxs_generic_v_u1_c0_f0, gxs_generic_v_u1_c0_f1, gxs_generic_v_u1_c0_f2 },
+		  { gxs_generic_v_u1_c1_f0, gxs_generic_v_u1_c1_f1, gxs_generic_v_u1_c1_f2 } },
+		{ { gxs_generic_v_u2_c0_f0, gxs_generic_v_u2_c0_f1, gxs_generic_v_u2_c0_f2 },
+		  { gxs_generic_v_u2_c1_f0, gxs_generic_v_u2_c1_f1, gxs_generic_v_u2_c1_f2 } },
 	};
 	return (const SceGxmProgram *)v[nuv][vcol][fog];
 }
@@ -215,13 +218,12 @@ static const SceGxmProgram *VertBlob( int nuv, int vcol, int fog )
 // GL_ADD only differs from GL_MODULATE once a second texture is in play
 static const SceGxmProgram *FragBlob( int ntex, int env, int atest, int fog )
 {
-#define F(t,e,a) { gxs_generic_f_t##t##_e##e##_a##a##_f0, gxs_generic_f_t##t##_e##e##_a##a##_f1, \
-				   gxs_generic_f_t##t##_e##e##_a##a##_f2 }
-	static const unsigned char *t0[5][3] = { F(0,0,0), F(0,0,1), F(0,0,2), F(0,0,3), F(0,0,4) };
-	static const unsigned char *t1[5][3] = { F(1,0,0), F(1,0,1), F(1,0,2), F(1,0,3), F(1,0,4) };
-	static const unsigned char *t2e0[5][3] = { F(2,0,0), F(2,0,1), F(2,0,2), F(2,0,3), F(2,0,4) };
-	static const unsigned char *t2e1[5][3] = { F(2,1,0), F(2,1,1), F(2,1,2), F(2,1,3), F(2,1,4) };
-	static const unsigned char *t2e2[5][3] = { F(2,2,0), F(2,2,1), F(2,2,2), F(2,2,3), F(2,2,4) };
+#define F(t,e,a) { gxs_generic_f_t##t##_e##e##_a##a##_f0, gxs_generic_f_t##t##_e##e##_a##a##_f1 }
+	static const unsigned char *t0[5][2] = { F(0,0,0), F(0,0,1), F(0,0,2), F(0,0,3), F(0,0,4) };
+	static const unsigned char *t1[5][2] = { F(1,0,0), F(1,0,1), F(1,0,2), F(1,0,3), F(1,0,4) };
+	static const unsigned char *t2e0[5][2] = { F(2,0,0), F(2,0,1), F(2,0,2), F(2,0,3), F(2,0,4) };
+	static const unsigned char *t2e1[5][2] = { F(2,1,0), F(2,1,1), F(2,1,2), F(2,1,3), F(2,1,4) };
+	static const unsigned char *t2e2[5][2] = { F(2,2,0), F(2,2,1), F(2,2,2), F(2,2,3), F(2,2,4) };
 #undef F
 
 	if ( ntex <= 0 ) return (const SceGxmProgram *)t0[atest][fog];
@@ -309,7 +311,7 @@ int GXM_BackendInit( void )
 
 	for ( int nuv = 0; nuv < 3; nuv++ ) {
 		for ( int vcol = 0; vcol < 2; vcol++ ) {
-			for ( int fog = 0; fog < 2; fog++ ) {
+			for ( int fog = 0; fog < 3; fog++ ) {
 				const SceGxmProgram *b = VertBlob( nuv, vcol, fog );
 				gxm_vertBlobs[nuv][vcol][fog] = b;
 				if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(),
@@ -332,7 +334,7 @@ int GXM_BackendInit( void )
 		// only the two-texture set has env variants; the rest alias env 0
 		for ( int e = 0; e < ( t == 2 ? 3 : 1 ); e++ ) {
 			for ( int a = 0; a < 5; a++ ) {
-				for ( int fog = 0; fog < 3; fog++ ) {
+				for ( int fog = 0; fog < 2; fog++ ) {
 					const SceGxmProgram *b = FragBlob( t, e, a, fog );
 					gxm_fragBlobs[t][e][a][fog] = b;
 					if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(),
@@ -587,7 +589,7 @@ void GXM_SetFog( int enabled, float start, float end, const float *color, int li
 	gxm_fogParams[0] = start;
 	gxm_fogParams[1] = end;
 	gxm_fogParams[2] = ( end > start ) ? 1.0f / ( end - start ) : 1.0f;
-	gxm_fogOn = linear ? 2 : 1;		// the curve is a fragment program variant
+	gxm_fogOn = linear ? 2 : 1;		// the curve is a vertex program variant
 	gxm_fogMode = gxm_fogOn;
 	if ( color ) {
 		gxm_fogColor[0] = color[0]; gxm_fogColor[1] = color[1];
@@ -759,10 +761,10 @@ static SceGxmFragmentProgram *ResolveFragment( int ntex, int env, int vcol, int 
 
 	SceGxmFragmentProgram *prog = NULL;
 	if ( sceGxmShaderPatcherCreateFragmentProgram( GXM_ShaderPatcher(),
-			gxm_fragIds[ntex][env][key->alphaTest][fog],
+			gxm_fragIds[ntex][env][key->alphaTest][fog ? 1 : 0],
 			SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4, SCE_GXM_MULTISAMPLE_NONE,
 			key->blended ? &key->blend : NULL,
-			gxm_vertBlobs[ntex][vcol][fog ? 1 : 0], &prog ) < 0 ) {	// links the fragment texcoords to the program that will be bound
+			gxm_vertBlobs[ntex][vcol][fog], &prog ) < 0 ) {	// links the fragment texcoords to the program that will be bound
 		gxm_statProgFail++;
 		return NULL;
 	}
@@ -871,7 +873,7 @@ void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexe
 		gxm_uniformsDirty = true;
 	}
 
-	SceGxmVertexProgram *vp = gxm_vertProgs[nuv][vcol][fog ? 1 : 0];
+	SceGxmVertexProgram *vp = gxm_vertProgs[nuv][vcol][fog];
 	bool progChanged = false;
 	if ( gxm_curVertProg != vp ) {
 		sceGxmSetVertexProgram( GXM_Context(), vp );
@@ -901,9 +903,9 @@ void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexe
 		void *uniforms = NULL;
 		sceGxmReserveVertexDefaultUniformBuffer( GXM_Context(), &uniforms );
 		if ( uniforms ) {
-			const SceGxmProgramParameter *pm = gxm_pMVP[nuv][vcol][fog ? 1 : 0];
-			const SceGxmProgramParameter *pc = gxm_pColor[nuv][vcol][fog ? 1 : 0];
-			const SceGxmProgramParameter *pf = gxm_pFogParams[nuv][vcol][fog ? 1 : 0];
+			const SceGxmProgramParameter *pm = gxm_pMVP[nuv][vcol][fog];
+			const SceGxmProgramParameter *pc = gxm_pColor[nuv][vcol][fog];
+			const SceGxmProgramParameter *pf = gxm_pFogParams[nuv][vcol][fog];
 			if ( pm ) sceGxmSetUniformDataF( uniforms, pm, 0, 16, gxm_mvp );
 			if ( pc ) sceGxmSetUniformDataF( uniforms, pc, 0, 4, gxm_constColor );
 			if ( pf ) sceGxmSetUniformDataF( uniforms, pf, 0, 4, gxm_fogParams );
@@ -922,7 +924,7 @@ void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexe
 	if ( fog && ( fragProgChanged || gxm_fragUniformsDirty ) ) {
 		void *funi = NULL;
 		sceGxmReserveFragmentDefaultUniformBuffer( GXM_Context(), &funi );
-		const SceGxmProgramParameter *pfc = gxm_pFogColor[ntex][env][key.alphaTest][fog];
+		const SceGxmProgramParameter *pfc = gxm_pFogColor[ntex][env][key.alphaTest][fog ? 1 : 0];
 		if ( funi && pfc ) {
 			sceGxmSetUniformDataF( funi, pfc, 0, 4, gxm_fogColor );
 			gxm_fragUniformsDirty = false;
@@ -1027,9 +1029,9 @@ void GXM_DrawStaticBuffer( const void *vertexBuffer, const unsigned short *index
 		void *uniforms = NULL;
 		sceGxmReserveVertexDefaultUniformBuffer( GXM_Context(), &uniforms );
 		if ( uniforms ) {
-			const SceGxmProgramParameter *pm = gxm_pMVP[ntex][vcol][fog ? 1 : 0];
-			const SceGxmProgramParameter *pc = gxm_pColor[ntex][vcol][fog ? 1 : 0];
-			const SceGxmProgramParameter *pf = gxm_pFogParams[ntex][vcol][fog ? 1 : 0];
+			const SceGxmProgramParameter *pm = gxm_pMVP[ntex][vcol][fog];
+			const SceGxmProgramParameter *pc = gxm_pColor[ntex][vcol][fog];
+			const SceGxmProgramParameter *pf = gxm_pFogParams[ntex][vcol][fog];
 			if ( pm ) sceGxmSetUniformDataF( uniforms, pm, 0, 16, gxm_mvp );
 			if ( pc ) sceGxmSetUniformDataF( uniforms, pc, 0, 4, gxm_constColor );
 			if ( pf ) sceGxmSetUniformDataF( uniforms, pf, 0, 4, gxm_fogParams );
@@ -1049,7 +1051,7 @@ void GXM_DrawStaticBuffer( const void *vertexBuffer, const unsigned short *index
 	if ( fog && ( fragProgChanged || gxm_fragUniformsDirty ) ) {
 		void *funi = NULL;
 		sceGxmReserveFragmentDefaultUniformBuffer( GXM_Context(), &funi );
-		const SceGxmProgramParameter *pfc = gxm_pFogColor[ntex][env][key.alphaTest][fog];
+		const SceGxmProgramParameter *pfc = gxm_pFogColor[ntex][env][key.alphaTest][fog ? 1 : 0];
 		if ( funi && pfc ) {
 			sceGxmSetUniformDataF( funi, pfc, 0, 4, gxm_fogColor );
 			gxm_fragUniformsDirty = false;

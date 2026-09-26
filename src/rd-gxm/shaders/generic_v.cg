@@ -24,6 +24,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // generic world/2D vertex program.
 //   NUV     0..2  texcoord sets consumed
 //   VCOLOR  0/1   per-vertex colour, else the uniform tint alone
+//   FOG     0=off 1=GL_EXP2 2=GL_LINEAR; the curve is evaluated here, not per pixel
 
 uniform float4x4 uMVP;
 #if FOG
@@ -45,7 +46,7 @@ void main(
 	out float2 vTexCoord1 : TEXCOORD1,
 #endif
 #if FOG
-	out float  vFog      : TEXCOORD2,
+	out half   vFog      : TEXCOORD2,
 #endif
 	out half4 vColor     : COLOR0,		// matches the fragment program's half colour path
 	out float4 vPosition : POSITION )
@@ -53,8 +54,14 @@ void main(
 	vPosition = mul( float4( aPosition, 1.0f ), uMVP );
 
 #if FOG
-	// w is eye distance under a standard projection; the curve is applied per pixel
-	vFog = saturate( ( vPosition.w - uFogParams.x ) * uFogParams.z );
+	// w is eye distance under a standard projection
+	float f = saturate( ( vPosition.w - uFogParams.x ) * uFogParams.z );
+  #if FOG == 2
+	vFog = (half)f;
+  #else
+	// already in [0,1] from the saturate above, so the curve needs no clamp
+	vFog = (half)( 1.0f - exp2( -7.98f * f * f ) );
+  #endif
 #endif
 
 #if VCOLOR
