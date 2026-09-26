@@ -61,6 +61,7 @@ void R_NoiseInit( void )
 		s_noise_table[i] = ( float ) ( ( ( rand() / ( float ) RAND_MAX ) * 2.0 - 1.0 ) );
 		s_noise_perm[i] = ( unsigned char ) ( rand() / ( float ) RAND_MAX * 255 );
 	}
+	srand( ri.Milliseconds() );		// the table wants a fixed seed; nothing after it does
 }
 
 float R_NoiseGet4f( float x, float y, float z, float t )
