@@ -1560,11 +1560,15 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 #include <psp2/io/stat.h>
 
 // DXT mip-chain cache (see the block above Upload32); dir shared with JA SP (same assets)
-static void R_TexCacheDxt_Path( const char *name, char *out, int outSize )
+// sharded on the top hash byte: an exFAT lookup scans the directory, and one flat
+// folder holds every baked entry
+static unsigned R_TexCacheDxt_Path( const char *name, char *out, int outSize )
 {
 	unsigned long long h = 14695981039346656037ULL;	// FNV-1a 64-bit of the asset name
 	for ( const char *p = name; *p; ++p ) { h ^= (unsigned char)*p; h *= 1099511628211ULL; }
-	Com_sprintf( out, outSize, "ux0:data/JAVITA/texcache_dxt/%016llx.bin", h );
+	const unsigned shard = (unsigned)( h >> 56 );
+	Com_sprintf( out, outSize, "ux0:data/JAVITA/texcache_dxt/%02x/%016llx.bin", shard, h );
+	return shard;
 }
 
 // Build an image_t straight from a cached DXT mip chain, no decode or encode. Returns NULL
@@ -1701,14 +1705,23 @@ static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 {
 	if ( !r_texCacheCompressed || !r_texCacheCompressed->integer || !hdr || !mipSizes || !blob ) return;
 	static qboolean s_dxtDirReady = qfalse;
+	static unsigned char s_shardMade[256];
 	if ( !s_dxtDirReady )
 	{
 		sceIoMkdir( "ux0:data/JAVITA", 0777 );
 		sceIoMkdir( "ux0:data/JAVITA/texcache_dxt", 0777 );
+		memset( s_shardMade, 0, sizeof(s_shardMade) );
 		s_dxtDirReady = qtrue;
 	}
 	char path[256], tmp[264];
-	R_TexCacheDxt_Path( name, path, sizeof(path) );
+	const unsigned shard = R_TexCacheDxt_Path( name, path, sizeof(path) );
+	if ( !s_shardMade[shard] )
+	{
+		char shardDir[64];
+		Com_sprintf( shardDir, sizeof(shardDir), "ux0:data/JAVITA/texcache_dxt/%02x", shard );
+		sceIoMkdir( shardDir, 0777 );
+		s_shardMade[shard] = 1;		// a duplicate mkdir from the other baker is harmless
+	}
 	Com_sprintf( tmp, sizeof(tmp), "%s.tmp", path );
 	// written beside the entry and renamed over it, so a short write never destroys a good file
 	SceUID fd = sceIoOpen( tmp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666 );

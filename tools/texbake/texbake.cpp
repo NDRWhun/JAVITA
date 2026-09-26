@@ -387,11 +387,18 @@ static bool BakeImage( std::vector<uint8_t> &pix, int w, int h, bool mipmap, boo
 	return true;
 }
 
+// sharded on the top hash byte, matching the engine: an exFAT lookup scans the directory
+static std::string ShardName( const std::string &key )
+{
+	const unsigned long long h = (unsigned long long)FnvName( key.c_str() );
+	char name[64];
+	sprintf( name, "%02x\\%016llx.bin", (unsigned)( h >> 56 ), h );
+	return std::string( name );
+}
+
 static bool WriteEntry( const std::string &dir, const std::string &key, const Baked &b )
 {
-	char name[64];
-	sprintf( name, "%016llx.bin", (unsigned long long)FnvName( key.c_str() ) );
-	const std::string path = dir + "\\" + name;
+	const std::string path = dir + "\\" + ShardName( key );
 	const std::string tmp  = path + ".tmp";
 
 	FILE *f = fopen( tmp.c_str(), "wb" );
@@ -847,6 +854,13 @@ int main( int argc, char **argv )
 		return 1;
 	}
 
+	// the engine shards on the top hash byte, so every bucket has to exist up front
+	for ( int s = 0; s < 256; s++ ) {
+		char sub[16];
+		sprintf( sub, "\\%02x", s );
+		CreateDirectoryA( ( outDir + sub ).c_str(), NULL );
+	}
+
 	bool hadManifest = false;
 	if ( !ManifestMatches( outDir, hadManifest ) && hadManifest ) {
 		printf( "  settings changed since the last run, rebaking everything\n\n" );
@@ -862,9 +876,7 @@ int main( int argc, char **argv )
 		if ( !f.allowTC ) continue;
 
 		if ( !opt.force ) {
-			char name[64];
-			sprintf( name, "%016llx.bin", (unsigned long long)FnvName( key.c_str() ) );
-			if ( FileExists( outDir + "\\" + name ) ) { already++; continue; }
+			if ( FileExists( outDir + "\\" + ShardName( key ) ) ) { already++; continue; }
 		}
 
 		std::string file;
@@ -970,12 +982,19 @@ int main( int argc, char **argv )
 		printf( "\n  copying to %s ...\n", dest.c_str() );
 
 		WIN32_FIND_DATAA fd;
-		const HANDLE hFind = FindFirstFileA( ( outDir + "\\*.bin" ).c_str(), &fd );
 		int copied = 0, failed = 0;
-		if ( hFind != INVALID_HANDLE_VALUE ) {
+		for ( int s = 0; s < 256; s++ ) {
+			char sub[16];
+			sprintf( sub, "\\%02x", s );
+			const std::string fromDir = outDir + sub;
+			const std::string toDir   = dest + sub;
+			CreateDirectoryA( toDir.c_str(), NULL );
+
+			const HANDLE hFind = FindFirstFileA( ( fromDir + "\\*.bin" ).c_str(), &fd );
+			if ( hFind == INVALID_HANDLE_VALUE ) continue;
 			do {
-				const std::string from = outDir + "\\" + fd.cFileName;
-				const std::string to   = dest + "\\" + fd.cFileName;
+				const std::string from = fromDir + "\\" + fd.cFileName;
+				const std::string to   = toDir + "\\" + fd.cFileName;
 				if ( CopyFileA( from.c_str(), to.c_str(), FALSE ) ) copied++;
 				else failed++;
 				if ( ( ( copied + failed ) & 63 ) == 0 ) {
