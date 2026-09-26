@@ -25,6 +25,10 @@
 #define FSEEKO_FUNC(stream, offset, origin) fseeko64(stream, offset, origin)
 #endif
 
+#ifdef VITA
+#define ZIP_STDIO_BUFSIZE	(16 * 1024)		// a pk3 handle costs this much resident
+#endif
+
 
 #include "ioapi.h"
 
@@ -106,7 +110,14 @@ static voidpf ZCALLBACK fopen_file_func (voidpf opaque, const char* filename, in
         mode_fopen = "wb";
 
     if ((filename!=NULL) && (mode_fopen != NULL))
+    {
         file = fopen(filename, mode_fopen);
+#ifdef VITA
+        // header fields are read a byte at a time, so the default 1 KB buffer refills constantly
+        if (file != NULL)
+            setvbuf(file, NULL, _IOFBF, ZIP_STDIO_BUFSIZE);
+#endif
+    }
     return file;
 }
 
@@ -124,7 +135,14 @@ static voidpf ZCALLBACK fopen64_file_func (voidpf opaque, const void* filename, 
         mode_fopen = "wb";
 
     if ((filename!=NULL) && (mode_fopen != NULL))
+    {
         file = FOPEN_FUNC((const char*)filename, mode_fopen);
+#ifdef VITA
+        // header fields are read a byte at a time, so the default 1 KB buffer refills constantly
+        if (file != NULL)
+            setvbuf(file, NULL, _IOFBF, ZIP_STDIO_BUFSIZE);
+#endif
+    }
     return file;
 }
 
