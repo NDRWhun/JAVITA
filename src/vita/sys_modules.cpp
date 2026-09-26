@@ -30,6 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/processmgr.h>
 
 // unbuffered boot-milestone trail; survives a hang + forced power-off
 char g_lastBootMark[64] = "none";
@@ -38,13 +39,24 @@ char g_lastBootMark[64] = "none";
 static void Sys_BootWrite( const char *s )
 {
 	static int first = 1;
+	static SceUInt64 base, prev;
 	if ( first ) {
 		sceIoMkdir( "ux0:data/JAVITA", 0777 );
+		base = prev = sceKernelGetProcessTimeWide();
 	}
 	SceUID fd = sceIoOpen( "ux0:data/JAVITA/mpboot.log",
 		SCE_O_WRONLY | SCE_O_CREAT | ( first ? SCE_O_TRUNC : SCE_O_APPEND ), 0666 );
 	if ( fd < 0 ) return;		// leave first set, so a later call still truncates
 	first = 0;
+
+	// absolute and since-previous, so a gap between marks is as visible as a slow mark
+	const SceUInt64 now = sceKernelGetProcessTimeWide();
+	char stamp[32];
+	snprintf( stamp, sizeof( stamp ), "[%6u +%5u] ",
+		(unsigned)( ( now - base ) / 1000 ), (unsigned)( ( now - prev ) / 1000 ) );
+	prev = now;
+
+	sceIoWrite( fd, stamp, strlen( stamp ) );
 	sceIoWrite( fd, s, strlen( s ) );
 	sceIoWrite( fd, "\n", 1 );
 	sceIoClose( fd );

@@ -1561,6 +1561,7 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 
 #ifdef VITA
 #include <psp2/io/fcntl.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/io/stat.h>
 
 // DXT mip-chain cache (see the block above Upload32); dir shared with JA SP (same assets)
@@ -1588,15 +1589,19 @@ static void R_TexCacheDxt_PathFlat( const char *name, char *out, int outSize )
 // cache outcome tally, reported through the boot trail so a device run is measurable
 int s_tcHit, s_tcNoFile, s_tcPicmip, s_tcHdr, s_tcFlags, s_tcShort;
 int s_tcLastWant = -1, s_tcLastGot = -1;
+// microseconds spent in the cache lookup, and of that, in parking the render thread
+unsigned int s_tcUsTotal, s_tcUsPark, s_tcUsUpload;
 
 static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qboolean allowPicmip,
 										   qboolean allowTC, int glWrapClampMode )
 {
 	if ( !r_texCacheCompressed || !r_texCacheCompressed->integer ) return NULL;
+	const SceUInt64 tcT0 = sceKernelGetProcessTimeWide();
 	// park the render thread before touching GL from the frontend
 	if ( r_renderThread && r_renderThread->integer ) {
 		R_IssuePendingRenderCommands();
 	}
+	s_tcUsPark += (unsigned)( sceKernelGetProcessTimeWide() - tcT0 );
 	char path[256];
 	R_TexCacheDxt_Path( name, path, sizeof(path) );
 	SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
@@ -1694,8 +1699,10 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	}
 #ifdef USE_GXM_NATIVE
 	// the cached blob is already UBC, so it goes over whole rather than per level
+	const SceUInt64 upT0 = sceKernelGetProcessTimeWide();
 	const int uploaded = GXM_TexUploadDxt( image->texnum, blob, hdr.totalSize, hdr.width, hdr.height,
 		hdr.mipCount, hdr.format == TEXCACHE_FMT_DXT5 );
+	s_tcUsUpload += (unsigned)( sceKernelGetProcessTimeWide() - upT0 );
 #else
 	const int uploaded = 1;
 #endif
@@ -1742,6 +1749,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	Q_strncpyz( image->imgName, psNewName, sizeof( image->imgName ) );
 	AllocatedImages[ image->imgName ] = image;
 	s_tcHit++;
+	s_tcUsTotal += (unsigned)( sceKernelGetProcessTimeWide() - tcT0 );
 	return image;
 }
 
@@ -1826,9 +1834,9 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		static int s_imgCount = 0;
 		if ( !( ++s_imgCount & 31 ) ) {
 			char tick[128];
-			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d picmip %d(want %d got %d) mip %d hdr %d short %d",
-				s_imgCount, s_tcHit, s_tcNoFile, s_tcPicmip, s_tcLastWant, s_tcLastGot,
-				s_tcFlags, s_tcHdr, s_tcShort );
+			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d picmip %d mip %d | cache %ums park %ums upload %ums",
+				s_imgCount, s_tcHit, s_tcNoFile, s_tcPicmip, s_tcFlags,
+				s_tcUsTotal / 1000, s_tcUsPark / 1000, s_tcUsUpload / 1000 );
 			Sys_BootMark( tick );
 		}
 	}
