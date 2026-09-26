@@ -533,6 +533,8 @@ void RE_RegisterMedia_LevelLoadBegin(const char *psMapName, ForceReload_e eForce
 
 	tr.numBSPModels = 0;
 
+	R_ImageMissCache_Clear();	// a pak mounted since the last level may supply what was missing
+
 // not used in MP codebase...
 //
 //	if (bDeleteBSP)

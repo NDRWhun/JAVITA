@@ -1151,6 +1151,7 @@ struct glconfigExt_t
 int		 R_Images_StartIteration(void);
 image_t *R_Images_GetNextIteration(void);
 void	 R_Images_Clear(void);
+void	 R_ImageMissCache_Clear(void);
 void	 R_Images_DeleteLightMaps(void);
 void	 R_Images_DeleteImage(image_t *pImage);
 

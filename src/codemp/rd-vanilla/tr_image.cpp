@@ -29,6 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #endif
 
 #include <map>
+#include <string>
 
 static byte			 s_intensitytable[256];
 static unsigned char s_gammatable[256];
@@ -536,6 +537,14 @@ public:
 typedef std::map <const char *, image_t *, CStringComparator> AllocatedImages_t;
 AllocatedImages_t AllocatedImages;
 AllocatedImages_t::iterator itAllocatedImages;
+
+// shaders name images no pk3 holds, and each miss costs one probe per loader extension
+static std::map<std::string, char> s_imageMisses;
+
+void R_ImageMissCache_Clear( void )
+{
+	s_imageMisses.clear();
+}
 int giTextureBindNum = 1024;	// will be set to this anyway at runtime, but wtf?
 
 
@@ -1282,6 +1291,7 @@ void R_Images_Clear(void)
 	}
 
 	AllocatedImages.clear();
+	s_imageMisses.clear();
 
 	giTextureBindNum = 1024;
 }
@@ -1747,6 +1757,10 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		return image;
 	}
 
+	if ( s_imageMisses.find( name ) != s_imageMisses.end() ) {
+		return NULL;
+	}
+
 #ifdef VITA
 	// liveness tick for the boot trail: first-run DXT bakes look like a hang otherwise
 	{
@@ -1773,6 +1787,7 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 	//
 	R_LoadImage( name, &pic, &width, &height );
 	if ( pic == NULL ) {                                    // if we dont get a successful load
+		s_imageMisses[name] = 1;                            // every loader extension was tried
 		return NULL;                                        // bail
 	}
 

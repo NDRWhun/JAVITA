@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../rd-common/tr_common.h"
 #include <png.h>
 #include <map>
+#include <string>
 
 static byte			 s_intensitytable[256];
 static unsigned char s_gammatable[256];
@@ -989,6 +990,14 @@ typedef std::map <const char *, image_t *, CStringComparator>	AllocatedImages_t;
 AllocatedImages_t AllocatedImages;
 AllocatedImages_t::iterator itAllocatedImages;
 
+// shaders name images no pk3 holds, and each miss costs one probe per loader extension
+static std::map<std::string, char> s_imageMisses;
+
+void R_ImageMissCache_Clear( void )
+{
+	s_imageMisses.clear();
+}
+
 int giTextureBindNum = 1024;	// will be set to this anyway at runtime, but wtf?
 
 int R_Images_StartIteration(void)
@@ -1089,6 +1098,7 @@ void R_Images_Clear(void)
 	}
 
 	AllocatedImages.clear();
+	s_imageMisses.clear();
 	giTextureBindNum = 1024;
 }
 
@@ -1519,6 +1529,10 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		return image;
 	}
 
+	if ( s_imageMisses.find( name ) != s_imageMisses.end() ) {
+		return NULL;
+	}
+
 #ifdef VITA
 	const int tStart = ( r_showTexLoad && r_showTexLoad->integer ) ? Com_Milliseconds() : 0;
 	int tCache = 0, tRead = 0;
@@ -1543,6 +1557,7 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 	//
 	R_LoadImage( name, &pic, &width, &height );
 	if ( !pic ) {
+		s_imageMisses[name] = 1;	// every loader extension was tried
         return NULL;
 	}
 #ifdef VITA
