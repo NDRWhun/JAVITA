@@ -26,6 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <inttypes.h>
 
 #include "qcommon/qcommon.h"
+#include "../../vita/vita_prof.h"
 
 vm_t *currentVM = NULL;
 
@@ -289,6 +290,16 @@ intptr_t QDECL VM_Call( vm_t *vm, int callnum, intptr_t arg0, intptr_t arg1, int
 
 	VMSwap v( vm );
 
+#ifdef VITA
+	extern unsigned int g_profVmUs, g_profVmCalls;
+	const SceUInt64 vmT0 = sceKernelGetProcessTimeWide();
+	const intptr_t r = vm->legacy.main( callnum, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,
+		arg9, arg10, arg11 );
+	g_profVmUs += (unsigned)( sceKernelGetProcessTimeWide() - vmT0 );
+	g_profVmCalls++;
+	return r;
+#else
 	return vm->legacy.main( callnum, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,
 		arg9, arg10, arg11 );
+#endif
 }

@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
 #include "qcommon/qcommon.h"
+#include "../../vita/vita_prof.h"
 
 #ifndef DEDICATED
 #ifndef FINAL_BUILD
@@ -1953,6 +1954,7 @@ a null buffer will just return the file length without loading
 ============
 */
 long FS_ReadFile( const char *qpath, void **buffer ) {
+	VITA_PROF( Fs );
 	fileHandle_t	h;
 	byte*			buf;
 	qboolean		isConfig;

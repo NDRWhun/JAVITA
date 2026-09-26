@@ -68,6 +68,31 @@ void Sys_BootMark( const char *s )
 	strncpy( g_lastBootMark, s, sizeof( g_lastBootMark ) - 1 );
 }
 
+// microseconds and call counts for the load-path cost centres; racy by design,
+// they only ever feed the trail
+unsigned int g_profVmUs, g_profVmCalls;
+unsigned int g_profShaderUs, g_profShaderCalls;
+unsigned int g_profSoundUs, g_profSoundCalls;
+unsigned int g_profModelUs, g_profModelCalls;
+unsigned int g_profFsUs, g_profFsCalls, g_profFsKb;
+unsigned int g_profImgUs, g_profImgCalls;
+
+// everything the engine was asked to do, so whatever is left is module cpu
+void Sys_ProfMark( const char *tag )
+{
+	char line[256];
+	snprintf( line, sizeof( line ),
+		"%s | vm %ums/%u shader %ums/%u img %ums/%u snd %ums/%u mdl %ums/%u fs %ums/%u %uKB",
+		tag,
+		g_profVmUs / 1000, g_profVmCalls,
+		g_profShaderUs / 1000, g_profShaderCalls,
+		g_profImgUs / 1000, g_profImgCalls,
+		g_profSoundUs / 1000, g_profSoundCalls,
+		g_profModelUs / 1000, g_profModelCalls,
+		g_profFsUs / 1000, g_profFsCalls, g_profFsKb );
+	Sys_BootWrite( line );
+}
+
 // main-loop stall watchdog: names any main-thread freeze in the trail
 volatile unsigned int g_vitaMainTicks = 0;
 

@@ -30,6 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 #include "sdl/sdl_sound.h"
 #include "snd_local.h"
+#include "../../vita/vita_prof.h"
 #include "snd_mp3.h"
 #include "snd_music.h"
 #include "client.h"
@@ -1230,6 +1231,7 @@ Creates a default buzz sound if the file can't be loaded
 */
 sfxHandle_t	S_RegisterSound( const char *name)
 {
+	VITA_PROF( Sound );
 	sfx_t	*sfx;
 
 	if (!s_soundStarted) {

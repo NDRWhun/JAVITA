@@ -1562,6 +1562,7 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 #ifdef VITA
 #include <psp2/io/fcntl.h>
 #include <psp2/kernel/processmgr.h>
+#include "../../vita/vita_prof.h"
 #include <psp2/io/stat.h>
 
 // DXT mip-chain cache (see the block above Upload32); dir shared with JA SP (same assets)
@@ -1826,6 +1827,7 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 	if ( s_imageMisses.find( name ) != s_imageMisses.end() ) {
 		return NULL;
 	}
+	VITA_PROF( Img );
 
 #ifdef VITA
 	// liveness tick for the boot trail: first-run DXT bakes look like a hang otherwise
@@ -1834,11 +1836,9 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		static int s_imgCount = 0;
 		if ( !( ++s_imgCount & 31 ) ) {
 			char tick[128];
-			extern unsigned int s_rsUs, s_rsCalls;
-			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d | cache %ums upload %ums | regshader %ums x%u",
-				s_imgCount, s_tcHit, s_tcNoFile,
-				s_tcUsTotal / 1000, s_tcUsUpload / 1000, s_rsUs / 1000, s_rsCalls );
-			Sys_BootMark( tick );
+			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d cache %ums upload %ums",
+				s_imgCount, s_tcHit, s_tcNoFile, s_tcUsTotal / 1000, s_tcUsUpload / 1000 );
+			Sys_ProfMark( tick );
 		}
 	}
 	// DXT cache hit: build straight from the cached mip chain, no decode/encode/picmip
