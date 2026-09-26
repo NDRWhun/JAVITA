@@ -1581,6 +1581,10 @@ static void R_TexCacheDxt_PathFlat( const char *name, char *out, int outSize )
 
 // Build an image_t straight from a cached DXT mip chain, no decode or encode. Returns NULL
 // on a miss, version/picmip mismatch, or corruption so the caller falls back to the load path.
+// cache outcome tally, reported through the boot trail so a device run is measurable
+int s_tcHit, s_tcNoFile, s_tcPicmip, s_tcHdr, s_tcShort;
+int s_tcLastWant = -1, s_tcLastGot = -1;
+
 static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qboolean allowPicmip,
 										   qboolean allowTC, int glWrapClampMode )
 {
@@ -1596,7 +1600,10 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		R_TexCacheDxt_PathFlat( name, path, sizeof(path) );
 		fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
 	}
-	if ( fd < 0 ) return NULL;
+	if ( fd < 0 ) {
+		s_tcNoFile++;
+		return NULL;
+	}
 
 	texCacheHdrDxt_t hdr;
 	unsigned mipSizes[TEXCACHE_MAX_MIPS];
@@ -1605,11 +1612,21 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		|| ( hdr.format != TEXCACHE_FMT_DXT1 && hdr.format != TEXCACHE_FMT_DXT5 )
 		|| hdr.mipCount < 1 || hdr.mipCount > TEXCACHE_MAX_MIPS
 		|| hdr.width == 0 || hdr.height == 0
-		|| (int)hdr.width > glConfig.maxTextureSize || (int)hdr.height > glConfig.maxTextureSize
-		|| hdr.picmip != (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 ) )
+		|| (int)hdr.width > glConfig.maxTextureSize || (int)hdr.height > glConfig.maxTextureSize )
 	{
+		s_tcHdr++;
 		sceIoClose( fd );
 		return NULL;
+	}
+	{
+		const unsigned want = (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 );
+		if ( hdr.picmip != want ) {
+			s_tcPicmip++;
+			s_tcLastWant = (int)want;
+			s_tcLastGot  = (int)hdr.picmip;
+			sceIoClose( fd );
+			return NULL;
+		}
 	}
 	if ( sceIoRead( fd, mipSizes, hdr.mipCount * sizeof(unsigned) ) != (int)( hdr.mipCount * sizeof(unsigned) ) )
 	{
@@ -1709,6 +1726,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	const char *psNewName = GenerateImageMappingName( name );
 	Q_strncpyz( image->imgName, psNewName, sizeof( image->imgName ) );
 	AllocatedImages[ image->imgName ] = image;
+	s_tcHit++;
 	return image;
 }
 
@@ -1792,8 +1810,9 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		extern void Sys_BootMark( const char *s );
 		static int s_imgCount = 0;
 		if ( !( ++s_imgCount & 31 ) ) {
-			char tick[32];
-			Com_sprintf( tick, sizeof(tick), "img %d", s_imgCount );
+			char tick[128];
+			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d picmip %d(want %d got %d) hdr %d",
+				s_imgCount, s_tcHit, s_tcNoFile, s_tcPicmip, s_tcLastWant, s_tcLastGot, s_tcHdr );
 			Sys_BootMark( tick );
 		}
 	}
