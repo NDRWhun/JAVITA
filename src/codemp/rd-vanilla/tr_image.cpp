@@ -598,6 +598,10 @@ Upload32
 // Gated by r_texCacheCompressed; any failure falls back to the stock RGBA path.
 #define TEXCACHE_MAGIC_DXT 0x41435456u	// "VTCA"; bump to invalidate
 #define TEXCACHE_MAX_MIPS  16
+// flags occupy what used to be texbits, which was written as zero and never read;
+// an entry without VALID predates the field, so the checks it guards are skipped
+#define TEXCACHE_FLAG_VALID		0x80000000u
+#define TEXCACHE_FLAG_MIPMAP	0x00000001u
 enum { TEXCACHE_FMT_DXT1 = 1, TEXCACHE_FMT_DXT5 = 5 };
 typedef struct {					// 32-byte LE header, native Vita byte order
 	unsigned int magic;
@@ -606,7 +610,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 	unsigned int height;
 	unsigned int mipCount;			// 1..TEXCACHE_MAX_MIPS
 	unsigned int picmip;			// r_picmip it was baked with, 0 when the image ignores picmip; mismatch = rebuild
-	unsigned int texbits;			// always 0; the DXT payload never depends on r_texturebits
+	unsigned int flags;				// TEXCACHE_FLAG_*; 0 in entries baked before the field existed
 	unsigned int totalSize;			// sum of per-mip sizes
 } texCacheHdrDxt_t;
 
@@ -752,7 +756,7 @@ static void R_BakeChain( bakeJob_t *job )
 	hdr.height    = (unsigned)job->height;
 	hdr.mipCount  = (unsigned)job->mipCount;
 	hdr.picmip    = (unsigned)( job->allowPicmip && r_picmip ? r_picmip->integer : 0 );
-	hdr.texbits   = 0;
+	hdr.flags     = TEXCACHE_FLAG_VALID | ( job->mipmap ? TEXCACHE_FLAG_MIPMAP : 0 );
 	hdr.totalSize = (unsigned)job->blobSize;
 	if ( job->store )
 		R_TexCacheStoreDxt( job->key, &hdr, job->mipSizes, job->blob );
@@ -1127,7 +1131,7 @@ static void Upload32( unsigned *data,
 				hdr.height    = (unsigned)height;
 				hdr.mipCount  = (unsigned)mipCount;
 				hdr.picmip    = (unsigned)( picmip && r_picmip ? r_picmip->integer : 0 );
-				hdr.texbits   = 0;
+				hdr.flags     = TEXCACHE_FLAG_VALID | ( mipmap ? TEXCACHE_FLAG_MIPMAP : 0 );
 				hdr.totalSize = (unsigned)blobOfs;
 #ifdef USE_GXM_NATIVE
 				GXM_TexUploadDxt( glState.currenttextures[glState.currenttmu], blob, (unsigned)blobOfs,
@@ -1582,7 +1586,7 @@ static void R_TexCacheDxt_PathFlat( const char *name, char *out, int outSize )
 // Build an image_t straight from a cached DXT mip chain, no decode or encode. Returns NULL
 // on a miss, version/picmip mismatch, or corruption so the caller falls back to the load path.
 // cache outcome tally, reported through the boot trail so a device run is measurable
-int s_tcHit, s_tcNoFile, s_tcPicmip, s_tcHdr, s_tcShort;
+int s_tcHit, s_tcNoFile, s_tcPicmip, s_tcHdr, s_tcFlags, s_tcShort;
 int s_tcLastWant = -1, s_tcLastGot = -1;
 
 static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qboolean allowPicmip,
@@ -1628,8 +1632,17 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 			return NULL;
 		}
 	}
+	// an entry baked unmipmapped would otherwise be accepted here and then given
+	// mip sampling, because the filter is derived from mipCount downstream
+	if ( ( hdr.flags & TEXCACHE_FLAG_VALID )
+		&& ( ( hdr.flags & TEXCACHE_FLAG_MIPMAP ) != 0 ) != ( mipmap != qfalse ) ) {
+		s_tcFlags++;
+		sceIoClose( fd );
+		return NULL;
+	}
 	if ( sceIoRead( fd, mipSizes, hdr.mipCount * sizeof(unsigned) ) != (int)( hdr.mipCount * sizeof(unsigned) ) )
 	{
+		s_tcShort++;
 		sceIoClose( fd );
 		return NULL;
 	}
@@ -1637,12 +1650,14 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	for ( unsigned i = 0; i < hdr.mipCount; ++i ) total += mipSizes[i];
 	if ( total != hdr.totalSize || total == 0 || total > (unsigned)( hdr.width * hdr.height * 2 + 4096 ) )
 	{
+		s_tcShort++;
 		sceIoClose( fd );
 		return NULL;
 	}
 	byte *blob = (byte *)Z_Malloc( total, TAG_TEMP_WORKSPACE, qfalse );
 	if ( !blob || sceIoRead( fd, blob, total ) != (int)total )
 	{
+		s_tcShort++;
 		if ( blob ) Z_Free( blob );
 		sceIoClose( fd );
 		return NULL;
@@ -1811,8 +1826,9 @@ image_t	*R_FindImageFile( const char *name, qboolean mipmap, qboolean allowPicmi
 		static int s_imgCount = 0;
 		if ( !( ++s_imgCount & 31 ) ) {
 			char tick[128];
-			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d picmip %d(want %d got %d) hdr %d",
-				s_imgCount, s_tcHit, s_tcNoFile, s_tcPicmip, s_tcLastWant, s_tcLastGot, s_tcHdr );
+			Com_sprintf( tick, sizeof(tick), "img %d hit %d nofile %d picmip %d(want %d got %d) mip %d hdr %d short %d",
+				s_imgCount, s_tcHit, s_tcNoFile, s_tcPicmip, s_tcLastWant, s_tcLastGot,
+				s_tcFlags, s_tcHdr, s_tcShort );
 			Sys_BootMark( tick );
 		}
 	}

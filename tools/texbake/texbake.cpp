@@ -32,9 +32,11 @@
 #define TEXCACHE_FMT_DXT1	1
 #define TEXCACHE_FMT_DXT5	5
 #define MAX_TEXTURE_SIZE	4096			// what the GXM backend reports
+#define TEXCACHE_FLAG_VALID		0x80000000u
+#define TEXCACHE_FLAG_MIPMAP	0x00000001u
 
 struct texCacheHdrDxt_t {
-	uint32_t magic, format, width, height, mipCount, picmip, texbits, totalSize;
+	uint32_t magic, format, width, height, mipCount, picmip, flags, totalSize;
 };
 
 static uint64_t FnvName( const char *s )
@@ -381,7 +383,7 @@ static bool BakeImage( std::vector<uint8_t> &pix, int w, int h, bool mipmap, boo
 	out.hdr.height    = (uint32_t)h;
 	out.hdr.mipCount  = (uint32_t)mipCount;
 	out.hdr.picmip    = (uint32_t)( allowPicmip ? opt.picmip : 0 );
-	out.hdr.texbits   = 0;
+	out.hdr.flags     = TEXCACHE_FLAG_VALID | ( mipmap ? TEXCACHE_FLAG_MIPMAP : 0 );
 	out.hdr.totalSize = (uint32_t)ofs;
 	out.blob.resize( ofs );
 	return true;
@@ -433,12 +435,32 @@ struct Flags {
 static std::map<std::string, Flags>	g_keys;			// cache key -> how it will be loaded
 static std::set<std::string>		g_notc;			// referenced by a shader that forbids compression
 static std::set<std::string>		g_shaderNames;	// lowercase, extension stripped
+static std::set<std::string>		g_nomip;		// reached through RegisterShaderNoMip, so mip and picmip are off
 
 static bool IsImageName( const std::string &n )
 {
 	const std::string e = ExtOf( n );
 	return e == "tga" || e == "jpg" || e == "jpeg" || e == "png";
 }
+
+// the ui and cgame modules reach these through RegisterShaderNoMip, which hands
+// R_FindShader mipRawImage=false and so loads them unmipmapped and unpicmipped
+static bool IsNoMipFamily( const std::string &key )
+{
+	static const char *pre[] = { "fonts/", "levelshots/", "menu/art/", "ui/assets/",
+								 "gfx/menus/", "gfx/hud/", "gfx/mp/", NULL };
+	for ( int i = 0; pre[i]; i++ ) {
+		const size_t n = strlen( pre[i] );
+		if ( key.size() > n && key.compare( 0, n, pre[i] ) == 0 ) return true;
+	}
+	// models/players/<name>/icon_<skin>
+	if ( key.compare( 0, 15, "models/players/" ) == 0 ) {
+		const size_t slash = key.find( '/', 15 );
+		if ( slash != std::string::npos && key.compare( slash + 1, 5, "icon_" ) == 0 ) return true;
+	}
+	return false;
+}
+
 
 // R_LoadImage order: the name's own extension first, then jpg, png, tga
 static bool ResolveImage( const std::string &key, std::string &file )
@@ -553,6 +575,68 @@ static void ParseShaderText( const std::string &text )
 			}
 		}
 	}
+}
+
+// .menu files name their art through background / asset_shader, both of which
+// ui_shared.c registers with RegisterShaderNoMip
+static void ParseMenuText( const std::string &text )
+{
+	std::vector<Token> t;
+	Tokenize( text.c_str(), text.c_str() + text.size(), t );
+	for ( size_t i = 0; i + 1 < t.size(); i++ ) {
+		const std::string kw = Lower( t[i].text );
+		if ( kw != "background" && kw != "asset_shader" ) continue;
+		std::string v = t[i + 1].text;
+		if ( v.size() >= 2 && v.front() == '"' && v.back() == '"' ) v = v.substr( 1, v.size() - 2 );
+		if ( v.empty() || v[0] == '$' || v[0] == '*' ) continue;
+		g_nomip.insert( Lower( StripExt( SlashFix( v ) ) ) );
+	}
+}
+
+// the rest of the unmipmapped set is named by string literals in the game modules,
+// so read them straight from the tree this tool ships in
+static int ScanNoMipLiterals( const std::string &exePath )
+{
+	size_t cut = exePath.find_last_of( "\\/" );
+	if ( cut == std::string::npos ) return 0;
+	cut = exePath.find_last_of( "\\/", cut - 1 );		// tools\texbake -> tools
+	if ( cut == std::string::npos ) return 0;
+	cut = exePath.find_last_of( "\\/", cut - 1 );		// tools -> repo root
+	if ( cut == std::string::npos ) return 0;
+	const std::string root = exePath.substr( 0, cut );
+
+	static const char *dirs[] = { "\\src\\codemp\\ui", "\\src\\codemp\\cgame",
+								  "\\src\\codemp\\client", NULL };
+	const size_t before = g_nomip.size();
+
+	for ( int d = 0; dirs[d]; d++ ) {
+		WIN32_FIND_DATAA fd;
+		const std::string pat = root + dirs[d] + "\\*.c*";
+		const HANDLE h = FindFirstFileA( pat.c_str(), &fd );
+		if ( h == INVALID_HANDLE_VALUE ) continue;
+		do {
+			FILE *f = fopen( ( root + dirs[d] + "\\" + fd.cFileName ).c_str(), "rb" );
+			if ( !f ) continue;
+			std::string txt;
+			char buf[8192];
+			size_t n;
+			while ( ( n = fread( buf, 1, sizeof( buf ), f ) ) > 0 ) txt.append( buf, n );
+			fclose( f );
+
+			for ( size_t p = txt.find( "RegisterShaderNoMip" ); p != std::string::npos;
+				  p = txt.find( "RegisterShaderNoMip", p + 1 ) ) {
+				const size_t q = txt.find( '"', p );
+				if ( q == std::string::npos || q > p + 64 ) continue;
+				const size_t e = txt.find( '"', q + 1 );
+				if ( e == std::string::npos ) continue;
+				const std::string v = txt.substr( q + 1, e - q - 1 );
+				if ( v.empty() || v[0] == '$' || v[0] == '*' || v.find( '%' ) != std::string::npos ) continue;
+				g_nomip.insert( Lower( StripExt( SlashFix( v ) ) ) );
+			}
+		} while ( FindNextFileA( h, &fd ) );
+		FindClose( h );
+	}
+	return (int)( g_nomip.size() - before );
 }
 
 // ---------------------------------------------------------------- job list
@@ -833,18 +917,46 @@ int main( int argc, char **argv )
 	printf( "  %d shader files, %d shaders, %d texture references\n",
 			shaderFiles, (int)g_shaderNames.size(), (int)g_keys.size() );
 
+	// ---- menu art is registered unmipmapped, and the engine bakes it that way
+	int menuFiles = 0;
+	for ( const auto &kv : g_index ) {
+		const std::string e = ExtOf( kv.first );
+		if ( e != "menu" && e != "txt" ) continue;
+
+		const char *why = NULL;
+		size_t len = 0;
+		uint8_t *buf = zr_read( &g_arch[kv.second.archive],
+								&g_arch[kv.second.archive].entries[kv.second.entry], &len, &why );
+		if ( !buf ) continue;
+		ParseMenuText( std::string( (const char *)buf, len ) );
+		free( buf );
+		menuFiles++;
+	}
+	const int fromSrc = ScanNoMipLiterals( argv[0] );
+	printf( "  %d menu files name %d unmipmapped images", menuFiles, (int)g_nomip.size() );
+	if ( fromSrc ) printf( ", %d more from the module sources", fromSrc );
+	printf( "\n" );
+
 	// ---- every image with no shader of its own is reached by its plain name
-	int plain = 0, uncompressed = 0;
+	int plain = 0, uncompressed = 0, nomip = 0;
 	for ( const auto &kv : g_index ) {
 		if ( !IsImageName( kv.first ) ) continue;
 		const std::string key = StripExt( kv.first );
 		if ( g_shaderNames.count( key ) ) continue;		// a shader owns this name
 		if ( g_keys.count( key ) ) continue;
 		if ( g_notc.count( key ) ) { uncompressed++; continue; }
-		g_keys.emplace( key, Flags() );
+		Flags f;
+		// no stanza means R_FindShader loads it raw, passing mipRawImage for both flags
+		if ( g_nomip.count( key ) || IsNoMipFamily( key ) ) {
+			f.mipmap = false;
+			f.allowPicmip = false;
+			nomip++;
+		}
+		g_keys.emplace( key, f );
 		plain++;
 	}
 	printf( "  %d more images reached by name alone", plain );
+	if ( nomip ) printf( ", %d of them unmipmapped", nomip );
 	if ( uncompressed ) printf( ", %d left uncompressed by their shader", uncompressed );
 	printf( "\n\n" );
 
