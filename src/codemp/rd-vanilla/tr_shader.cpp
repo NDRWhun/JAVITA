@@ -26,6 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "tr_local.h"
 
 static char *s_shaderText;
+static qboolean s_shaderTextHasHash;	// a '#' token is absent from the hash table, so it needs the scan
 
 // the shader is parsed into these global variables, then copied into
 // dynamically allocated memory if it is valid.
@@ -3234,6 +3235,11 @@ static const char *FindShaderInShaderText( const char *shadername ) {
 		}
 	}
 
+	// the table holds every definition unless one is named with a leading '#'
+	if ( !s_shaderTextHasHash ) {
+		return NULL;
+	}
+
 	p = s_shaderText;
 
 	if ( !p ) {
@@ -4070,6 +4076,9 @@ static void ScanAndLoadShaderFiles( void )
 	}
 
 	COM_CompressShader( s_shaderText );
+
+	// the hash table below drops '#' tokens, so only then can a lookup miss need the linear scan
+	s_shaderTextHasHash = (qboolean)( strchr( s_shaderText, '#' ) != NULL );
 
 	// free up memory
 	ri.FS_FreeFileList( shaderFiles );
