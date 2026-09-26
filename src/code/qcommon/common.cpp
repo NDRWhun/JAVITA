@@ -1460,11 +1460,16 @@ void Com_Frame( void ) {
 
 		timeVal = Com_TimeVal(minMsec);
 		do {
+#ifdef VITA
+			// usleep takes microseconds, so the last millisecond needs no spin
+			Sys_Sleep(com_busyWait->integer ? 0 : timeVal);
+#else
 			// Busy sleep the last millisecond for better timeout precision
 			if(com_busyWait->integer || timeVal < 1)
 				Sys_Sleep(0);
 			else
 				Sys_Sleep(timeVal - 1);
+#endif
 		} while( (timeVal = Com_TimeVal(minMsec)) != 0 );
 		IN_Frame();
 
