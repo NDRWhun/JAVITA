@@ -2016,7 +2016,6 @@ static int FS_ReturnPath( const char *zname, char *zpath, int *depth ) {
 	int len, at, newdep;
 
 	newdep = 0;
-	zpath[0] = 0;
 	len = 0;
 	at = 0;
 
@@ -2028,8 +2027,11 @@ static int FS_ReturnPath( const char *zname, char *zpath, int *depth ) {
 		}
 		at++;
 	}
-	strcpy(zpath, zname);
-	zpath[len] = 0;
+	if ( zpath ) {		// the per-entry scan wants only the length and the depth
+		zpath[0] = 0;
+		strcpy(zpath, zname);
+		zpath[len] = 0;
+	}
 	*depth = newdep;
 
 	return len;
@@ -2121,7 +2123,7 @@ char **FS_ListFilteredFiles( const char *path, const char *extension, char *filt
 				}
 				else {
 
-					zpathLen = FS_ReturnPath(name, zpath, &depth);
+					zpathLen = FS_ReturnPath(name, NULL, &depth);
 
 					if ( (depth-pathDepth)>2 || pathLength > zpathLen || Q_stricmpn( name, path, pathLength ) ) {
 						continue;
