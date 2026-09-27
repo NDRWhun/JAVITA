@@ -495,7 +495,14 @@ static int S_AsyncLoad_Worker( SceSize argSize, void *argp )
 		job.sfx  = sfx;
 		job.data = NULL;
 		job.size = 0;
-		job.ok   = S_LoadSound_ReadFile( sfx, job.sLoadName, sizeof(job.sLoadName), &job.data, &job.size, qtrue );
+		try {
+			job.ok = S_LoadSound_ReadFile( sfx, job.sLoadName, sizeof(job.sLoadName), &job.data, &job.size, qtrue );
+		} catch ( ... ) {
+			// this thread has no handler, so an escaping throw would terminate the process
+			extern void Sys_BootMark( const char *s );
+			Sys_BootMark( "snd: async loader raised an error" );
+			job.ok = qfalse;
+		}
 
 		sceKernelLockMutex( s_asyncMutex, 1, NULL );
 		s_asyncDone[s_asyncDoneHead] = job;	// CAP guarantees room
@@ -616,8 +623,14 @@ static int S_MixerThread( SceSize argc, void *argv )
 		sceKernelDelayThread( 3000 );
 		if ( !s_soundStarted || s_soundMuted ) continue;
 		S_MixLock();
-		S_UpdateBackgroundTrack();
-		S_Update_();
+		try {
+			S_UpdateBackgroundTrack();
+			S_Update_();
+		} catch ( ... ) {
+			// an escaping throw would terminate the process and leave the mix lock held
+			extern void Sys_BootMark( const char *s );
+			Sys_BootMark( "snd: mixer thread raised an error" );
+		}
 		S_MixUnlock();
 	}
 	return sceKernelExitDeleteThread( 0 );

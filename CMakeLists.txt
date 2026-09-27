@@ -61,6 +61,9 @@ set(JK_ARCH_FLAGS
   -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
   -ffast-math -fsigned-char -fno-short-enums
   -fsingle-precision-constant -fno-optimize-sibling-calls
+  # the C modules carry no unwind tables otherwise, and an ERR_DROP thrown
+  # under a cgame frame then aborts instead of unwinding to Com_Frame
+  -funwind-tables
 )
 add_compile_options(${JK_ARCH_FLAGS})
 # C++ needs permissive (legacy id-Tech-3 era code) + GNU visibility.

@@ -40,6 +40,35 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <psp2/appmgr.h>
 #include <psp2/kernel/processmgr.h>
 #include <cstring>
+#include <cxxabi.h>
+#include <exception>
+
+extern char com_errorMessage[];
+extern qboolean com_errorEntered;
+static void NORETURN Sys_Exit( int ex );
+
+// an escaping throw dies here with the stack intact, so this is the only place
+// that can still name what raised it
+static void Sys_TerminateHandler( void )
+{
+	char line[512];
+
+	SceKernelThreadInfo ti;
+	ti.size = sizeof( ti );
+	const char *thread = ( sceKernelGetThreadInfo( sceKernelGetThreadId(), &ti ) >= 0 )
+		? ti.name : "?";
+
+	// mangled only: __cxa_demangle allocates, and the heap may be what failed
+	const std::type_info *ti2 = abi::__cxa_current_exception_type();
+	snprintf( line, sizeof( line ), "TERMINATE thread=%s type=%s", thread, ti2 ? ti2->name() : "none" );
+	Sys_BootMark( line );
+
+	if ( com_errorEntered ) {
+		snprintf( line, sizeof( line ), "TERMINATE com_error: %s", com_errorMessage );
+		Sys_BootMark( line );
+	}
+	Sys_Exit( 6 );
+}
 #endif
 
 static char binaryPath[ MAX_OSPATH ] = { 0 };
@@ -831,6 +860,7 @@ int main ( int argc, char* argv[] )
 
 #ifdef VITA
 	Sys_BootMark( "main" );
+	std::set_terminate( Sys_TerminateHandler );
 	// deterministic core layout: main 1, G2 skin worker + mixer 0, render backend 2
 	sceKernelChangeThreadCpuAffinityMask( sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_1 );
 	Sys_Vita_CheckConfigGate();

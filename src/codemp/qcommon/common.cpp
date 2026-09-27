@@ -1354,6 +1354,11 @@ void Com_Init( char *commandLine ) {
 		Com_CatchError (code);
 		Sys_Error ("Error during initialization: %s", Com_ErrorString (code));
 	}
+	catch ( ... )
+	{
+		Com_CatchError (ERR_FATAL);
+		Sys_Error ("Unhandled exception during initialization");
+	}
 }
 
 //==================================================================
@@ -1711,6 +1716,12 @@ void Com_Frame( void ) {
 	catch (int code) {
 		Com_CatchError (code);
 		Com_Printf ("%s\n", Com_ErrorString (code));
+		return;
+	}
+	catch (...) {
+		// a bad_alloc or any other non-engine throw, which would otherwise terminate
+		Com_CatchError (ERR_DROP);
+		Com_Printf ("%s\n", Com_ErrorString (ERR_DROP));
 		return;
 	}
 
