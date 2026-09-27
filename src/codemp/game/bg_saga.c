@@ -1011,6 +1011,7 @@ void BG_SiegeParseClassFile(const char *filename, siegeClassDesc_t *descBuffer)
 	//Parse shader for ui to use
 	if (BG_SiegeGetPairedValue(classInfo, "class_shader", parseBuf))
 	{
+		Q_strncpyz(bgSiegeClasses[bgNumSiegeClasses].classShaderName, parseBuf, sizeof(bgSiegeClasses[0].classShaderName));
 	#ifdef _GAME
 		bgSiegeClasses[bgNumSiegeClasses].classShader = 0;
 	#else //cgame, ui
@@ -1062,6 +1063,7 @@ void BG_SiegeParseClassFile(const char *filename, siegeClassDesc_t *descBuffer)
 	{ //No entry!  Bad bad bad
 		//Com_Error( ERR_DROP, "ERROR: no class_shader defined for class %s\n", bgSiegeClasses[bgNumSiegeClasses].name );
 		Com_Printf( "ERROR: no class_shader defined for class %s\n", bgSiegeClasses[bgNumSiegeClasses].name );
+		bgSiegeClasses[bgNumSiegeClasses].classShaderName[0] = 0;
 	}
 
 	//Parse holdable items to use

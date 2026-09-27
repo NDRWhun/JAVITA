@@ -1052,7 +1052,9 @@ void UI_FreeAllSpecies(void);
 void UI_Shutdown( void ) {
 	trap->LAN_SaveCachedServers();
 	UI_CleanupGhoul2();
-	UI_FreeAllSpecies();
+#ifndef VITA
+	UI_FreeAllSpecies();	// the Vita module is static, so the list stays as the next UI_Init's cache
+#endif
 }
 
 char *defaultMenu = NULL;
@@ -9432,11 +9434,14 @@ PlayerModel_BuildList
 */
 static void UI_BuildQ3Model_List( void )
 {
+	static int	builtGen = 0;
+	int		fsGen = trap->ext.FS_Generation();
 	int		numdirs;
 	int		numfiles;
 	char	dirlist[2048];
-	char	filelist[2048];
+	char	filelist[16384];	// holds every player skin at once; retail needs 7506 bytes
 	char	skinname[64];
+	char	headName[sizeof( uiInfo.q3HeadNames[0] )];
 	char*	dirptr;
 	char*	fileptr;
 	char*	check;
@@ -9444,8 +9449,18 @@ static void UI_BuildQ3Model_List( void )
 	int		j, k, p, s;
 	int		dirlen;
 	int		filelen;
+	qboolean iconExists;
+
+	if (fsGen == builtGen)
+	{ //same search path as the cached list; only the icon handles died with the renderer restart
+		memset( uiInfo.q3HeadIcons, 0, sizeof( uiInfo.q3HeadIcons ) );
+		return;
+	}
 
 	uiInfo.q3HeadCount = 0;
+
+	// one listing for every skin: a scan per model directory re-walks all 23k pak entries each time
+	numfiles = trap->FS_GetFileList( "models/players", "skin", filelist, sizeof(filelist) );
 
 	// iterate directory of all player models
 	numdirs = trap->FS_GetFileList("models/players", "/", dirlist, 2048 );
@@ -9460,7 +9475,6 @@ static void UI_BuildQ3Model_List( void )
 			continue;
 
 
-		numfiles = trap->FS_GetFileList( va("models/players/%s",dirptr), "skin", filelist, 2048 );
 		fileptr  = filelist;
 		for (j=0; j<numfiles && uiInfo.q3HeadCount < MAX_Q3PLAYERMODELS;j++,fileptr+=filelen+1)
 		{
@@ -9468,7 +9482,13 @@ static void UI_BuildQ3Model_List( void )
 
 			filelen = strlen(fileptr);
 
-			COM_StripExtension(fileptr,skinname, sizeof( skinname ) );
+			// entries are dir-qualified, so take only the ones under this model
+			if ( Q_stricmpn( fileptr, dirptr, dirlen ) || fileptr[dirlen] != '/' )
+			{
+				continue;
+			}
+
+			COM_StripExtension(fileptr + dirlen + 1,skinname, sizeof( skinname ) );
 
 			skinLen = strlen(skinname);
 			k = 0;
@@ -9489,58 +9509,60 @@ static void UI_BuildQ3Model_List( void )
 				skinname[p] = '\0';
 			}
 
-			/*
-			Com_sprintf(fpath, 2048, "models/players/%s/icon%s.jpg", dirptr, skinname);
-
-			trap->FS_Open(fpath, &f, FS_READ);
-
-			if (f)
-			*/
 			check = &skinname[1];
-			if (bIsImageFile(dirptr, check))
-			{ //if it exists
-				qboolean iconExists = qfalse;
+			if (skinname[0] == '_')
+			{ //change character to append properly
+				skinname[0] = '/';
+			}
+			Com_sprintf( headName, sizeof( headName ), "%s%s", dirptr, skinname );
 
-				//trap->FS_Close(f);
-
-				if (skinname[0] == '_')
-				{ //change character to append properly
-					skinname[0] = '/';
-				}
-
-				s = 0;
-
-				while (s < uiInfo.q3HeadCount)
-				{ //check for dupes
-					if (!Q_stricmp(va("%s%s", dirptr, skinname), uiInfo.q3HeadNames[s]))
-					{
-						iconExists = qtrue;
-						break;
-					}
-					s++;
-				}
-
-				if (iconExists)
+			iconExists = qfalse;
+			for (s = 0; s < uiInfo.q3HeadCount; s++)
+			{ //head, torso and lower skins of one variant share an icon, so dupes go before the probe
+				if (!Q_stricmp(headName, uiInfo.q3HeadNames[s]))
 				{
-					continue;
+					iconExists = qtrue;
+					break;
 				}
+			}
 
-				Com_sprintf( uiInfo.q3HeadNames[uiInfo.q3HeadCount], sizeof(uiInfo.q3HeadNames[uiInfo.q3HeadCount]), va("%s%s", dirptr, skinname));
-				uiInfo.q3HeadIcons[uiInfo.q3HeadCount++] = 0;//trap->R_RegisterShaderNoMip(fpath);
-				//rww - we are now registering them as they are drawn like the TA feeder, so as to decrease UI load time.
+			if (iconExists)
+			{
+				continue;
+			}
+
+			if (bIsImageFile(dirptr, check))
+			{ //icons are registered when first drawn
+				Q_strncpyz( uiInfo.q3HeadNames[uiInfo.q3HeadCount], headName, sizeof(uiInfo.q3HeadNames[uiInfo.q3HeadCount]) );
+				uiInfo.q3HeadIcons[uiInfo.q3HeadCount++] = 0;
 			}
 
 			if (uiInfo.q3HeadCount >= MAX_Q3PLAYERMODELS)
 			{
-				return;
+				break;
 			}
 		}
 	}
 
+	builtGen = fsGen;
 }
 
 void UI_SiegeInit(void)
 {
+	static int	builtGen = 0;
+	int			fsGen = trap->ext.FS_Generation();
+	int			i;
+
+	if (fsGen == builtGen)
+	{ //class and team data are current; only the shader handles died with the renderer restart
+		for (i = 0; i < bgNumSiegeClasses; i++)
+		{
+			bgSiegeClasses[i].uiPortraitShader = trap->R_RegisterShaderNoMip(bgSiegeClasses[i].uiPortrait);
+			bgSiegeClasses[i].classShader = bgSiegeClasses[i].classShaderName[0] ? trap->R_RegisterShaderNoMip(bgSiegeClasses[i].classShaderName) : 0;
+		}
+		return;
+	}
+
 	//Load the player class types
 	BG_SiegeLoadClasses(g_UIClassDescriptions);
 
@@ -9556,6 +9578,8 @@ void UI_SiegeInit(void)
 	{ //React same as with classes.
 		Com_Error(ERR_DROP, "Couldn't find any player teams for Siege");
 	}
+
+	builtGen = fsGen;
 }
 
 /*
@@ -9632,6 +9656,21 @@ void UI_FreeAllSpecies( void )
 		UI_FreeSpecies(&uiInfo.playerSpecies[i]);
 	}
 	free(uiInfo.playerSpecies);
+	uiInfo.playerSpecies = NULL;
+	uiInfo.playerSpeciesCount = 0;
+	uiInfo.playerSpeciesMax = 0;
+}
+
+static void UI_PrecacheSpeciesModel( const char *dir )
+{
+	void	*ghoul2 = NULL;
+	char	fpath[MAX_QPATH];
+
+	Com_sprintf( fpath, sizeof( fpath ), "models/players/%s/model.glm", dir );
+	if (trap->G2API_InitGhoul2Model(&ghoul2, fpath, 0, 0, 0, 0, 0) >= 0)
+	{
+		trap->G2API_CleanGhoul2Models(&ghoul2);
+	}
 }
 
 /*
@@ -9642,6 +9681,8 @@ UI_BuildPlayerModel_List
 static void UI_BuildPlayerModel_List( qboolean inGameLoad )
 {
 	static const size_t DIR_LIST_SIZE = 16384;
+	static int	builtGen = 0;
+	int		fsGen = trap->ext.FS_Generation();
 
 	int		numdirs;
 	size_t	dirListSize = DIR_LIST_SIZE;
@@ -9651,6 +9692,20 @@ static void UI_BuildPlayerModel_List( qboolean inGameLoad )
 	int		dirlen;
 	int		i;
 	int		j;
+
+	if (fsGen == builtGen)
+	{ //same search path as the cached species list
+		uiInfo.playerSpeciesIndex = 0;
+		if (!inGameLoad && ui_PrecacheModels.integer)
+		{
+			for (i = 0; i < uiInfo.playerSpeciesCount; i++)
+			{
+				UI_PrecacheSpeciesModel(uiInfo.playerSpecies[i].Name);
+			}
+		}
+		return;
+	}
+	UI_FreeAllSpecies();
 
 	dirlist = malloc(DIR_LIST_SIZE);
 	if ( !dirlist )
@@ -9798,18 +9853,12 @@ static void UI_BuildPlayerModel_List( qboolean inGameLoad )
 			uiInfo.playerSpeciesCount++;
 			if (!inGameLoad && ui_PrecacheModels.integer)
 			{
-				int g2Model;
-				void *ghoul2 = 0;
-				Com_sprintf( fpath, sizeof( fpath ), "models/players/%s/model.glm", dirptr );
-				g2Model = trap->G2API_InitGhoul2Model(&ghoul2, fpath, 0, 0, 0, 0, 0);
-				if (g2Model >= 0)
-				{
-//					trap->G2API_RemoveGhoul2Model( &ghoul2, 0 );
-					trap->G2API_CleanGhoul2Models (&ghoul2);
-				}
+				UI_PrecacheSpeciesModel(dirptr);
 			}
 		}
 	}
+
+	builtGen = fsGen;
 
 	if ( dirlist != stackDirList )
 	{

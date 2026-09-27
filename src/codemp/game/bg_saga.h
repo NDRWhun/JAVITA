@@ -93,6 +93,7 @@ typedef struct siegeClass_s {
 	int			uiPortraitShader;
 	char		uiPortrait[256];
 	int			classShader;
+	char		classShaderName[MAX_QPATH];
 	short		playerClass;		// SPC_INFANTRY . ..
 } siegeClass_t;
 
