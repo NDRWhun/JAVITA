@@ -25,8 +25,6 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 
-#include "../../vita/vita_prof.h"
-
 static char *s_shaderText;
 static qboolean s_shaderTextHasHash;	// a '#' token is absent from the hash table, so it needs the scan
 
@@ -3738,8 +3736,7 @@ qhandle_t RE_RegisterShader( const char *name ) {
 		return 0;
 	}
 
-	{ VITA_PROF( Shader );
-	sh = R_FindShader( name, lightmaps2d, stylesDefault, qtrue ); }
+	sh = R_FindShader( name, lightmaps2d, stylesDefault, qtrue );
 
 	// we want to return 0 if the shader failed to
 	// load for some reason, but R_FindShader should
@@ -3769,8 +3766,7 @@ qhandle_t RE_RegisterShaderNoMip( const char *name ) {
 		return 0;
 	}
 
-	{ VITA_PROF( Shader );
-	sh = R_FindShader( name, lightmaps2d, stylesDefault, qfalse ); }
+	sh = R_FindShader( name, lightmaps2d, stylesDefault, qfalse );
 
 	// we want to return 0 if the shader failed to
 	// load for some reason, but R_FindShader should

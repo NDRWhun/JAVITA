@@ -24,7 +24,6 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // tr_models.c -- model loading and caching
 
 #include "tr_local.h"
-#include "../../vita/vita_prof.h"
 #include "qcommon/disablewarnings.h"
 #include "qcommon/sstring.h"	// #include <string>
 
@@ -1441,7 +1440,6 @@ fail:
 qboolean gbInsideRegisterModel = qfalse;
 qhandle_t RE_RegisterModel( const char *name )
 {
-	VITA_PROF( Model );
 	const qboolean bWhatitwas = gbInsideRegisterModel;
 	gbInsideRegisterModel = qtrue;	// !!!!!!!!!!!!!!
 

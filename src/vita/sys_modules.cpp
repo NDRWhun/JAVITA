@@ -35,18 +35,27 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // unbuffered boot-milestone trail; survives a hang + forced power-off
 char g_lastBootMark[64] = "none";
 
+// the watchdog thread and main both write, and they share the stamp origin
+static volatile unsigned char s_trailLock = 0;
+
 // appends without claiming to be a milestone, so the watchdog cannot erase the real one
 static void Sys_BootWrite( const char *s )
 {
 	static int first = 1;
 	static SceUInt64 base, prev;
+	while ( __atomic_test_and_set( &s_trailLock, __ATOMIC_ACQUIRE ) ) {
+		sceKernelDelayThread( 100 );
+	}
 	if ( first ) {
 		sceIoMkdir( "ux0:data/JAVITA", 0777 );
 		base = prev = sceKernelGetProcessTimeWide();
 	}
 	SceUID fd = sceIoOpen( "ux0:data/JAVITA/mpboot.log",
 		SCE_O_WRONLY | SCE_O_CREAT | ( first ? SCE_O_TRUNC : SCE_O_APPEND ), 0666 );
-	if ( fd < 0 ) return;		// leave first set, so a later call still truncates
+	if ( fd < 0 ) {				// leave first set, so a later call still truncates
+		__atomic_clear( &s_trailLock, __ATOMIC_RELEASE );
+		return;
+	}
 	first = 0;
 
 	// absolute and since-previous, so a gap between marks is as visible as a slow mark
@@ -60,37 +69,13 @@ static void Sys_BootWrite( const char *s )
 	sceIoWrite( fd, s, strlen( s ) );
 	sceIoWrite( fd, "\n", 1 );
 	sceIoClose( fd );
+	__atomic_clear( &s_trailLock, __ATOMIC_RELEASE );
 }
 
 void Sys_BootMark( const char *s )
 {
 	Sys_BootWrite( s );
 	strncpy( g_lastBootMark, s, sizeof( g_lastBootMark ) - 1 );
-}
-
-// microseconds and call counts for the load-path cost centres; racy by design,
-// they only ever feed the trail
-unsigned int g_profVmUs, g_profVmCalls;
-unsigned int g_profShaderUs, g_profShaderCalls;
-unsigned int g_profSoundUs, g_profSoundCalls;
-unsigned int g_profModelUs, g_profModelCalls;
-unsigned int g_profFsUs, g_profFsCalls, g_profFsKb;
-unsigned int g_profImgUs, g_profImgCalls;
-
-// everything the engine was asked to do, so whatever is left is module cpu
-void Sys_ProfMark( const char *tag )
-{
-	char line[256];
-	snprintf( line, sizeof( line ),
-		"%s | vm %ums/%u shader %ums/%u img %ums/%u snd %ums/%u mdl %ums/%u fs %ums/%u %uKB",
-		tag,
-		g_profVmUs / 1000, g_profVmCalls,
-		g_profShaderUs / 1000, g_profShaderCalls,
-		g_profImgUs / 1000, g_profImgCalls,
-		g_profSoundUs / 1000, g_profSoundCalls,
-		g_profModelUs / 1000, g_profModelCalls,
-		g_profFsUs / 1000, g_profFsCalls, g_profFsKb );
-	Sys_BootWrite( line );
 }
 
 // main-loop stall watchdog: names any main-thread freeze in the trail
@@ -111,12 +96,6 @@ static int Sys_StallWatchdog( SceSize argc, void *argv )
 			break;
 		}
 		const unsigned int now = g_vitaMainTicks;
-		// unconditional, so a quiet trail means idle rather than uninstrumented
-		{
-			char tick[64];
-			snprintf( tick, sizeof( tick ), "tick frames %u", now );
-			Sys_ProfMark( tick );
-		}
 		if ( now == last && now != 0 ) {
 			stalledFor += 5;
 			char msg[128];
