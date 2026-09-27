@@ -686,12 +686,16 @@ static qboolean S_LoadSound_FileLoadAndNameAdjuster(char *psFilename, byte **pDa
 		}
 	}
 
-	*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try WAV
+	// mp3 first: the assets hold 12769 mp3 to 302 wav, and each miss costs a real card open
+	psFilename[iNameStrlen-3] = 'm';
+	psFilename[iNameStrlen-2] = 'p';
+	psFilename[iNameStrlen-1] = '3';
+	*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try MP3
 	if ( !*pData ) {
-		psFilename[iNameStrlen-3] = 'm';
-		psFilename[iNameStrlen-2] = 'p';
-		psFilename[iNameStrlen-1] = '3';
-		*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try MP3
+		psFilename[iNameStrlen-3] = 'w';
+		psFilename[iNameStrlen-2] = 'a';
+		psFilename[iNameStrlen-1] = 'v';
+		*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try WAV
 
 		if ( !*pData )
 		{
@@ -708,16 +712,16 @@ static qboolean S_LoadSound_FileLoadAndNameAdjuster(char *psFilename, byte **pDa
 
 				strncpy(psVoice,"chars",5);
 
-				psFilename[iNameStrlen-3] = 'w';
-				psFilename[iNameStrlen-2] = 'a';
-				psFilename[iNameStrlen-1] = 'v';
-				*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try English WAV
+				psFilename[iNameStrlen-3] = 'm';
+				psFilename[iNameStrlen-2] = 'p';
+				psFilename[iNameStrlen-1] = '3';
+				*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try English MP3
 				if ( !*pData )
 				{
-					psFilename[iNameStrlen-3] = 'm';
-					psFilename[iNameStrlen-2] = 'p';
-					psFilename[iNameStrlen-1] = '3';
-					*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try English MP3
+					psFilename[iNameStrlen-3] = 'w';
+					psFilename[iNameStrlen-2] = 'a';
+					psFilename[iNameStrlen-1] = 'v';
+					*piSize = S_LoadSound_ReadWholeFile( psFilename, pData, bWorker );	// try English WAV
 				}
 			}
 
