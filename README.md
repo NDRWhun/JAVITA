@@ -71,7 +71,7 @@ to `ux0:data/JAVITA/texcache_dxt`. Later loads of that level read the cache inst
 You can skip that first pass by building the cache on a PC with [`tools/texbake`](tools/texbake) and
 copying the `pack.bin` it writes to `ux0:data/JAVITA/texcache_dxt/`. That one file holds every baked
 texture, so the game opens it once per session instead of one file per texture. Anything not in it is
-compressed on the device as before.
+compressed on the device and appended to `pack.delta` beside it; `texbake --pack` folds that back in.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
