@@ -499,7 +499,6 @@ static int S_AsyncLoad_Worker( SceSize argSize, void *argp )
 			job.ok = S_LoadSound_ReadFile( sfx, job.sLoadName, sizeof(job.sLoadName), &job.data, &job.size, qtrue );
 		} catch ( ... ) {
 			// this thread has no handler, so an escaping throw would terminate the process
-			extern void Sys_BootMark( const char *s );
 			Sys_BootMark( "snd: async loader raised an error" );
 			job.ok = qfalse;
 		}
@@ -628,7 +627,6 @@ static int S_MixerThread( SceSize argc, void *argv )
 			S_Update_();
 		} catch ( ... ) {
 			// an escaping throw would terminate the process and leave the mix lock held
-			extern void Sys_BootMark( const char *s );
 			Sys_BootMark( "snd: mixer thread raised an error" );
 		}
 		S_MixUnlock();

@@ -97,8 +97,7 @@ bool GXM_TextureCreateRGBA( gxmTexture_t *t, const void *rgba, unsigned int w, u
 	return true;
 }
 
-// a video frame arrives every frame at a fixed size; reallocating each time would
-// churn memblocks, so an in-place copy is the analogue of glTexSubImage2D
+// in-place update for a same-size texture, the glTexSubImage2D path
 bool GXM_TextureUpdateRGBA( gxmTexture_t *t, const void *rgba, unsigned int w, unsigned int h )
 {
 	if ( !t->valid || !rgba || t->width != w || t->height != h || t->mipCount ) {
@@ -277,15 +276,7 @@ void GXM_RingShutdown( void )
 	}
 }
 
-/*
-================
-GXM_RingBeginFrame
-
-One slice per frame gives the GPU a frame of grace before reuse.
-================
-*/
-// libgxm Overview 9/Fig.21: vertex/index data may be overwritten only once the vertex
-// pipeline notification for the scene that used it has landed
+// libgxm Overview 9/Fig.21: vertex/index data may be overwritten only once the vertex pipeline notification for the scene that used it has landed
 static SceGxmNotification	ring_notify[GXM_RING_FRAMES];
 
 static void RingNotifyInit( void )
@@ -314,6 +305,13 @@ const SceGxmNotification *GXM_RingSceneNotification( void )
 	return &ring_notify[ring_frame];
 }
 
+/*
+================
+GXM_RingBeginFrame
+
+One slice per frame gives the GPU a frame of grace before reuse.
+================
+*/
 void GXM_RingBeginFrame( void )
 {
 	// a high-water mark, so a heavy frame still shows in an occasional report

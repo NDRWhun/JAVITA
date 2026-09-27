@@ -2326,7 +2326,7 @@ Ghoul2 Insert Start
 static void *g2WeaponInstances[MAX_WEAPONS];
 static qboolean g2WeaponInstanceBuilt[MAX_WEAPONS];
 
-// drops any instances left from an earlier map so they are rebuilt on demand from the current item list
+// drops the last map's instances; they are rebuilt on demand from the current item list
 void CG_InitG2Weapons(void)
 {
 	CG_ShutDownG2Weapons();

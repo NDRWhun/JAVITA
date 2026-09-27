@@ -1612,12 +1612,11 @@ static void R_TexCacheDxt_Key( const char *name, char out[MAX_QPATH] )
 
 // sharded on the top hash byte: an exFAT lookup scans the directory, and one flat
 // folder holds every baked entry
-static unsigned R_TexCacheDxt_Path( const char *name, char *out, int outSize )
+static void R_TexCacheDxt_Path( const char *name, char *out, int outSize )
 {
 	const unsigned long long h = R_TexCacheDxt_Hash( name );
 	const unsigned shard = (unsigned)( h >> 56 );
 	Com_sprintf( out, outSize, "ux0:data/JAVITA/texcache_dxt/%02x/%016llx.bin", shard, h );
-	return shard;
 }
 
 // where entries baked before the sharding lived; a card full of them still reads
@@ -2196,7 +2195,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	byte *entry = R_TexCacheDxt_ReadPacked( key, mipmap, allowPicmip, &hdr, mipSizes, &total, &blob );	// owns the bytes the upload reads
 	if ( !entry )
 	{
-		// loose files: the sharded entry, then the flat layout that predates sharding
+		// loose files: the sharded path, then the flat path
 		char path[256];
 		R_TexCacheDxt_Path( key, path, sizeof(path) );
 		SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );

@@ -51,8 +51,7 @@ void	GXM_TextureFree( gxmTexture_t *t );
 void	GXM_TextureBind( unsigned int unit, const gxmTexture_t *t );
 void	GXM_TextureSetFilter( gxmTexture_t *t, bool linear, bool clamp );
 
-// Per-frame ring. GXM defers execution, so anything a draw references must stay
-// untouched until the GPU consumes the scene; tess buffers get copied in here.
+// per-frame ring: draw data is copied here and left alone until the GPU consumes the scene
 bool	GXM_RingInit( unsigned int bytesPerFrame );
 void	GXM_RingShutdown( void );
 void	GXM_RingBeginFrame( void );

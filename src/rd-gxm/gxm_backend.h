@@ -55,7 +55,7 @@ void GXM_TexFree( unsigned int texnum );
 void GXM_TexBind( int tmu, unsigned int texnum );
 void GXM_TexFilter( unsigned int texnum, int linear, int clampToEdge );
 
-// --- state the engine sets through what used to be GL calls ---
+// --- state the engine sets through the qgl shim ---
 void GXM_SetProjection( const float *m );	// column-major, as glLoadMatrixf takes it
 void GXM_SetModelView( const float *m );
 void GXM_SetStateBits( unsigned int stateBits );

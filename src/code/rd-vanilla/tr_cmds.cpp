@@ -307,8 +307,7 @@ void R_IssuePendingRenderCommands( void ) {
 		return;
 	}
 #ifdef VITA
-	// nothing can unpark the backend but a hand-off, so a second drain over an
-	// empty list would only buy two semaphore round trips at vsync cadence
+	// a parked backend with nothing queued has nothing to drain
 	if ( r_renderThread && r_renderThread->integer && rend_parked && !backEndData->commands.used ) {
 		return;
 	}

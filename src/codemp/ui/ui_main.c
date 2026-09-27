@@ -9439,7 +9439,7 @@ static void UI_BuildQ3Model_List( void )
 	int		numdirs;
 	int		numfiles;
 	char	dirlist[2048];
-	char	filelist[16384];	// holds every player skin at once; retail needs 7506 bytes
+	char	filelist[16384];	// every player skin in one listing
 	char	skinname[64];
 	char	headName[sizeof( uiInfo.q3HeadNames[0] )];
 	char*	dirptr;
@@ -9459,7 +9459,7 @@ static void UI_BuildQ3Model_List( void )
 
 	uiInfo.q3HeadCount = 0;
 
-	// one listing for every skin: a scan per model directory re-walks all 23k pak entries each time
+	// one listing for every skin, filtered per model directory below
 	numfiles = trap->FS_GetFileList( "models/players", "skin", filelist, sizeof(filelist) );
 
 	// iterate directory of all player models

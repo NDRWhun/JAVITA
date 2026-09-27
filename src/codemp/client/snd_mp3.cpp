@@ -281,7 +281,7 @@ qboolean MP3Stream_InitFromFile( sfx_t* sfx, byte *pbSrcData, int iSrcDatalen, c
 		sfx->eSoundCompressionMethod = ct_MP3;
 		sfx->fVolRange = fMaxVol;
 		//sfx->width  = 2;
-		sfx->iSoundLengthInSamples = (iMP3UnPackedSize / 2/*sfx->width*/) / (bStereoDesired?2:1);	// iMP3UnPackedSize was measured at dma.speed
+		sfx->iSoundLengthInSamples = (iMP3UnPackedSize / 2/*sfx->width*/) / (bStereoDesired?2:1);	// iMP3UnPackedSize is already at dma.speed
 		//
 		// alloc mem for data and store it (raw MP3 in this case)...
 		//

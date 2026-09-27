@@ -1,8 +1,8 @@
 /*
 ===========================================================================
-Copyright (C) 2026, JAMPVITA contributors
+Copyright (C) 2026, JAVITA contributors
 
-This file is part of JAMPVITA, a PS Vita port built on the OpenJK
+This file is part of JAVITA, a PS Vita port built on the OpenJK
 source code.
 
 OpenJK is free software; you can redistribute it and/or modify it
