@@ -536,6 +536,22 @@ local ZPOS64_T unz64local_SearchCentralDir64(const zlib_filefunc64_32_def* pzlib
 
         if (uPosFound!=0)
             break;
+
+        /* The zip64 locator always sits immediately before the 32-bit end of
+           central directory, so once that is in hand its absence is decided.
+           Without this a comment-less non-zip64 archive rescans the whole 64k. */
+        {
+            int j;
+            for (j=(int)uReadSize-3; (j--)>0;)
+                if (((*(buf+j))==0x50) && ((*(buf+j+1))==0x4b) &&
+                    ((*(buf+j+2))==0x05) && ((*(buf+j+3))==0x06))
+                    break;
+            if (j>=20)
+            {
+                TRYFREE(buf);
+                return 0;
+            }
+        }
     }
     TRYFREE(buf);
     if (uPosFound == 0)
