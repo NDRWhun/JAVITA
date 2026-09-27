@@ -28,7 +28,19 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build
-        run: bash tools/build.sh
+        shell: bash
+        run: |
+          mkdir -p build
+          bash tools/build.sh 2>&1 | tee build/ci.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Report the failing lines
+        if: failure()
+        shell: bash
+        run: |
+          grep -nE 'error:|FAILED:|undefined reference|No such file|CMake Error|ninja: build stopped' build/ci.log | head -40 | sed 's/^/::error::/'
+          tail -60 build/ci.log | sed 's/^/::notice::/'
+          true
 
       - uses: actions/upload-artifact@v4
         with:
