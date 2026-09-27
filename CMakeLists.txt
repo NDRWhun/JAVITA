@@ -289,8 +289,9 @@ vita_create_vpk(JAVITA.vpk ${SP_TITLEID} JAVITA.self
   FILE ${CMAKE_BINARY_DIR}/generated/livearea/template.xml sce_sys/livearea/contents/template.xml
 )
 
-# vita_create_vpk appends its -s flags to VITA_MKSFOEX_FLAGS, so each vpk starts from the base set
+# vita_create_vpk appends its -s and -a flags to these in the caller's scope, so each vpk starts clean
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
+set(VITA_PACK_VPK_FLAGS "")
 # shares the single-player LiveArea art for now; only the SFO name differs
 vita_create_vpk(JAMPVITA.vpk ${MP_TITLEID} JAMPVITA.self
   VERSION ${VITA_VERSION}
