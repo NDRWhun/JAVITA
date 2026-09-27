@@ -9,12 +9,16 @@ and skip the wait entirely.
 
 ## Use it
 
-1. Double-click `TEXBAKE.bat`.
-2. Press Enter to let it find the game, or drag the folder that holds `assets0.pk3`
-   into the window first.
-3. Wait. It prints a progress line and finishes in a few minutes.
-4. Copy `texcache_out\texcache_dxt\pack.bin` to `ux0:data/JAVITA/texcache_dxt/` on the Vita.
-   That one file is the whole cache. If the card is plugged in, the tool offers to copy it for you.
+1. Plug the Vita's card in if you have it, then double-click `TEXBAKE.bat`.
+2. Read the status block: where it found the game, whether the card is there and
+   what is on it, and whether you have a local `pack.bin` from a previous run.
+   If it could not find the game, drag the folder that holds `assets0.pk3` into
+   the window and press Enter.
+3. Press Enter. With the card in, that builds the cache, merges in whatever the
+   Vita compressed on its own, copies `pack.bin` over and checks the copy. Without
+   the card, it just builds, and tells you where `pack.bin` is and where it goes:
+   `ux0:data/JAVITA/texcache_dxt/pack.bin`. That one file is the whole cache.
+4. Wait. It prints a progress line and finishes in a few minutes.
 
 The first build needs Visual Studio with "Desktop development with C++". After
 that, `texbake.exe` sits next to the batch file and runs on its own.
@@ -23,24 +27,40 @@ that, `texbake.exe` sits next to the batch file and runs on its own.
 
 Anything the game compresses on the Vita that was not in `pack.bin` is appended to
 `pack.delta` in the same folder. The game reads it on the next start, so nothing is
-compressed twice. Now and then, with the card plugged in, fold it into the pack:
+compressed twice. Every build with the card plugged in folds it in: the merged pack
+takes `pack.delta` first, then the fresh build, then the card's old `pack.bin`, then
+any loose `.bin` entries an older build left behind, and `pack.delta` is deleted only
+after the copy on the card has been read back and verified. To fold without baking,
+pick option 3 in the menu, or:
 
     texbake.exe --pack F:\data\JAVITA\texcache_dxt
 
-That rewrites `pack.bin` from `pack.delta`, the old `pack.bin` and any loose `.bin`
-entries an older build left behind, in that order of precedence, and deletes
-`pack.delta` once the new pack is in place. Nothing writes loose files any more;
-the ones already on a card still work and are folded in the same way.
+Nothing writes loose files any more; the ones already on a card still work and are
+folded in the same way.
 
-## Settings that have to match the game
+## Settings and the game
 
-The cache records the `r_picmip` it was built with, and the game rejects entries
-that disagree. The tool defaults to `1`, which is what the port ships. If you
-changed `r_picmip` on the Vita, pass the same number:
+Every entry records the `r_picmip` it was built at. The game uses an entry built at
+the same or a lower `r_picmip` and skips the levels it would have halved away, so a
+pack built at the default `1` also serves a Vita running `r_picmip 2`. An entry built
+at a higher `r_picmip` than the game runs is rejected and re-compressed on the
+device. To build for a coarser setting only, pass the number:
 
     texbake.exe "...\GameData\base" --picmip 2
 
 Changing the setting re-bakes everything, so the tool notices and does it for you.
+
+## Looking inside
+
+Entries are keyed by the texture's name as the game files it: lowercase, forward
+slashes, no extension. `--list` prints every entry of a `pack.bin` or `pack.delta`
+with its key, size, mip count, picmip and flags:
+
+    texbake.exe --list texcache_out\texcache_dxt\pack.bin
+
+A hash-keyed `pack.bin` (version 1) or hash-keyed `pack.delta` records are read too:
+`--list` shows those entries as `#<hash>`, and a fold names them from the game's
+files, leaving out any hash no known name matches.
 
 ## Options
 
@@ -51,9 +71,10 @@ Changing the setting re-bakes everything, so the tool notices and does it for yo
 | `--fast` | Quicker encode, slightly worse blocks. Default is the better one. |
 | `--force` | Re-encode entries that are already in `pack.bin`. |
 | `--threads <n>` | Worker threads. Default is one per core. |
-| `--copy <path>` | Copy `pack.bin` to that card root when finished, no questions. |
+| `--copy <path>` | Put `pack.bin` on the card at that root when finished, no questions; the card's `pack.delta` is merged in first. |
 | `--no-copy` | Never offer to copy. |
 | `--pack <dir>` | Fold `pack.delta`, the old `pack.bin` and any loose entries in `<dir>` into a fresh `pack.bin`, no baking. |
+| `--list <file>` | Print every entry of a `pack.bin` or `pack.delta`: key, size, mips, picmip, flags. |
 
 A second run into the same output folder only encodes what its `pack.bin` is
 missing and carries the rest over.

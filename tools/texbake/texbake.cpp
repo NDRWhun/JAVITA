@@ -36,11 +36,13 @@
 #define MAX_TEXTURE_SIZE	4096			// what the GXM backend reports
 #define TEXCACHE_FLAG_VALID		0x80000000u
 #define TEXCACHE_FLAG_MIPMAP	0x00000001u
+#define MAX_QPATH				64
 
 struct texCacheHdrDxt_t {
 	uint32_t magic, format, width, height, mipCount, picmip, flags, totalSize;
 };
 
+// FNV-1a 64 of a key: how v1 packs, 'JKTD' delta records and loose files are found
 static uint64_t FnvName( const char *s )
 {
 	uint64_t h = 14695981039346656037ULL;
@@ -51,13 +53,29 @@ static uint64_t FnvName( const char *s )
 	return h;
 }
 
+// the cache key, as GenerateImageMappingName in tr_image.cpp files a name: lowercase, '/' separators, cut at the first '.'
+static std::string CacheKey( const std::string &name )
+{
+	std::string key;
+	for ( size_t i = 0; i < name.size() && i < MAX_QPATH - 1; i++ ) {
+		char c = name[i];
+		if ( c >= 'A' && c <= 'Z' ) c = (char)( c - 'A' + 'a' );
+		if ( c == '.' ) break;
+		if ( c == '\\' ) c = '/';
+		key += c;
+	}
+	return key;
+}
+
 // ---------------------------------------------------------------- options
 
 struct Options {
 	std::string		assets;					// folder holding the pk3 files
 	std::string		out;					// folder that receives texcache_dxt
 	std::string		copyTo;					// card path, empty = ask
+	std::string		card;					// card root to use instead of scanning the drives
 	std::string		pack;					// texcache_dxt folder to pack without baking
+	std::string		list;					// pack.bin or pack.delta to print
 	int				picmip      = 1;		// r_picmip the device runs
 	int				highQuality = 1;		// DXT refine passes: 1 = slow and better
 	int				force       = 0;		// rebake entries that already exist
@@ -393,22 +411,40 @@ static bool BakeImage( std::vector<uint8_t> &pix, int w, int h, bool mipmap, boo
 }
 
 // ---------------------------------------------------------------- pack.bin
-// header, index sorted by name hash, then every entry byte-for-byte; must match src/code*/rd-vanilla/tr_image.cpp
+// header, index sorted by key, the key bytes, then every entry byte-for-byte; must match src/code*/rd-vanilla/tr_image.cpp
 
 #define TEXCACHE_PACK_MAGIC		0x50544B4Au		// "JKTP"
-#define TEXCACHE_PACK_VERSION	1u
+#define TEXCACHE_PACK_VERSION	2u				// 2 = keyed by name, 1 = keyed by name hash; both are read, 2 is written
+#define TEXCACHE_PACK_VERSION_V1 1u
 #define TEXCACHE_PACK_ALIGN		16
 #define TEXCACHE_PACK_MAX_COUNT	( 1u << 20 )
 #define TEXCACHE_PACK_MAX_ENTRY	( 32u * 1024 * 1024 + 65536 )
 
 struct texCachePackHdr_t {
-	uint32_t magic, version, count, pad;
+	uint32_t magic, version, count, namesSize;	// namesSize is a zero pad in v1
 };
 
-struct texCachePackEntry_t {
+struct texCachePackEntry_t {					// v2, sorted by key bytes
+	uint32_t nameOffset, nameLen, offset, size;
+};
+
+struct texCachePackEntryV1_t {					// v1, sorted by hash
 	uint64_t nameHash;
 	uint32_t offset, size;
 };
+
+// memcmp order with the shorter key first on a shared prefix, the order the device binary-searches
+static int KeyCmp( const char *a, size_t alen, const char *b, size_t blen )
+{
+	const int c = memcmp( a, b, alen < blen ? alen : blen );
+	if ( c ) return c;
+	return alen < blen ? -1 : ( alen > blen ? 1 : 0 );
+}
+
+static bool KeyLess( const std::string &a, const std::string &b )
+{
+	return KeyCmp( a.data(), a.size(), b.data(), b.size() ) < 0;
+}
 
 // header, mip table and payload of one entry, checked as the device checks them
 static bool EntryOk( const uint8_t *buf, size_t len )
@@ -435,15 +471,20 @@ static void EntryBytes( const Baked &b, std::vector<uint8_t> &out )
 	memcpy( out.data() + sizeof( b.hdr ) + b.hdr.mipCount * 4, b.blob.data(), b.blob.size() );
 }
 
-// a pack.bin under construction: entries stream into a temp file behind reserved index space
+struct PackItem {
+	std::string	key;
+	uint32_t	offset, size;
+};
+
+// a pack.bin under construction: entries stream into a temp file behind space reserved for the index and its keys
 struct PackWriter {
-	FILE								*f = NULL;
-	std::string							path, tmp;
-	std::mutex							lock;
-	std::vector<texCachePackEntry_t>	index;
-	size_t								reserved = 0;
-	uint64_t							pos = 0;
-	bool								failed = false;
+	FILE					*f = NULL;
+	std::string				path, tmp;
+	std::mutex				lock;
+	std::vector<PackItem>	index;
+	size_t					reserved = 0;
+	uint64_t				pos = 0;
+	bool					failed = false;
 };
 
 static bool PackBegin( PackWriter &w, const std::string &path, size_t reserve )
@@ -454,7 +495,7 @@ static bool PackBegin( PackWriter &w, const std::string &path, size_t reserve )
 	if ( !w.f ) return false;
 	texCachePackHdr_t ph = { TEXCACHE_PACK_MAGIC, TEXCACHE_PACK_VERSION, 0, 0 };
 	w.reserved = reserve;
-	w.pos = sizeof( ph ) + (uint64_t)reserve * sizeof( texCachePackEntry_t );
+	w.pos = sizeof( ph ) + (uint64_t)reserve * ( sizeof( texCachePackEntry_t ) + MAX_QPATH );
 	w.index.reserve( reserve );
 	if ( fwrite( &ph, 1, sizeof( ph ), w.f ) != sizeof( ph ) || _fseeki64( w.f, (long long)w.pos, SEEK_SET ) != 0 ) {
 		fclose( w.f );
@@ -465,10 +506,10 @@ static bool PackBegin( PackWriter &w, const std::string &path, size_t reserve )
 	return true;
 }
 
-static bool PackAdd( PackWriter &w, uint64_t hash, const uint8_t *entry, size_t size )
+static bool PackAdd( PackWriter &w, const std::string &key, const uint8_t *entry, size_t size )
 {
 	std::lock_guard<std::mutex> hold( w.lock );
-	if ( !w.f || w.failed || w.index.size() >= w.reserved ) return false;
+	if ( !w.f || w.failed || w.index.size() >= w.reserved || key.empty() || key.size() >= MAX_QPATH ) return false;
 	const uint64_t aligned = ( w.pos + TEXCACHE_PACK_ALIGN - 1 ) & ~(uint64_t)( TEXCACHE_PACK_ALIGN - 1 );
 	if ( aligned + size > 0xFFFFFFFFull ) { w.failed = true; return false; }
 	static const uint8_t zero[TEXCACHE_PACK_ALIGN] = { 0 };
@@ -477,31 +518,40 @@ static bool PackAdd( PackWriter &w, uint64_t hash, const uint8_t *entry, size_t 
 		w.failed = true;
 		return false;
 	}
-	w.index.push_back( { hash, (uint32_t)aligned, (uint32_t)size } );
+	w.index.push_back( { key, (uint32_t)aligned, (uint32_t)size } );
 	w.pos = aligned + size;
 	return true;
 }
 
-// writes the index and header, then puts the file in place of any older pack.bin
+// writes the index, the keys and the header, then puts the file in place of any older pack.bin
 static bool PackFinish( PackWriter &w )
 {
 	if ( !w.f ) return false;
-	std::stable_sort( w.index.begin(), w.index.end(), []( const texCachePackEntry_t &a, const texCachePackEntry_t &b ) {
-		return a.nameHash < b.nameHash;
+	std::stable_sort( w.index.begin(), w.index.end(), []( const PackItem &a, const PackItem &b ) {
+		return KeyLess( a.key, b.key );
 	} );
-	// the device rejects a repeated hash; the first one added came from the higher-priority source
+	// the device rejects a repeated key; the first one added came from the higher-priority source
 	size_t n = 0;
 	for ( size_t i = 0; i < w.index.size(); i++ ) {
-		if ( n && w.index[n - 1].nameHash == w.index[i].nameHash ) continue;
+		if ( n && w.index[n - 1].key == w.index[i].key ) continue;
 		w.index[n++] = w.index[i];
 	}
 	w.index.resize( n );
-	texCachePackHdr_t ph = { TEXCACHE_PACK_MAGIC, TEXCACHE_PACK_VERSION, (uint32_t)n, 0 };
+	std::vector<texCachePackEntry_t> entries( n );
+	std::string names;
+	uint64_t firstEntry = ~0ull;
+	for ( size_t i = 0; i < n; i++ ) {
+		entries[i] = { (uint32_t)names.size(), (uint32_t)w.index[i].key.size(), w.index[i].offset, w.index[i].size };
+		names += w.index[i].key;
+		if ( w.index[i].offset < firstEntry ) firstEntry = w.index[i].offset;
+	}
+	texCachePackHdr_t ph = { TEXCACHE_PACK_MAGIC, TEXCACHE_PACK_VERSION, (uint32_t)n, (uint32_t)names.size() };
 	const size_t idxBytes = n * sizeof( texCachePackEntry_t );
-	bool ok = !w.failed && n
+	bool ok = !w.failed && n && sizeof( ph ) + idxBytes + names.size() <= firstEntry
 		&& _fseeki64( w.f, 0, SEEK_SET ) == 0
 		&& fwrite( &ph, 1, sizeof( ph ), w.f ) == sizeof( ph )
-		&& fwrite( w.index.data(), 1, idxBytes, w.f ) == idxBytes;
+		&& fwrite( entries.data(), 1, idxBytes, w.f ) == idxBytes
+		&& fwrite( names.data(), 1, names.size(), w.f ) == names.size();
 	ok = ( fclose( w.f ) == 0 ) && ok;
 	w.f = NULL;
 	if ( !ok || !MoveFileExA( w.tmp.c_str(), w.path.c_str(), MOVEFILE_REPLACE_EXISTING ) ) {
@@ -514,7 +564,12 @@ static bool PackFinish( PackWriter &w )
 // an existing pack.bin, opened as the device opens it: any defect and it counts as absent
 struct PackReader {
 	FILE								*f = NULL;
-	std::vector<texCachePackEntry_t>	index;
+	uint32_t							version = 0;
+	std::vector<texCachePackEntry_t>	index;		// v2
+	std::string							names;		// the keys the v2 index points into
+	std::vector<texCachePackEntryV1_t>	hashed;		// v1
+	size_t Count() const { return version == TEXCACHE_PACK_VERSION_V1 ? hashed.size() : index.size(); }
+	std::string Key( const texCachePackEntry_t &e ) const { return names.substr( e.nameOffset, e.nameLen ); }
 };
 
 static bool PackOpenRead( PackReader &r, const std::string &path )
@@ -526,24 +581,52 @@ static bool PackOpenRead( PackReader &r, const std::string &path )
 	_fseeki64( r.f, 0, SEEK_SET );
 	texCachePackHdr_t ph = { 0, 0, 0, 0 };
 	bool ok = fread( &ph, 1, sizeof( ph ), r.f ) == sizeof( ph )
-		&& ph.magic == TEXCACHE_PACK_MAGIC && ph.version == TEXCACHE_PACK_VERSION
-		&& ph.count && ph.count <= TEXCACHE_PACK_MAX_COUNT;
+		&& ph.magic == TEXCACHE_PACK_MAGIC && ( ph.version == TEXCACHE_PACK_VERSION || ph.version == TEXCACHE_PACK_VERSION_V1 )
+		&& ph.count && ph.count <= TEXCACHE_PACK_MAX_COUNT
+		&& ( ph.version == TEXCACHE_PACK_VERSION_V1 || ph.namesSize <= ph.count * ( MAX_QPATH - 1 ) );
+	const bool v1 = ph.version == TEXCACHE_PACK_VERSION_V1;
+	const uint32_t namesSize = v1 ? 0 : ph.namesSize;
 	if ( ok ) {
-		r.index.resize( ph.count );
-		ok = fread( r.index.data(), sizeof( texCachePackEntry_t ), ph.count, r.f ) == ph.count;
+		r.version = ph.version;
+		if ( v1 ) {
+			r.hashed.resize( ph.count );
+			ok = fread( r.hashed.data(), sizeof( texCachePackEntryV1_t ), ph.count, r.f ) == ph.count;
+		}
+		else {
+			r.index.resize( ph.count );
+			r.names.resize( namesSize );
+			ok = fread( r.index.data(), sizeof( texCachePackEntry_t ), ph.count, r.f ) == ph.count
+				&& ( !namesSize || fread( &r.names[0], 1, namesSize, r.f ) == namesSize );
+		}
 	}
-	const uint64_t dataStart = sizeof( ph ) + (uint64_t)ph.count * sizeof( texCachePackEntry_t );
-	for ( size_t i = 0; ok && i < r.index.size(); i++ ) {
-		const texCachePackEntry_t &e = r.index[i];
-		if ( ( i && r.index[i - 1].nameHash >= e.nameHash )
-			|| e.size < sizeof( texCacheHdrDxt_t ) + 4 || e.size > TEXCACHE_PACK_MAX_ENTRY
-			|| e.offset < dataStart || (long long)e.offset + e.size > fileSize )
+	const uint64_t dataStart = sizeof( ph ) + (uint64_t)ph.count * ( v1 ? sizeof( texCachePackEntryV1_t ) : sizeof( texCachePackEntry_t ) ) + namesSize;
+	for ( size_t i = 0; ok && i < ph.count; i++ ) {
+		uint32_t offset, size;
+		if ( v1 ) {
+			const texCachePackEntryV1_t &e = r.hashed[i];
+			if ( i && r.hashed[i - 1].nameHash >= e.nameHash ) ok = false;
+			offset = e.offset;
+			size = e.size;
+		}
+		else {
+			const texCachePackEntry_t &e = r.index[i];
+			if ( e.nameLen == 0 || e.nameLen >= MAX_QPATH || e.nameOffset > namesSize || e.nameOffset + e.nameLen > namesSize
+				|| ( i && KeyCmp( r.names.data() + r.index[i - 1].nameOffset, r.index[i - 1].nameLen, r.names.data() + e.nameOffset, e.nameLen ) >= 0 ) )
+				ok = false;
+			offset = e.offset;
+			size = e.size;
+		}
+		if ( size < sizeof( texCacheHdrDxt_t ) + 4 || size > TEXCACHE_PACK_MAX_ENTRY
+			|| offset < dataStart || (long long)offset + size > fileSize )
 			ok = false;
 	}
 	if ( !ok ) {
 		fclose( r.f );
 		r.f = NULL;
+		r.version = 0;
 		r.index.clear();
+		r.names.clear();
+		r.hashed.clear();
 	}
 	return ok;
 }
@@ -554,18 +637,35 @@ static void PackCloseRead( PackReader &r )
 	r.f = NULL;
 }
 
-static bool PackHas( const PackReader &r, uint64_t hash )
+// the v2 entry for key, NULL when absent
+static const texCachePackEntry_t *PackFind( const PackReader &r, const std::string &key )
 {
-	const auto it = std::lower_bound( r.index.begin(), r.index.end(), hash,
-		[]( const texCachePackEntry_t &e, uint64_t h ) { return e.nameHash < h; } );
-	return it != r.index.end() && it->nameHash == hash;
+	const auto it = std::lower_bound( r.index.begin(), r.index.end(), key,
+		[&]( const texCachePackEntry_t &e, const std::string &k ) { return KeyCmp( r.names.data() + e.nameOffset, e.nameLen, k.data(), k.size() ) < 0; } );
+	if ( it == r.index.end() || KeyCmp( r.names.data() + it->nameOffset, it->nameLen, key.data(), key.size() ) != 0 ) return NULL;
+	return &*it;
 }
 
-static bool PackReadEntry( PackReader &r, const texCachePackEntry_t &e, std::vector<uint8_t> &buf )
+// the v1 entry for hash, NULL when absent
+static const texCachePackEntryV1_t *PackFindHash( const PackReader &r, uint64_t hash )
 {
-	buf.resize( e.size );
-	return r.f && _fseeki64( r.f, (long long)e.offset, SEEK_SET ) == 0
-		&& fread( buf.data(), 1, e.size, r.f ) == e.size && EntryOk( buf.data(), buf.size() );
+	const auto it = std::lower_bound( r.hashed.begin(), r.hashed.end(), hash,
+		[]( const texCachePackEntryV1_t &e, uint64_t h ) { return e.nameHash < h; } );
+	if ( it == r.hashed.end() || it->nameHash != hash ) return NULL;
+	return &*it;
+}
+
+// whether the pack holds key: by name in v2, by the hash of the name in v1
+static bool PackHas( const PackReader &r, const std::string &key )
+{
+	return r.version == TEXCACHE_PACK_VERSION_V1 ? PackFindHash( r, FnvName( key.c_str() ) ) != NULL : PackFind( r, key ) != NULL;
+}
+
+static bool PackReadEntry( PackReader &r, uint32_t offset, uint32_t size, std::vector<uint8_t> &buf )
+{
+	buf.resize( size );
+	return r.f && _fseeki64( r.f, (long long)offset, SEEK_SET ) == 0
+		&& fread( buf.data(), 1, size, r.f ) == size && EntryOk( buf.data(), buf.size() );
 }
 
 static PackWriter g_pack;
@@ -587,10 +687,15 @@ struct Flags {
 	bool allowTC   = true;
 };
 
-static std::map<std::string, Flags>	g_keys;			// cache key -> how it will be loaded
-static std::set<std::string>		g_notc;			// referenced by a shader that forbids compression
-static std::set<std::string>		g_shaderNames;	// lowercase, extension stripped
-static std::set<std::string>		g_nomip;		// reached through RegisterShaderNoMip, so mip and picmip are off
+struct KeyInfo {
+	Flags		f;
+	std::string	ref;			// the spelling the game resolves the file by
+};
+
+static std::map<std::string, KeyInfo>	g_keys;			// cache key -> how it will be loaded
+static std::set<std::string>		g_notc;			// cache keys a shader forbids compressing
+static std::set<std::string>		g_shaderNames;	// cache keys of every shader stanza
+static std::set<std::string>		g_nomip;		// cache keys reached through RegisterShaderNoMip, so mip and picmip are off
 
 static bool IsImageName( const std::string &n )
 {
@@ -667,13 +772,14 @@ static void Tokenize( const char *p, const char *end, std::vector<Token> &out )
 static void NoteKey( const std::string &rawKey, const Flags &f )
 {
 	if ( rawKey.empty() || rawKey[0] == '$' || rawKey[0] == '*' ) return;
-	const std::string key = SlashFix( rawKey );
+	const std::string key = CacheKey( rawKey );
+	if ( key.empty() ) return;
 	if ( !f.allowTC ) {
 		// an uncompressed image is never read from the cache; noted so the by-name pass skips it
-		g_notc.insert( Lower( key ) );
+		g_notc.insert( key );
 		return;
 	}
-	g_keys.emplace( key, f );	// first reference wins, as in the game
+	g_keys.emplace( key, KeyInfo{ f, SlashFix( rawKey ) } );	// first reference wins, as in the game
 }
 
 static void ParseShaderText( const std::string &text )
@@ -685,7 +791,7 @@ static void ParseShaderText( const std::string &text )
 	while ( i < t.size() ) {
 		if ( t[i].text == "{" || t[i].text == "}" ) { i++; continue; }
 
-		const std::string name = Lower( SlashFix( StripExt( t[i].text ) ) );
+		const std::string name = CacheKey( t[i].text );
 		i++;
 		if ( i >= t.size() || t[i].text != "{" ) continue;
 		i++;
@@ -744,12 +850,11 @@ static void ParseMenuText( const std::string &text )
 		std::string v = t[i + 1].text;
 		if ( v.size() >= 2 && v.front() == '"' && v.back() == '"' ) v = v.substr( 1, v.size() - 2 );
 		if ( v.empty() || v[0] == '$' || v[0] == '*' ) continue;
-		g_nomip.insert( Lower( StripExt( SlashFix( v ) ) ) );
+		g_nomip.insert( CacheKey( v ) );
 	}
 }
 
-// the rest of the unmipmapped set is named by string literals in the game modules,
-// so read them straight from the tree this tool ships in
+// RegisterShaderNoMip string literals in both games' modules, read from the tree this tool ships in
 static int ScanNoMipLiterals( const std::string &exePath )
 {
 	size_t cut = exePath.find_last_of( "\\/" );
@@ -760,8 +865,8 @@ static int ScanNoMipLiterals( const std::string &exePath )
 	if ( cut == std::string::npos ) return 0;
 	const std::string root = exePath.substr( 0, cut );
 
-	static const char *dirs[] = { "\\src\\codemp\\ui", "\\src\\codemp\\cgame",
-								  "\\src\\codemp\\client", NULL };
+	static const char *dirs[] = { "\\src\\codemp\\ui", "\\src\\codemp\\cgame", "\\src\\codemp\\client", "\\src\\codemp\\game",
+								  "\\src\\code\\ui", "\\src\\code\\cgame", "\\src\\code\\client", "\\src\\code\\game", NULL };
 	const size_t before = g_nomip.size();
 
 	for ( int d = 0; dirs[d]; d++ ) {
@@ -786,7 +891,7 @@ static int ScanNoMipLiterals( const std::string &exePath )
 				if ( e == std::string::npos ) continue;
 				const std::string v = txt.substr( q + 1, e - q - 1 );
 				if ( v.empty() || v[0] == '$' || v[0] == '*' || v.find( '%' ) != std::string::npos ) continue;
-				g_nomip.insert( Lower( StripExt( SlashFix( v ) ) ) );
+				g_nomip.insert( CacheKey( v ) );
 			}
 		} while ( FindNextFileA( h, &fd ) );
 		FindClose( h );
@@ -870,7 +975,7 @@ static void Worker( void )
 		EntryBytes( baked, entry );
 
 		for ( const std::string &key : job.keys ) {
-			if ( PackAdd( g_pack, FnvName( key.c_str() ), entry.data(), entry.size() ) ) {
+			if ( PackAdd( g_pack, key, entry.data(), entry.size() ) ) {
 				g_written++;
 				g_bytes += (long long)entry.size();
 			}
@@ -913,14 +1018,85 @@ static void FindPaks( const std::string &dir, std::vector<std::string> &out )
 	for ( const std::string &n : names ) out.push_back( dir + "\\" + n );
 }
 
-static std::string AutoDetectAssets( void )
+static std::string TrimSlashes( std::string s )
 {
+	while ( !s.empty() && ( s.back() == '\\' || s.back() == '/' ) ) s.pop_back();
+	return s;
+}
+
+static std::string BackslashFix( std::string s )
+{
+	for ( char &c : s ) if ( c == '/' ) c = '\\';
+	return s;
+}
+
+// a REG_SZ value, empty when the key or value is absent
+static std::string RegString( HKEY root, const char *sub, const char *name )
+{
+	HKEY k;
+	if ( RegOpenKeyExA( root, sub, 0, KEY_READ, &k ) != ERROR_SUCCESS ) return "";
+	char buf[1024];
+	DWORD type = 0, len = sizeof( buf ) - 1;
+	std::string s;
+	if ( RegQueryValueExA( k, name, NULL, &type, (BYTE *)buf, &len ) == ERROR_SUCCESS && type == REG_SZ ) {
+		buf[len] = '\0';
+		s = buf;
+	}
+	RegCloseKey( k );
+	return s;
+}
+
+// every "path" value in a Steam libraryfolders.vdf
+static void SteamLibraries( const std::string &vdf, std::vector<std::string> &out )
+{
+	FILE *f = fopen( vdf.c_str(), "rb" );
+	if ( !f ) return;
+	std::string txt;
+	char buf[8192];
+	size_t n;
+	while ( ( n = fread( buf, 1, sizeof( buf ), f ) ) > 0 ) txt.append( buf, n );
+	fclose( f );
+
+	for ( size_t p = txt.find( "\"path\"" ); p != std::string::npos; p = txt.find( "\"path\"", p + 6 ) ) {
+		const size_t q = txt.find( '"', p + 6 );
+		if ( q == std::string::npos ) break;
+		const size_t e = txt.find( '"', q + 1 );
+		if ( e == std::string::npos ) break;
+		std::string v;
+		for ( size_t i = q + 1; i < e; i++ ) {
+			if ( txt[i] == '\\' && i + 1 < e ) i++;
+			v += txt[i];
+		}
+		if ( !v.empty() ) out.push_back( v );
+		p = e;
+	}
+}
+
+// the Steam client's libraries first, then the usual install folders
+static std::string FindGame( void )
+{
+	static const char *suffix = "\\steamapps\\common\\Jedi Academy\\GameData\\base";
+
+	std::vector<std::string> libs;
+	const std::string steam = RegString( HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath" );
+	const std::string steam64 = RegString( HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Valve\\Steam", "InstallPath" );
+	if ( !steam.empty() ) libs.push_back( steam );
+	if ( !steam64.empty() ) libs.push_back( steam64 );
+	if ( !steam.empty() ) SteamLibraries( TrimSlashes( BackslashFix( steam ) ) + "\\steamapps\\libraryfolders.vdf", libs );
+	if ( !steam64.empty() ) SteamLibraries( TrimSlashes( BackslashFix( steam64 ) ) + "\\steamapps\\libraryfolders.vdf", libs );
+
+	std::set<std::string> tried;
+	for ( const std::string &lib : libs ) {
+		const std::string base = TrimSlashes( BackslashFix( lib ) ) + suffix;
+		if ( !tried.insert( Lower( base ) ).second ) continue;
+		if ( FileExists( base + "\\assets0.pk3" ) ) return base;
+	}
+
 	static const char *guesses[] = {
 		"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Jedi Academy\\GameData\\base",
 		"C:\\Program Files\\Steam\\steamapps\\common\\Jedi Academy\\GameData\\base",
 		"D:\\SteamLibrary\\steamapps\\common\\Jedi Academy\\GameData\\base",
 		"E:\\SteamLibrary\\steamapps\\common\\Jedi Academy\\GameData\\base",
-		"E:\\steamlibrary\\steamapps\\common\\Jedi Academy\\GameData\\base",
 		"F:\\SteamLibrary\\steamapps\\common\\Jedi Academy\\GameData\\base",
 		"C:\\Program Files (x86)\\LucasArts\\Star Wars Jedi Knight Jedi Academy\\GameData\\base",
 	};
@@ -1001,132 +1177,529 @@ static bool ReadEntry( const std::string &path, std::vector<uint8_t> &buf )
 }
 
 // ---------------------------------------------------------------- pack.delta
-// what the device appended since its pack was built: 'JKTD', u64 hash, u32 size, u32 pad, then the entry bytes
+// 'JKTE' records = u32 magic, u32 nameLen, u32 size, u32 pad, key, entry
+// 'JKTD' records = u32 magic, u64 hash, u32 size, u32 pad, entry
 
-#define TEXCACHE_DELTA_MAGIC		0x44544B4Au		// "JKTD"
-#define TEXCACHE_DELTA_HDR_SIZE		20
+#define TEXCACHE_DELTA_MAGIC		0x45544B4Au		// "JKTE"
+#define TEXCACHE_DELTA_MAGIC_V1		0x44544B4Au		// "JKTD"
+#define TEXCACHE_DELTA_HDR_SIZE		16
+#define TEXCACHE_DELTA_HDR_SIZE_V1	20
 
 struct DeltaRec {
 	uint64_t offset;
 	uint32_t size;
 };
 
-// the newest record of every name, walked from the start and stopped at the first record that is not whole, as the device does
-static FILE *DeltaOpen( const std::string &path, std::map<uint64_t, DeltaRec> &latest, int &records )
+struct DeltaIndex {
+	std::map<std::string, DeltaRec>	named;			// newest 'JKTE' record per key
+	std::map<uint64_t, DeltaRec>	hashed;			// newest 'JKTD' record per hash
+	int								records = 0;
+	size_t Count() const { return named.size() + hashed.size(); }
+};
+
+// the record at pos: its key or hash, entry size and entry position; false when it is not a whole record inside the file
+static bool DeltaParse( FILE *f, uint64_t pos, uint64_t fileSize, std::string &key, uint64_t &hash, uint32_t &size, uint64_t &entryPos )
+{
+	uint8_t b[TEXCACHE_DELTA_HDR_SIZE + MAX_QPATH];
+	if ( pos + TEXCACHE_DELTA_HDR_SIZE > fileSize || _fseeki64( f, (long long)pos, SEEK_SET ) != 0 ) return false;
+	const size_t have = fread( b, 1, sizeof( b ), f );
+	if ( have < TEXCACHE_DELTA_HDR_SIZE ) return false;
+	uint32_t magic, hdrSize, nameLen = 0;
+	memcpy( &magic, b, 4 );
+	key.clear();
+	hash = 0;
+	if ( magic == TEXCACHE_DELTA_MAGIC ) {
+		hdrSize = TEXCACHE_DELTA_HDR_SIZE;
+		memcpy( &nameLen, b + 4, 4 );
+		memcpy( &size, b + 8, 4 );
+		if ( nameLen == 0 || nameLen >= MAX_QPATH || have < hdrSize + nameLen ) return false;
+		key.assign( (const char *)b + hdrSize, nameLen );
+	}
+	else if ( magic == TEXCACHE_DELTA_MAGIC_V1 ) {
+		hdrSize = TEXCACHE_DELTA_HDR_SIZE_V1;
+		if ( have < hdrSize ) return false;
+		memcpy( &hash, b + 4, 8 );
+		memcpy( &size, b + 12, 4 );
+	}
+	else {
+		return false;
+	}
+	entryPos = pos + hdrSize + nameLen;
+	return size >= sizeof( texCacheHdrDxt_t ) + 4 && size <= TEXCACHE_PACK_MAX_ENTRY && entryPos + size <= fileSize;
+}
+
+// the newest record of every key, walked from the start and stopped at the first record that is not whole, as the device does
+static FILE *DeltaOpen( const std::string &path, DeltaIndex &ix )
 {
 	FILE *f = fopen( path.c_str(), "rb" );
 	if ( !f ) return NULL;
 	_fseeki64( f, 0, SEEK_END );
 	const uint64_t fileSize = (uint64_t)_ftelli64( f );
 	uint64_t pos = 0;
-	records = 0;
+	ix = DeltaIndex();
 	for ( ;; ) {
-		uint8_t b[TEXCACHE_DELTA_HDR_SIZE];
-		if ( pos + TEXCACHE_DELTA_HDR_SIZE > fileSize ) break;
-		if ( _fseeki64( f, (long long)pos, SEEK_SET ) != 0 || fread( b, 1, sizeof( b ), f ) != sizeof( b ) ) break;
-		uint32_t magic, size;
-		uint64_t hash;
-		memcpy( &magic, b, 4 );
-		memcpy( &hash, b + 4, 8 );
-		memcpy( &size, b + 12, 4 );
-		if ( magic != TEXCACHE_DELTA_MAGIC || size < sizeof( texCacheHdrDxt_t ) + 4 || size > TEXCACHE_PACK_MAX_ENTRY
-			|| pos + TEXCACHE_DELTA_HDR_SIZE + size > fileSize )
-			break;
-		latest[hash] = { pos + TEXCACHE_DELTA_HDR_SIZE, size };
-		records++;
-		pos += TEXCACHE_DELTA_HDR_SIZE + size;
+		std::string key;
+		uint64_t hash, entryPos;
+		uint32_t size;
+		if ( !DeltaParse( f, pos, fileSize, key, hash, size, entryPos ) ) break;
+		if ( key.empty() ) ix.hashed[hash] = { entryPos, size };
+		else ix.named[key] = { entryPos, size };
+		ix.records++;
+		pos = entryPos + size;
 	}
 	return f;
 }
 
 // ---------------------------------------------------------------- fold
-// pack.delta, then the old pack.bin, then loose entries, into a fresh pack.bin; the delta goes only once that is in place
-static bool FoldPack( const std::string &dir )
+// ordered sources into one fresh pack.bin; the first source that holds a key supplies it
+
+static std::map<uint64_t, std::string> g_hashNames;		// hash -> key, names hash-keyed entries
+
+// the game's key set hashed, so v1 packs, 'JKTD' records and loose files can be named
+static void BuildHashNames( void )
 {
-	const std::string packPath = dir + "\\pack.bin", deltaPath = dir + "\\pack.delta";
+	if ( !g_hashNames.empty() ) return;
+	for ( const auto &kv : g_keys ) g_hashNames[FnvName( kv.first.c_str() )] = kv.first;
+}
 
-	std::map<uint64_t, DeltaRec> latest;
-	int deltaRecords = 0;
-	FILE *delta = DeltaOpen( deltaPath, latest, deltaRecords );
+static bool NameOfHash( uint64_t hash, std::string &key )
+{
+	const auto it = g_hashNames.find( hash );
+	if ( it == g_hashNames.end() ) return false;
+	key = it->second;
+	return true;
+}
 
-	PackReader old;
-	PackOpenRead( old, packPath );
+struct FoldSource {
+	enum Kind { DELTA, PACK, LOOSE };
+	Kind		kind;
+	std::string	path;		// a pack.delta, a pack.bin, or the folder that holds loose entries
+	const char	*label;		// how the summary names this source
+};
 
-	std::set<uint64_t> looseSeen;
-	std::vector<PackSource> loose;
-	for ( int s = 0; s < 256; s++ ) {
-		char sub[16];
-		sprintf( sub, "\\%02x", s );
-		ListEntries( dir + sub, looseSeen, loose );
+struct FoldResult {
+	std::vector<int>	from;				// entries taken from each source
+	int					bad = 0;			// entries no source could supply intact
+	int					unnamed = 0;		// hashed entries no known key matches
+	int					count = 0;
+	uint64_t			bytes = 0;
+	bool				unchanged = false;	// the destination already held everything, nothing written
+	bool				empty = false;		// no source had a single entry
+};
+
+static bool FoldPacks( const std::vector<FoldSource> &src, const std::string &dest, FoldResult &res )
+{
+	const size_t n = src.size();
+	std::vector<FILE *>								deltaF( n, NULL );
+	std::vector<DeltaIndex>							delta( n );
+	std::vector<PackReader>							packs( n );
+	std::vector<std::vector<PackSource>>			loose( n );
+	size_t candidates = 0;
+	res = FoldResult();
+	res.from.assign( n, 0 );
+	BuildHashNames();
+
+	for ( size_t i = 0; i < n; i++ ) {
+		switch ( src[i].kind ) {
+		case FoldSource::DELTA:
+			deltaF[i] = DeltaOpen( src[i].path, delta[i] );
+			if ( deltaF[i] ) printf( "  %-24s %d records, %d textures\n", src[i].label, delta[i].records, (int)delta[i].Count() );
+			candidates += delta[i].Count();
+			break;
+		case FoldSource::PACK:
+			if ( PackOpenRead( packs[i], src[i].path ) )
+				printf( "  %-24s %d entries%s\n", src[i].label, (int)packs[i].Count(), packs[i].version == TEXCACHE_PACK_VERSION_V1 ? " (keyed by hash)" : "" );
+			candidates += packs[i].Count();
+			break;
+		case FoldSource::LOOSE: {
+			std::set<uint64_t> seen;
+			for ( int s = 0; s < 256; s++ ) {
+				char sub[16];
+				sprintf( sub, "\\%02x", s );
+				ListEntries( src[i].path + sub, seen, loose[i] );
+			}
+			ListEntries( src[i].path, seen, loose[i] );		// the flat layout that predates sharding
+			if ( !loose[i].empty() ) printf( "  %-24s %d entries\n", src[i].label, (int)loose[i].size() );
+			candidates += loose[i].size();
+			break;
+		}
+		}
 	}
-	ListEntries( dir, looseSeen, loose );		// the flat layout that predates sharding
 
-	const size_t candidates = latest.size() + old.index.size() + loose.size();
+	auto closeAll = [&]() {
+		for ( size_t i = 0; i < n; i++ ) {
+			if ( deltaF[i] ) fclose( deltaF[i] );
+			deltaF[i] = NULL;
+			PackCloseRead( packs[i] );
+		}
+	};
+
 	if ( !candidates ) {
-		printf( "  no cache entries in %s, no pack written\n", dir.c_str() );
-		if ( delta ) fclose( delta );
+		res.empty = true;
+		closeAll();
 		return false;
 	}
-	if ( delta ) printf( "  pack.delta: %d records, %d names\n", deltaRecords, (int)latest.size() );
-	if ( old.f ) printf( "  pack.bin:   %d entries\n", (int)old.index.size() );
-	if ( !loose.empty() ) printf( "  loose:      %d entries\n", (int)loose.size() );
+
+	// no rewrite when the destination is keyed by name, nothing outranks it and every other key is already in it
+	int destIdx = -1;
+	for ( size_t i = 0; i < n; i++ ) {
+		if ( src[i].kind == FoldSource::PACK && packs[i].f && packs[i].version == TEXCACHE_PACK_VERSION
+			&& Lower( src[i].path ) == Lower( dest ) ) destIdx = (int)i;
+	}
+	if ( destIdx >= 0 ) {
+		bool same = true;
+		std::string key;
+		for ( size_t i = 0; same && i < n; i++ ) {
+			if ( (int)i == destIdx ) continue;
+			const bool above = (int)i < destIdx;
+			for ( const auto &kv : delta[i].named ) if ( above || !PackHas( packs[destIdx], kv.first ) ) { same = false; break; }
+			for ( const auto &kv : delta[i].hashed ) if ( NameOfHash( kv.first, key ) && ( above || !PackHas( packs[destIdx], key ) ) ) { same = false; break; }
+			for ( const texCachePackEntry_t &e : packs[i].index ) if ( above || !PackHas( packs[destIdx], packs[i].Key( e ) ) ) { same = false; break; }
+			for ( const texCachePackEntryV1_t &e : packs[i].hashed ) if ( NameOfHash( e.nameHash, key ) && ( above || !PackHas( packs[destIdx], key ) ) ) { same = false; break; }
+			for ( const PackSource &s : loose[i] ) if ( NameOfHash( s.hash, key ) && ( above || !PackHas( packs[destIdx], key ) ) ) { same = false; break; }
+		}
+		if ( same ) {
+			res.unchanged = true;
+			res.count = (int)packs[destIdx].Count();
+			_fseeki64( packs[destIdx].f, 0, SEEK_END );
+			res.bytes = (uint64_t)_ftelli64( packs[destIdx].f );
+			closeAll();
+			return true;
+		}
+	}
 
 	PackWriter w;
-	if ( !PackBegin( w, packPath, candidates ) ) {
+	if ( !PackBegin( w, dest, candidates ) ) {
 		printf( "  cannot write %s\n", w.tmp.c_str() );
-		if ( delta ) fclose( delta );
-		PackCloseRead( old );
+		closeAll();
 		return false;
 	}
 
-	std::set<uint64_t> seen;
+	std::set<std::string> seen;
+	std::set<uint64_t> unnamed;
 	std::vector<uint8_t> buf;
-	int fromDelta = 0, fromPack = 0, fromLoose = 0, bad = 0, done = 0;
+	std::string key;
+	int done = 0;
 	auto progress = [&]() {
 		if ( ( ++done & 255 ) == 0 ) {
 			printf( "\r  packing %d / %d ", done, (int)candidates );
 			fflush( stdout );
 		}
 	};
+	auto take = [&]( size_t i, const std::string &k, bool ok ) {
+		if ( !ok ) { res.bad++; return; }
+		if ( PackAdd( w, k, buf.data(), buf.size() ) ) { seen.insert( k ); res.from[i]++; }
+	};
+	// a hashed entry is taken when a known key hashes to it and nothing above supplied that key
+	auto wanted = [&]( uint64_t hash ) {
+		if ( !NameOfHash( hash, key ) ) { unnamed.insert( hash ); return false; }
+		return !seen.count( key );
+	};
+	auto readDelta = [&]( FILE *f, const DeltaRec &r ) {
+		buf.resize( r.size );
+		return _fseeki64( f, (long long)r.offset, SEEK_SET ) == 0
+			&& fread( buf.data(), 1, buf.size(), f ) == buf.size() && EntryOk( buf.data(), buf.size() );
+	};
 
-	for ( const auto &kv : latest ) {
-		progress();
-		buf.resize( kv.second.size );
-		if ( _fseeki64( delta, (long long)kv.second.offset, SEEK_SET ) != 0
-			|| fread( buf.data(), 1, buf.size(), delta ) != buf.size() || !EntryOk( buf.data(), buf.size() ) ) {
-			bad++;
-			continue;
+	for ( size_t i = 0; i < n; i++ ) {
+		switch ( src[i].kind ) {
+		case FoldSource::DELTA:
+			for ( const auto &kv : delta[i].named ) {
+				progress();
+				if ( seen.count( kv.first ) ) continue;
+				take( i, kv.first, readDelta( deltaF[i], kv.second ) );
+			}
+			for ( const auto &kv : delta[i].hashed ) {
+				progress();
+				if ( !wanted( kv.first ) ) continue;
+				take( i, key, readDelta( deltaF[i], kv.second ) );
+			}
+			break;
+		case FoldSource::PACK:
+			for ( const texCachePackEntry_t &e : packs[i].index ) {
+				progress();
+				const std::string k = packs[i].Key( e );
+				if ( seen.count( k ) ) continue;
+				take( i, k, PackReadEntry( packs[i], e.offset, e.size, buf ) );
+			}
+			for ( const texCachePackEntryV1_t &e : packs[i].hashed ) {
+				progress();
+				if ( !wanted( e.nameHash ) ) continue;
+				take( i, key, PackReadEntry( packs[i], e.offset, e.size, buf ) );
+			}
+			break;
+		case FoldSource::LOOSE:
+			for ( const PackSource &s : loose[i] ) {
+				progress();
+				if ( !wanted( s.hash ) ) continue;
+				take( i, key, ReadEntry( s.path, buf ) );
+			}
+			break;
 		}
-		if ( PackAdd( w, kv.first, buf.data(), buf.size() ) ) { seen.insert( kv.first ); fromDelta++; }
 	}
-	for ( const texCachePackEntry_t &e : old.index ) {
-		progress();
-		if ( seen.count( e.nameHash ) ) continue;
-		if ( !PackReadEntry( old, e, buf ) ) { bad++; continue; }
-		if ( PackAdd( w, e.nameHash, buf.data(), buf.size() ) ) { seen.insert( e.nameHash ); fromPack++; }
-	}
-	for ( const PackSource &s : loose ) {
-		progress();
-		if ( seen.count( s.hash ) ) continue;
-		if ( !ReadEntry( s.path, buf ) ) { bad++; continue; }
-		if ( PackAdd( w, s.hash, buf.data(), buf.size() ) ) { seen.insert( s.hash ); fromLoose++; }
-	}
-	if ( delta ) fclose( delta );
-	PackCloseRead( old );		// the replace below needs the old file closed
+	closeAll();		// the replace below needs the old file closed
+	res.unnamed = (int)unnamed.size();
 
-	if ( !PackFinish( w ) ) {
-		printf( "\r  pack.bin not written; pack.delta kept                    \n" );
+	if ( !PackFinish( w ) ) return false;
+	res.count = (int)w.index.size();
+	res.bytes = w.pos;
+	return true;
+}
+
+static void FoldSummary( const std::vector<FoldSource> &src, const FoldResult &res )
+{
+	char sz[32];
+	PrintSize( (long long)res.bytes, sz );
+	printf( "\r  pack.bin: %d entries, %s                    \n   ", res.count, sz );
+	bool first = true;
+	for ( size_t i = 0; i < src.size(); i++ ) {
+		if ( !res.from[i] ) continue;
+		printf( "%s %d from %s", first ? "" : ",", res.from[i], src[i].label );
+		first = false;
+	}
+	if ( res.bad ) printf( ", %d unreadable left out", res.bad );
+	if ( res.unnamed ) printf( ", %d stored by hash alone matched no known name and were left out", res.unnamed );
+	printf( "\n" );
+}
+
+// pack.delta, then the old pack.bin, then loose entries, into a fresh pack.bin in dir; the delta goes once that is in place
+static bool FoldDir( const std::string &dir )
+{
+	const std::string packPath = dir + "\\pack.bin", deltaPath = dir + "\\pack.delta";
+	const std::vector<FoldSource> src = {
+		{ FoldSource::DELTA, deltaPath, "pack.delta" },
+		{ FoldSource::PACK,  packPath,  "the old pack.bin" },
+		{ FoldSource::LOOSE, dir,       "loose files" },
+	};
+	FoldResult res;
+	if ( !FoldPacks( src, packPath, res ) ) {
+		if ( res.empty ) printf( "  no cache entries in %s, no pack written\n", dir.c_str() );
+		else printf( "\r  pack.bin not written; pack.delta kept                    \n" );
 		return false;
 	}
-	if ( delta && !DeleteFileA( deltaPath.c_str() ) )
-		printf( "\r  pack.delta could not be deleted; the next --pack folds it again\n" );
+	if ( res.unchanged ) printf( "  pack.bin already holds everything (%d entries), nothing to fold\n", res.count );
+	else FoldSummary( src, res );
+	if ( FileExists( deltaPath ) ) {
+		if ( DeleteFileA( deltaPath.c_str() ) ) printf( "  pack.delta is folded in and removed\n" );
+		else printf( "  pack.delta could not be deleted; the next run folds it again\n" );
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------- card
+// a status line for the card, a verified copy onto it, and the merge that keeps what the device found
+
+// entries a pack.bin header claims, -1 when there is no usable pack
+static int PackCount( const std::string &path )
+{
+	FILE *f = fopen( path.c_str(), "rb" );
+	if ( !f ) return -1;
+	texCachePackHdr_t ph = { 0, 0, 0, 0 };
+	const bool ok = fread( &ph, 1, sizeof( ph ), f ) == sizeof( ph )
+		&& ph.magic == TEXCACHE_PACK_MAGIC && ( ph.version == TEXCACHE_PACK_VERSION || ph.version == TEXCACHE_PACK_VERSION_V1 )
+		&& ph.count <= TEXCACHE_PACK_MAX_COUNT;
+	fclose( f );
+	return ok ? (int)ph.count : -1;
+}
+
+// distinct textures in a pack.delta, -1 when there is none
+static int DeltaCount( const std::string &path )
+{
+	DeltaIndex ix;
+	FILE *f = DeltaOpen( path, ix );
+	if ( !f ) return -1;
+	fclose( f );
+	return (int)ix.Count();
+}
+
+// ---------------------------------------------------------------- list
+// every entry of a pack.bin or pack.delta with what its header says
+
+static void PrintEntryLine( const std::string &key, const uint8_t *hdrBytes, size_t have )
+{
+	texCacheHdrDxt_t h;
+	if ( have < sizeof( h ) ) { printf( "  %-56s (unreadable)\n", key.c_str() ); return; }
+	memcpy( &h, hdrBytes, sizeof( h ) );
+	if ( h.magic != TEXCACHE_MAGIC_DXT ) { printf( "  %-56s (bad header)\n", key.c_str() ); return; }
+	printf( "  %-56s %5ux%-5u %2u mip%s  picmip %u  %s%s\n", key.c_str(), h.width, h.height, h.mipCount, h.mipCount == 1 ? " " : "s",
+			h.picmip, h.format == TEXCACHE_FMT_DXT5 ? "dxt5" : "dxt1",
+			!( h.flags & TEXCACHE_FLAG_VALID ) ? "  (no flags)" : ( h.flags & TEXCACHE_FLAG_MIPMAP ) ? "" : "  nomipmaps" );
+}
+
+static int ListFile( const std::string &path )
+{
+	FILE *f = fopen( path.c_str(), "rb" );
+	if ( !f ) { printf( "  cannot open %s\n\n", path.c_str() ); return 1; }
+	uint32_t magic = 0;
+	fread( &magic, 1, 4, f );
+	uint8_t hdr[sizeof( texCacheHdrDxt_t )];
+	char hashName[32];
+	if ( magic == TEXCACHE_PACK_MAGIC ) {
+		fclose( f );
+		PackReader r;
+		if ( !PackOpenRead( r, path ) ) { printf( "  %s is not a pack.bin this build reads\n\n", path.c_str() ); return 1; }
+		printf( "  %s: pack.bin v%u, %d entries%s\n\n", path.c_str(), r.version, (int)r.Count(),
+				r.version == TEXCACHE_PACK_VERSION_V1 ? ", keyed by hash" : "" );
+		for ( const texCachePackEntry_t &e : r.index ) {
+			const size_t have = _fseeki64( r.f, e.offset, SEEK_SET ) == 0 ? fread( hdr, 1, sizeof( hdr ), r.f ) : 0;
+			PrintEntryLine( r.Key( e ), hdr, have );
+		}
+		for ( const texCachePackEntryV1_t &e : r.hashed ) {
+			sprintf( hashName, "#%016llx", (unsigned long long)e.nameHash );
+			const size_t have = _fseeki64( r.f, e.offset, SEEK_SET ) == 0 ? fread( hdr, 1, sizeof( hdr ), r.f ) : 0;
+			PrintEntryLine( hashName, hdr, have );
+		}
+		PackCloseRead( r );
+		printf( "\n" );
+		return 0;
+	}
+	_fseeki64( f, 0, SEEK_END );
+	const uint64_t fileSize = (uint64_t)_ftelli64( f );
+	printf( "  %s: pack.delta, records in file order\n\n", path.c_str() );
+	uint64_t pos = 0;
+	int records = 0, hashedRecords = 0;
+	for ( ;; ) {
+		std::string key;
+		uint64_t hash, entryPos;
+		uint32_t size;
+		if ( !DeltaParse( f, pos, fileSize, key, hash, size, entryPos ) ) break;
+		if ( key.empty() ) { sprintf( hashName, "#%016llx", (unsigned long long)hash ); key = hashName; hashedRecords++; }
+		const size_t have = _fseeki64( f, (long long)entryPos, SEEK_SET ) == 0 ? fread( hdr, 1, sizeof( hdr ), f ) : 0;
+		PrintEntryLine( key, hdr, have );
+		records++;
+		pos = entryPos + size;
+	}
+	fclose( f );
+	printf( "\n  %d records", records );
+	if ( hashedRecords ) printf( ", %d of them keyed by hash", hashedRecords );
+	if ( pos < fileSize ) printf( ", %llu bytes of torn tail after the last whole record", (unsigned long long)( fileSize - pos ) );
+	printf( "\n\n" );
+	return records ? 0 : 1;
+}
+
+static std::string CardCacheDir( const std::string &card )
+{
+	return TrimSlashes( card ) + "\\data\\JAVITA\\texcache_dxt";
+}
+
+static std::string WinError( DWORD e )
+{
+	switch ( e ) {
+	case ERROR_ACCESS_DENIED:		return "the card is not writable";
+	case ERROR_WRITE_PROTECT:		return "the card is write-protected";
+	case ERROR_DISK_FULL:
+	case ERROR_HANDLE_DISK_FULL:	return "the card is full";
+	case ERROR_NOT_READY:
+	case ERROR_DEVICE_NOT_CONNECTED:
+	case ERROR_PATH_NOT_FOUND:		return "the card went away";
+	}
+	char buf[64];
+	sprintf( buf, "Windows error %lu", (unsigned long)e );
+	return buf;
+}
+
+static bool SameBytes( const std::string &a, const std::string &b )
+{
+	FILE *fa = fopen( a.c_str(), "rb" ), *fb = fopen( b.c_str(), "rb" );
+	bool same = fa && fb;
+	if ( same ) {
+		std::vector<uint8_t> ba( 1 << 20 ), bb( 1 << 20 );
+		for ( ;; ) {
+			const size_t na = fread( ba.data(), 1, ba.size(), fa ), nb = fread( bb.data(), 1, bb.size(), fb );
+			if ( na != nb || memcmp( ba.data(), bb.data(), na ) != 0 ) { same = false; break; }
+			if ( !na ) break;
+		}
+	}
+	if ( fa ) fclose( fa );
+	if ( fb ) fclose( fb );
+	return same;
+}
+
+// copies src beside dst, reads the copy back against src in full, then puts it in place of dst
+static bool CopyVerified( const std::string &src, const std::string &dst, std::string &why )
+{
+	const std::string tmp = dst + ".tmp";
+	if ( !CopyFileA( src.c_str(), tmp.c_str(), FALSE ) ) {
+		why = WinError( GetLastError() );
+		DeleteFileA( tmp.c_str() );
+		return false;
+	}
+	if ( !SameBytes( src, tmp ) ) {
+		why = "the copy on the card does not match the file here";
+		DeleteFileA( tmp.c_str() );
+		return false;
+	}
+	if ( !MoveFileExA( tmp.c_str(), dst.c_str(), MOVEFILE_REPLACE_EXISTING ) ) {
+		why = WinError( GetLastError() ) + " (could not replace pack.bin)";
+		DeleteFileA( tmp.c_str() );
+		return false;
+	}
+	return true;
+}
+
+// what the device found, then this build, then what was already on the card, into localPack; the copy is verified before the card's pack.delta goes
+static bool Deliver( const std::string &card, const std::string &localPack )
+{
+	const std::string dir = CardCacheDir( card );
+	const std::string cardPack = dir + "\\pack.bin", cardDelta = dir + "\\pack.delta";
+
+	if ( !MakeDirs( dir ) ) {
+		printf( "  The Vita card is not writable: cannot create %s\n  Check it is plugged in with write access and run again.\n\n", dir.c_str() );
+		return false;
+	}
+
+	const std::vector<FoldSource> src = {
+		{ FoldSource::DELTA, cardDelta, "the Vita's pack.delta" },
+		{ FoldSource::PACK,  localPack, "this build" },
+		{ FoldSource::PACK,  cardPack,  "the Vita's pack.bin" },
+		{ FoldSource::LOOSE, dir,       "loose files on the Vita" },
+	};
+	printf( "  merging with the Vita:\n" );
+	FoldResult res;
+	if ( !FoldPacks( src, localPack, res ) ) {
+		printf( "  Could not merge the Vita's textures into pack.bin; nothing was copied and nothing on the Vita was touched.\n\n" );
+		return false;
+	}
+	if ( res.unchanged ) printf( "  nothing new on the Vita\n" );
+	else FoldSummary( src, res );
 
 	char sz[32];
-	PrintSize( (long long)w.pos, sz );
-	printf( "\r  pack.bin: %d entries, %s                    \n", (int)w.index.size(), sz );
-	printf( "    %d from pack.delta, %d from the old pack.bin, %d from loose files", fromDelta, fromPack, fromLoose );
-	if ( bad ) printf( ", %d unreadable left out", bad );
-	printf( "\n" );
+	PrintSize( (long long)res.bytes, sz );
+	if ( res.unchanged && PackCount( cardPack ) == res.count && SameBytes( localPack, cardPack ) ) {
+		printf( "  the Vita already has this pack.bin, %d entries, %s\n", res.count, sz );
+	}
+	else {
+		printf( "\n  copying to %s ...\n", cardPack.c_str() );
+		fflush( stdout );
+		std::string why;
+		if ( !CopyVerified( localPack, cardPack, why ) ) {
+			printf( "  Copy failed: %s.\n  The Vita's pack.delta was left in place, nothing was lost. Run again once the card is writable.\n\n", why.c_str() );
+			return false;
+		}
+		printf( "  copied and verified, %d entries, %s\n", res.count, sz );
+	}
+
+	if ( FileExists( cardDelta ) ) {
+		if ( DeleteFileA( cardDelta.c_str() ) ) printf( "  the Vita's pack.delta is folded in and removed\n" );
+		else printf( "  the Vita's pack.delta could not be removed; the game keeps using it until the next run\n" );
+	}
+	printf( "\n  Done. The Vita has the whole cache.\n\n" );
+	return true;
+}
+
+// a whole line from the console with quotes, spaces and the newline trimmed off; false at end of input
+static bool ReadLine( std::string &out )
+{
+	char buf[2048];
+	out.clear();
+	if ( !fgets( buf, sizeof( buf ), stdin ) ) return false;
+	out = buf;
+	if ( out.compare( 0, 3, "\xEF\xBB\xBF" ) == 0 ) out.erase( 0, 3 );		// a piped UTF-8 byte order mark
+	while ( !out.empty() && (unsigned char)out.back() <= ' ' ) out.pop_back();
+	size_t s = 0;
+	while ( s < out.size() && (unsigned char)out[s] <= ' ' ) s++;
+	out = out.substr( s );
+	if ( out.size() >= 2 && out.front() == '"' && out.back() == '"' ) out = out.substr( 1, out.size() - 2 );
 	return true;
 }
 
@@ -1137,16 +1710,22 @@ static void Usage( void )
 		"\n"
 		"  texbake [<folder with the pk3 files>] [options]\n"
 		"  texbake --pack <texcache_dxt folder>\n"
+		"  texbake --list <pack.bin or pack.delta>\n"
 		"\n"
 		"  -o <folder>    where to put texcache_dxt (default: .\\texcache_out)\n"
 		"  --picmip <n>   the r_picmip the Vita runs (default 1; must match the game)\n"
 		"  --fast         quicker, slightly worse blocks (default is the better encoder)\n"
 		"  --force        rebake entries that already exist\n"
 		"  --threads <n>  worker threads (default: one per core)\n"
-		"  --copy <path>  copy pack.bin to this card root when finished, no questions\n"
+		"  --copy <path>  put pack.bin on the card at this root when finished, no questions;\n"
+		"                 what the card's pack.delta holds is merged in first\n"
 		"  --no-copy      never offer to copy\n"
 		"  --pack <dir>   fold pack.delta, the old pack.bin and any loose entries in <dir>\n"
-		"                 into a fresh pack.bin, no baking\n" );
+		"                 into a fresh pack.bin, no baking\n"
+		"  --list <file>  print every entry of a pack.bin or pack.delta: its key, size, mips,\n"
+		"                 picmip and flags\n"
+		"\n"
+		"  With no arguments it finds the game and the card itself and shows a menu.\n" );
 }
 
 // keeps the output honest when a setting that changes the pixels is altered
@@ -1173,59 +1752,17 @@ static bool ManifestMatches( const std::string &dir, bool &hadOne )
 	return !hadOne;
 }
 
-int main( int argc, char **argv )
+static std::string g_exePath;
+
+// indexes the pk3 files, reads the shaders and menus and settles how every reachable image loads; false with no pk3s
+static bool ScanAssets( void )
 {
-	printf( "\n  texbake -- Vita texture cache builder\n\n" );
-
-	for ( int i = 1; i < argc; i++ ) {
-		const std::string a = argv[i];
-		if ( a == "-h" || a == "--help" || a == "/?" ) { Usage(); return 0; }
-		else if ( a == "-o" && i + 1 < argc ) opt.out = argv[++i];
-		else if ( a == "--picmip" && i + 1 < argc ) opt.picmip = atoi( argv[++i] );
-		else if ( a == "--threads" && i + 1 < argc ) opt.threads = atoi( argv[++i] );
-		else if ( a == "--copy" && i + 1 < argc ) opt.copyTo = argv[++i];
-		else if ( a == "--pack" && i + 1 < argc ) opt.pack = argv[++i];
-		else if ( a == "--fast" ) opt.highQuality = 0;
-		else if ( a == "--force" ) opt.force = 1;
-		else if ( a == "--no-copy" ) opt.noCopy = 1;
-		else if ( !a.empty() && a[0] != '-' && opt.assets.empty() ) opt.assets = a;
-		else { printf( "  unknown option: %s\n\n", a.c_str() ); Usage(); return 1; }
-	}
-
-	if ( opt.picmip < 0 || opt.picmip > 16 ) { printf( "  picmip must be 0..16\n" ); return 1; }
-
-	if ( !opt.pack.empty() ) {
-		std::string dir = opt.pack;
-		while ( !dir.empty() && ( dir.back() == '\\' || dir.back() == '/' ) ) dir.pop_back();
-		if ( DirExists( dir + "\\texcache_dxt" ) ) dir += "\\texcache_dxt";
-		printf( "  packing : %s\n\n", dir.c_str() );
-		const bool ok = FoldPack( dir );
-		printf( "\n" );
-		return ok ? 0 : 1;
-	}
-
-	if ( opt.assets.empty() ) opt.assets = AutoDetectAssets();
-	if ( opt.assets.empty() ) {
-		printf( "  I could not find the game's base folder.\n"
-				"  Drag it onto this window, or pass it on the command line:\n"
-				"      texbake \"C:\\...\\Jedi Academy\\GameData\\base\"\n\n" );
-		return 1;
-	}
-	while ( !opt.assets.empty() && ( opt.assets.back() == '\\' || opt.assets.back() == '/' ) )
-		opt.assets.pop_back();
-
-	if ( opt.out.empty() ) opt.out = "texcache_out";
-	const std::string outDir = opt.out + "\\texcache_dxt";
-
+	if ( !g_keys.empty() ) return true;
 	FindPaks( opt.assets, g_pakPaths );
 	if ( g_pakPaths.empty() ) {
-		printf( "  no .pk3 files in: %s\n\n", opt.assets.c_str() );
-		return 1;
+		printf( "  There are no .pk3 files in %s\n  Point me at the folder that holds assets0.pk3.\n\n", opt.assets.c_str() );
+		return false;
 	}
-
-	printf( "  assets : %s\n", opt.assets.c_str() );
-	printf( "  output : %s\n", outDir.c_str() );
-	printf( "  picmip : %d      encoder: %s\n\n", opt.picmip, opt.highQuality ? "best" : "fast" );
 
 	// ---- index every archive, highest sorted name wins a duplicate
 	g_arch.resize( g_pakPaths.size() );
@@ -1279,7 +1816,7 @@ int main( int argc, char **argv )
 		free( buf );
 		menuFiles++;
 	}
-	const int fromSrc = ScanNoMipLiterals( argv[0] );
+	const int fromSrc = ScanNoMipLiterals( g_exePath );
 	printf( "  %d menu files name %d unmipmapped images", menuFiles, (int)g_nomip.size() );
 	if ( fromSrc ) printf( ", %d more from the module sources", fromSrc );
 	printf( "\n" );
@@ -1288,8 +1825,8 @@ int main( int argc, char **argv )
 	int plain = 0, uncompressed = 0, nomip = 0;
 	for ( const auto &kv : g_index ) {
 		if ( !IsImageName( kv.first ) ) continue;
-		const std::string key = StripExt( kv.first );
-		if ( g_shaderNames.count( key ) ) continue;		// a shader owns this name
+		const std::string key = CacheKey( kv.first );
+		if ( key.empty() || g_shaderNames.count( key ) ) continue;		// a shader owns this name
 		if ( g_keys.count( key ) ) continue;
 		if ( g_notc.count( key ) ) { uncompressed++; continue; }
 		Flags f;
@@ -1299,13 +1836,21 @@ int main( int argc, char **argv )
 			f.allowPicmip = false;
 			nomip++;
 		}
-		g_keys.emplace( key, f );
+		g_keys.emplace( key, KeyInfo{ f, kv.first } );
 		plain++;
 	}
 	printf( "  %d more images reached by name alone", plain );
 	if ( nomip ) printf( ", %d of them unmipmapped", nomip );
 	if ( uncompressed ) printf( ", %d left uncompressed by their shader", uncompressed );
 	printf( "\n\n" );
+	return true;
+}
+
+// bakes opt.assets into outDir\pack.bin, carrying over the last run's entries; 0 when the pack is current
+static int RunBake( const std::string &outDir, const std::string &packPath )
+{
+	printf( "  picmip : %d      encoder: %s\n\n", opt.picmip, opt.highQuality ? "best" : "fast" );
+	if ( !ScanAssets() ) return 1;
 
 	// ---- group the keys by the work they need, so each image is encoded once
 	if ( !MakeDirs( outDir ) ) {
@@ -1320,7 +1865,6 @@ int main( int argc, char **argv )
 	}
 
 	// the last run's pack: its entries are carried over rather than encoded again
-	const std::string packPath = outDir + "\\pack.bin";
 	PackReader old;
 	PackOpenRead( old, packPath );
 
@@ -1330,15 +1874,15 @@ int main( int argc, char **argv )
 
 	for ( const auto &kv : g_keys ) {
 		const std::string &key = kv.first;
-		const Flags &f = kv.second;
+		const Flags &f = kv.second.f;
 		if ( !f.allowTC ) continue;
 
 		if ( !opt.force ) {
-			if ( PackHas( old, FnvName( key.c_str() ) ) ) { already++; continue; }
+			if ( PackHas( old, key ) ) { already++; continue; }
 		}
 
 		std::string file;
-		if ( !ResolveImage( key, file ) ) { unresolved++; continue; }
+		if ( !ResolveImage( kv.second.ref, file ) ) { unresolved++; continue; }
 
 		const std::string tag = file + "|" + ( f.mipmap ? "m" : "-" ) + ( f.allowPicmip ? "p" : "-" );
 		auto it = group.find( tag );
@@ -1365,56 +1909,60 @@ int main( int argc, char **argv )
 	if ( unresolved ) printf( ", %d named but missing", unresolved );
 	printf( "\n\n" );
 
-	if ( g_jobs.empty() ) {
-		printf( "  nothing to encode; %s is current.\n\n", packPath.c_str() );
+	if ( g_jobs.empty() && old.version != TEXCACHE_PACK_VERSION_V1 ) {
+		const bool havePack = old.f != NULL;
+		if ( havePack ) printf( "  nothing to encode; pack.bin is current\n\n" );
+		else printf( "  Nothing to encode and no pack.bin from before. Are these the game's pk3 files?\n\n" );
 		for ( size_t i = 0; i < g_arch.size(); i++ ) zr_close( &g_arch[i] );
 		PackCloseRead( old );
-		return 0;
+		return havePack ? 0 : 1;
 	}
+	if ( g_jobs.empty() ) printf( "  nothing to encode; the hash-keyed pack.bin is rewritten with names\n\n" );
 
-	if ( !PackBegin( g_pack, packPath, keyCount + old.index.size() ) ) {
+	if ( !PackBegin( g_pack, packPath, keyCount + old.Count() ) ) {
 		printf( "  cannot write %s\n\n", g_pack.tmp.c_str() );
 		return 1;
 	}
 
-	// ---- encode
-	int nThreads = opt.threads > 0 ? opt.threads : (int)std::thread::hardware_concurrency();
-	if ( nThreads < 1 ) nThreads = 1;
-	if ( nThreads > 32 ) nThreads = 32;
-	printf( "  encoding on %d threads, this takes a few minutes\n\n", nThreads );
-
-	const DWORD t0 = GetTickCount();
-	std::vector<std::thread> pool;
-	for ( int i = 0; i < nThreads; i++ ) pool.emplace_back( Worker );
-
-	const int total = (int)g_jobs.size();
-	for ( ;; ) {
-		const int done = g_done.load();
-		char sz[32];
-		PrintSize( g_bytes.load(), sz );
-		printf( "\r  %6d / %d   %3d%%   %s written   ", done, total,
-				total ? ( done * 100 / total ) : 100, sz );
-		fflush( stdout );
-		if ( done >= total ) break;
-		Sleep( 200 );
-	}
-	for ( std::thread &t : pool ) t.join();
-
 	char sz[32];
-	PrintSize( g_bytes.load(), sz );
-	printf( "\r  %6d / %d   100%%   %s written   \n\n", total, total, sz );
+	if ( !g_jobs.empty() ) {
+		// ---- encode
+		int nThreads = opt.threads > 0 ? opt.threads : (int)std::thread::hardware_concurrency();
+		if ( nThreads < 1 ) nThreads = 1;
+		if ( nThreads > 32 ) nThreads = 32;
+		printf( "  encoding on %d threads, this takes a few minutes\n\n", nThreads );
 
-	const DWORD secs = ( GetTickCount() - t0 ) / 1000;
-	printf( "  done in %u:%02u   %d entries written", secs / 60, secs % 60, g_written.load() );
-	if ( g_skipped.load() ) printf( ", %d skipped (not power of two)", g_skipped.load() );
-	if ( g_failed.load() ) printf( ", %d failed", g_failed.load() );
-	printf( "\n" );
+		const DWORD t0 = GetTickCount();
+		std::vector<std::thread> pool;
+		for ( int i = 0; i < nThreads; i++ ) pool.emplace_back( Worker );
 
-	if ( !g_problems.empty() ) {
-		printf( "\n  problems:\n" );
-		for ( const std::string &p : g_problems ) printf( "    %s\n", p.c_str() );
-		if ( g_failed.load() > (int)g_problems.size() )
-			printf( "    ...and %d more\n", g_failed.load() - (int)g_problems.size() );
+		const int total = (int)g_jobs.size();
+		for ( ;; ) {
+			const int done = g_done.load();
+			PrintSize( g_bytes.load(), sz );
+			printf( "\r  %6d / %d   %3d%%   %s written   ", done, total,
+					total ? ( done * 100 / total ) : 100, sz );
+			fflush( stdout );
+			if ( done >= total ) break;
+			Sleep( 200 );
+		}
+		for ( std::thread &t : pool ) t.join();
+
+		PrintSize( g_bytes.load(), sz );
+		printf( "\r  %6d / %d   100%%   %s written   \n\n", total, total, sz );
+
+		const DWORD secs = ( GetTickCount() - t0 ) / 1000;
+		printf( "  done in %u:%02u   %d entries written", secs / 60, secs % 60, g_written.load() );
+		if ( g_skipped.load() ) printf( ", %d skipped (not power of two)", g_skipped.load() );
+		if ( g_failed.load() ) printf( ", %d failed", g_failed.load() );
+		printf( "\n" );
+
+		if ( !g_problems.empty() ) {
+			printf( "\n  problems:\n" );
+			for ( const std::string &p : g_problems ) printf( "    %s\n", p.c_str() );
+			if ( g_failed.load() > (int)g_problems.size() )
+				printf( "    ...and %d more\n", g_failed.load() - (int)g_problems.size() );
+		}
 	}
 
 	for ( size_t i = 0; i < g_arch.size(); i++ ) zr_close( &g_arch[i] );
@@ -1422,12 +1970,23 @@ int main( int argc, char **argv )
 	// ---- what the last run baked and this one did not touch stays in the pack
 	int carried = 0;
 	{
-		std::set<uint64_t> fresh;
-		for ( const texCachePackEntry_t &e : g_pack.index ) fresh.insert( e.nameHash );
+		std::set<std::string> fresh;
+		for ( const PackItem &e : g_pack.index ) fresh.insert( e.key );
 		std::vector<uint8_t> buf;
-		for ( const texCachePackEntry_t &e : old.index ) {
-			if ( fresh.count( e.nameHash ) ) continue;
-			if ( PackReadEntry( old, e, buf ) && PackAdd( g_pack, e.nameHash, buf.data(), buf.size() ) ) carried++;
+		if ( old.version == TEXCACHE_PACK_VERSION ) {
+			for ( const texCachePackEntry_t &e : old.index ) {
+				const std::string key = old.Key( e );
+				if ( fresh.count( key ) ) continue;
+				if ( PackReadEntry( old, e.offset, e.size, buf ) && PackAdd( g_pack, key, buf.data(), buf.size() ) ) carried++;
+			}
+		}
+		else {
+			// a hash-keyed pack supplies an entry under the key that hashes to it
+			for ( const auto &kv : g_keys ) {
+				if ( !kv.second.f.allowTC || fresh.count( kv.first ) ) continue;
+				const texCachePackEntryV1_t *e = PackFindHash( old, FnvName( kv.first.c_str() ) );
+				if ( e && PackReadEntry( old, e->offset, e->size, buf ) && PackAdd( g_pack, kv.first, buf.data(), buf.size() ) ) carried++;
+			}
 		}
 	}
 	PackCloseRead( old );		// the replace below needs the old file closed
@@ -1439,41 +1998,172 @@ int main( int argc, char **argv )
 	PrintSize( (long long)g_pack.pos, sz );
 	printf( "\n  pack.bin: %d entries, %s", (int)g_pack.index.size(), sz );
 	if ( carried ) printf( " (%d carried over from the last run)", carried );
-	printf( "\n" );
+	printf( "\n\n" );
+	return 0;
+}
 
-	// ---- put it on the card
-	printf( "\n  Copy this file to your Vita:\n"
+// ---------------------------------------------------------------- front end
+
+static void PrintStatus( const std::string &game, const std::string &card, const std::string &localPack )
+{
+	printf( "  Game : %s\n", game.empty() ? "not found" : game.c_str() );
+	if ( card.empty() ) {
+		printf( "  Vita : not plugged in\n" );
+	}
+	else {
+		const std::string dir = CardCacheDir( card );
+		const int packN = PackCount( dir + "\\pack.bin" ), deltaN = DeltaCount( dir + "\\pack.delta" );
+		printf( "  Vita : %s  -", card.c_str() );
+		if ( packN < 0 && deltaN < 0 ) printf( " no texture cache yet" );
+		if ( packN >= 0 ) printf( " pack.bin %d entries", packN );
+		if ( packN >= 0 && deltaN >= 0 ) printf( "," );
+		if ( deltaN >= 0 ) printf( " pack.delta %d new textures", deltaN );
+		printf( "\n" );
+	}
+	const int localN = PackCount( localPack );
+	if ( localN < 0 ) printf( "  Local: none yet\n" );
+	else printf( "  Local: %s - %d entries\n", localPack.c_str(), localN );
+	printf( "\n" );
+}
+
+// '1' build and copy, '2' build only, '3' fold on the card, 'q' quit; Enter takes the default
+static char Menu( bool haveCard )
+{
+	printf( "    1  Build the cache and put it on the Vita%s\n", haveCard ? "" : "   (needs the Vita plugged in)" );
+	printf( "    2  Just build - I'll copy pack.bin myself\n" );
+	if ( haveCard ) printf( "    3  Fold the Vita's new textures into its pack.bin (no baking)\n" );
+	printf( "    q  Quit\n\n" );
+	const char def = haveCard ? '1' : '2';
+	for ( ;; ) {
+		printf( "  choice [%c]: ", def );
+		fflush( stdout );
+		std::string line;
+		if ( !ReadLine( line ) || line.empty() ) { printf( "%c\n", def ); return def; }
+		const char c = (char)tolower( (unsigned char)line[0] );
+		if ( c == 'q' || c == '2' || ( ( c == '1' || c == '3' ) && haveCard ) ) return c;
+		if ( c == '1' ) printf( "  No Vita is plugged in. Plug it in and run again, or pick 2.\n" );
+		else printf( "  Type 1, 2%s or q.\n", haveCard ? ", 3" : "" );
+	}
+}
+
+int main( int argc, char **argv )
+{
+	printf( "\n  texbake -- Vita texture cache builder\n\n" );
+	g_exePath = argv[0];
+
+	bool interactive = true;
+	for ( int i = 1; i < argc; i++ ) {
+		const std::string a = argv[i];
+		if ( a == "--card" && i + 1 < argc ) { opt.card = argv[++i]; continue; }
+		interactive = false;
+		if ( a == "-h" || a == "--help" || a == "/?" ) { Usage(); return 0; }
+		else if ( a == "-o" && i + 1 < argc ) opt.out = argv[++i];
+		else if ( a == "--picmip" && i + 1 < argc ) opt.picmip = atoi( argv[++i] );
+		else if ( a == "--threads" && i + 1 < argc ) opt.threads = atoi( argv[++i] );
+		else if ( a == "--copy" && i + 1 < argc ) opt.copyTo = argv[++i];
+		else if ( a == "--pack" && i + 1 < argc ) opt.pack = argv[++i];
+		else if ( a == "--list" && i + 1 < argc ) opt.list = argv[++i];
+		else if ( a == "--fast" ) opt.highQuality = 0;
+		else if ( a == "--force" ) opt.force = 1;
+		else if ( a == "--no-copy" ) opt.noCopy = 1;
+		else if ( !a.empty() && a[0] != '-' && opt.assets.empty() ) opt.assets = a;
+		else { printf( "  unknown option: %s\n\n", a.c_str() ); Usage(); return 1; }
+	}
+
+	if ( opt.picmip < 0 || opt.picmip > 16 ) { printf( "  picmip must be 0..16\n" ); return 1; }
+
+	if ( !opt.list.empty() ) return ListFile( opt.list );
+
+	if ( !opt.pack.empty() ) {
+		std::string dir = TrimSlashes( opt.pack );
+		if ( DirExists( dir + "\\texcache_dxt" ) ) dir += "\\texcache_dxt";
+		printf( "  packing : %s\n", dir.c_str() );
+		// hash-keyed entries fold in under the game's names
+		if ( opt.assets.empty() ) opt.assets = FindGame();
+		opt.assets = TrimSlashes( opt.assets );
+		if ( opt.assets.empty() ) {
+			printf( "  no game found, so entries stored by hash alone cannot be named and are left out\n\n" );
+		}
+		else {
+			printf( "  naming  : %s\n\n", opt.assets.c_str() );
+			ScanAssets();
+		}
+		const bool ok = FoldDir( dir );
+		printf( "\n" );
+		return ok ? 0 : 1;
+	}
+
+	// ---- what we have to work with
+	std::string card;
+	if ( !opt.copyTo.empty() ) {
+		card = TrimSlashes( opt.copyTo );
+		if ( !DirExists( card + "\\" ) ) { printf( "  There is no drive or folder at %s. Is the Vita plugged in?\n\n", card.c_str() ); return 1; }
+	}
+	else if ( !opt.card.empty() ) {
+		card = TrimSlashes( opt.card );
+		if ( !DirExists( card + "\\" ) ) card.clear();
+	}
+	else {
+		card = DetectCard();
+	}
+
+	if ( opt.assets.empty() ) opt.assets = FindGame();
+	opt.assets = TrimSlashes( opt.assets );
+
+	if ( opt.out.empty() ) opt.out = "texcache_out";
+	const std::string outDir = opt.out + "\\texcache_dxt";
+	const std::string packPath = outDir + "\\pack.bin";
+
+	PrintStatus( opt.assets, card, packPath );
+
+	if ( opt.assets.empty() ) {
+		printf( "  I could not find Jedi Academy on this PC.\n" );
+		if ( !interactive ) {
+			printf( "  Drag the folder that holds assets0.pk3 onto TEXBAKE.bat and it will be used.\n\n" );
+			return 1;
+		}
+		printf( "  Drag the folder that holds assets0.pk3 onto this window, then press Enter.\n\n  folder: " );
+		fflush( stdout );
+		std::string line;
+		if ( !ReadLine( line ) || line.empty() ) { printf( "\n  Nothing entered, so nothing to do.\n\n" ); return 1; }
+		opt.assets = TrimSlashes( line );
+		printf( "\n  Game : %s\n\n", opt.assets.c_str() );
+	}
+
+	// ---- what to do: '1' build and deliver, '2' build only, '3' fold on the card, 'a' ask after the build
+	char choice;
+	if ( interactive ) choice = Menu( !card.empty() );
+	else if ( !opt.copyTo.empty() ) choice = '1';
+	else if ( opt.noCopy || card.empty() ) choice = '2';
+	else choice = 'a';
+	if ( interactive ) printf( "\n" );
+
+	if ( choice == 'q' ) return 0;
+	if ( choice == '3' ) {
+		const std::string dir = CardCacheDir( card );
+		printf( "  folding : %s\n\n", dir.c_str() );
+		ScanAssets();
+		const bool ok = FoldDir( dir );
+		printf( "\n" );
+		return ok ? 0 : 1;
+	}
+
+	const int rc = RunBake( outDir, packPath );
+	if ( rc ) return rc;
+
+	if ( choice == 'a' ) {
+		printf( "  A Vita card looks like it is on %s\n  Put pack.bin on it now? [y/N] ", card.c_str() );
+		fflush( stdout );
+		std::string line;
+		choice = ( ReadLine( line ) && !line.empty() && tolower( (unsigned char)line[0] ) == 'y' ) ? '1' : '2';
+		printf( "\n" );
+	}
+
+	if ( choice == '1' ) return Deliver( card, packPath ) ? 0 : 1;
+
+	printf( "  Copy this file to your Vita:\n"
 			"      %s\n"
 			"  goes to\n"
 			"      ux0:data/JAVITA/texcache_dxt/pack.bin\n\n", packPath.c_str() );
-
-	std::string card = opt.copyTo;
-	if ( card.empty() && !opt.noCopy ) {
-		card = DetectCard();
-		if ( !card.empty() ) {
-			printf( "  A Vita card looks like it is on %s\n"
-					"  Copy it there now? [y/N] ", card.c_str() );
-			fflush( stdout );
-			const int c = getchar();
-			if ( c != 'y' && c != 'Y' ) card.clear();
-		}
-	}
-
-	if ( !card.empty() ) {
-		while ( !card.empty() && ( card.back() == '\\' || card.back() == '/' ) ) card.pop_back();
-		const std::string dest = card + "\\data\\JAVITA\\texcache_dxt";
-		if ( !MakeDirs( dest ) ) {
-			printf( "\n  cannot create %s\n", dest.c_str() );
-			return 1;
-		}
-		printf( "\n  copying to %s ...\n", dest.c_str() );
-		if ( !CopyFileA( packPath.c_str(), ( dest + "\\pack.bin" ).c_str(), FALSE ) ) {
-			printf( "  pack.bin copy failed\n\n" );
-			return 1;
-		}
-		printf( "  copied pack.bin\n" );
-	}
-
-	printf( "\n" );
 	return 0;
 }

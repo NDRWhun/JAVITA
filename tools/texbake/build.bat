@@ -24,7 +24,7 @@ if not exist "%HERE%obj" mkdir "%HERE%obj"
 cl /nologo /O2 /EHsc /MT /std:c++17 /W3 /wd4996 ^
    "%HERE%texbake.cpp" "%HERE%..\..\src\code\rd-common\tr_dxt.cpp" ^
    /Fe:"%HERE%texbake.exe" /Fo:"%HERE%obj\\" ^
-   /link ole32.lib windowscodecs.lib
+   /link ole32.lib windowscodecs.lib advapi32.lib
 if errorlevel 1 goto failed
 
 echo.
