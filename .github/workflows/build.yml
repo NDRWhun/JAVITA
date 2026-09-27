@@ -38,8 +38,8 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -nE 'error:|FAILED:|undefined reference|No such file|CMake Error|ninja: build stopped' build/ci.log | head -40 | sed 's/^/::error::/'
-          tail -60 build/ci.log | sed 's/^/::notice::/'
+          grep -nE 'error:|FAILED:|undefined reference|No such file|CMake Error|ninja: build stopped' build/ci.log | head -8 | sed 's/^/::error::/'
+          grep -n -A12 'FAILED:' build/ci.log | grep -vE 'ld: warning|32-bit enums' | head -40 | sed 's/^/::error::/'
           true
 
       - uses: actions/upload-artifact@v4
