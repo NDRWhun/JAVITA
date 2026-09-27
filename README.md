@@ -64,6 +64,9 @@ You need your own legally-owned copy of Jedi Academy (eg.: from Steam)
 
 The first time you visit a level it loads slower, because each texture is compressed once and cached
 to `ux0:data/JAVITA/texcache_dxt`. Later loads of that level read the cache instead and are quicker.
+You can skip that first pass by building the cache on a PC with [`tools/texbake`](tools/texbake) and
+copying the folder across. It also writes a `pack.bin`, which the game opens once per session instead
+of one file per texture; loose entries are still read when something is missing from it.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -168,7 +171,7 @@ default of `125` sits above that ceiling.
 | `r_shadowExtrude` | `96` | How far a shadow volume reaches past the ground plane — raise it to catch nearby walls |
 | `r_texCacheCompressed` | `1` | Cache textures as DXT (less VRAM; `0` = uncompressed) *(latched)* |
 | `r_dropTexturesOnLoad` | `1` | Free the old map's textures at map change (lower transition memory peak); `0` = keep until the new map's first frame |
-| `s_khz` | `22` | Mixer rate — 22 matches the source assets *(latched)* |
+| `s_khz` | `22` | Mixer rate — the MP3 assets are decoded straight to it *(latched)* |
 | `vita_rearTouch` | `1` | Rear-touch panel controls — `0` disables them |
 
 The stencil and projected modes are not finished: `2` casts onto the ground plane, reaches walls only as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry.
@@ -197,7 +200,7 @@ bash tools/build.sh        # vdpm deps + SDL + port -> build/JAVITA.vpk
 `bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. If the clone
 was made without `--recursive`, the script runs `git submodule update --init` itself.
 
-The renderer backend lives in [`src/code/rd-gxm/`](src/code/rd-gxm). Its shaders are Cg sources under
+The renderer backend lives in [`src/rd-gxm/`](src/rd-gxm). Its shaders are Cg sources under
 `shaders/`, compiled ahead of time into `gxm_shaders.h` — change a `.cg` and you need to re-run
 `build_shaders.py`, which needs Sony's shader compiler, so the generated header is committed.
 
@@ -239,7 +242,7 @@ their owners; you must own a legal copy to play.
 [platform-shield]: https://img.shields.io/badge/platform-PS%20Vita-4b6cb7?style=flat-square
 [platform-url]: https://vitasdk.org
 [renderer-shield]: https://img.shields.io/badge/renderer-native%20sceGxm-8a4fff?style=flat-square
-[renderer-url]: src/code/rd-gxm
+[renderer-url]: src/rd-gxm
 [engine-shield]: https://img.shields.io/badge/engine-OpenJK-555?style=flat-square
 [engine-url]: https://github.com/JACoders/OpenJK
 [license-shield]: https://img.shields.io/badge/license-GPLv2-blue?style=flat-square
