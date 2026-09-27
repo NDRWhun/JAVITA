@@ -13,8 +13,9 @@ the wait entirely.
 2. Press Enter to let it find the game, or drag the folder that holds `assets0.pk3`
    into the window first.
 3. Wait. It prints a progress line and finishes in a few minutes.
-4. Copy the `texcache_dxt` folder it made into `ux0:data/JAVITA/` on the Vita.
-   If the card is plugged in, the tool offers to copy for you.
+4. Copy `texcache_out/texcache_dxt/pack.bin` to `ux0:data/JAVITA/texcache_dxt/` on the Vita.
+   That one file is the whole cache. If the card is plugged in, the tool offers to copy for you —
+   it sends the loose entries as well, which is roughly twice the data for no gain.
 
 The first build needs Visual Studio with "Desktop development with C++". After
 that, `texbake.exe` sits next to the batch file and runs on its own.
@@ -46,7 +47,8 @@ Changing the setting re-bakes everything, so the tool notices and does it for yo
 
 Every run ends by writing `pack.bin` next to the entries: the same files, packed
 behind one index, so the game opens one file per session instead of one per
-texture. The loose files stay and are still read when an entry is not in the
+texture. It holds every entry the run produced, so it is the only file you need
+to copy. The loose files stay and are still read when an entry is not in the
 pack, so a cache without a `pack.bin` keeps working as before.
 
 To pack a cache you already have on the card, without baking anything:
