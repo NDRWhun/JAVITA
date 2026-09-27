@@ -92,23 +92,28 @@ long generateHashValue( const char *fname ) {
 	return hash;
 }
 
+// Lowercases name into out with '/' separators, cut at the first '.', bounded to outSize; re-entrant.
+static void R_ImageMappingName( const char *name, char *out, int outSize )
+{
+	int		i=0;
+	char	letter;
+
+	while (name[i] != '\0' && i<outSize-1)
+	{
+		letter = tolower((unsigned char)name[i]);
+		if (letter =='.') break;				// don't include extension
+		if (letter =='\\') letter = '/';		// damn path names
+		out[i++] = letter;
+	}
+	out[i]=0;
+}
+
 // makeup a nice clean, consistant name to query for and file under, for map<> usage...
 //
 char *GenerateImageMappingName( const char *name )
 {
 	static char sName[MAX_QPATH];
-	int		i=0;
-	char	letter;
-
-	while (name[i] != '\0' && i<MAX_QPATH-1)
-	{
-		letter = tolower(name[i]);
-		if (letter =='.') break;				// don't include extension
-		if (letter =='\\') letter = '/';		// damn path names
-		sName[i++] = letter;
-	}
-	sName[i]=0;
-
+	R_ImageMappingName( name, sName, sizeof( sName ) );
 	return &sName[0];
 }
 
@@ -1361,11 +1366,18 @@ Returns NULL if it fails, not a default image.
 #include <psp2/io/stat.h>
 
 // DXT mip-chain cache (see the block above Upload32)
+// FNV-1a 64 of a key: how the v1 pack index, 'JKTD' delta records and loose files are looked up.
 static unsigned long long R_TexCacheDxt_Hash( const char *name )
 {
-	unsigned long long h = 14695981039346656037ULL;	// FNV-1a 64-bit of the asset name
+	unsigned long long h = 14695981039346656037ULL;
 	for ( const char *p = name; *p; ++p ) { h ^= (unsigned char)*p; h *= 1099511628211ULL; }
 	return h;
+}
+
+// The cache key: the name as GenerateImageMappingName files it, lowercase, '/' separators, no extension.
+static void R_TexCacheDxt_Key( const char *name, char out[MAX_QPATH] )
+{
+	R_ImageMappingName( name, out, MAX_QPATH );
 }
 
 // sharded on the top hash byte: an exFAT lookup scans the directory, and one flat
@@ -1389,29 +1401,44 @@ static void R_TexCacheDxt_PathFlat( const char *name, char *out, int outSize )
 
 // pack.bin: the loose entries byte-for-byte behind one index, so a hit is one read on one fd
 #define TEXCACHE_PACK_MAGIC		0x50544B4Au	// "JKTP"
-#define TEXCACHE_PACK_VERSION	1u
+#define TEXCACHE_PACK_VERSION	2u			// 2 = index keyed by name, 1 = index keyed by name hash; both are read
+#define TEXCACHE_PACK_VERSION_V1 1u
 #define TEXCACHE_PACK_MAX_COUNT	( 1u << 20 )
 #define TEXCACHE_PACK_MAX_ENTRY	( 32u * 1024 * 1024 + 65536 )	// caps the alloc a corrupt index could ask for
 typedef struct {
-	unsigned int magic, version, count, pad;
+	unsigned int magic, version, count, namesSize;	// namesSize is a zero pad in v1
 } texCachePackHdr_t;
-typedef struct {					// index sorted ascending by nameHash
-	unsigned long long nameHash;	// R_TexCacheDxt_Hash of the asset name
+typedef struct {					// v2 index entry, sorted ascending by key bytes
+	unsigned int nameOffset;		// key start inside the name table that follows the index
+	unsigned int nameLen;			// key bytes, no terminator
 	unsigned int offset;			// entry start from the file start
 	unsigned int size;				// header + mip sizes + payload
 } texCachePackEntry_t;
-static SceUID				s_texPackFd = -1;
+typedef struct {					// v1 index entry, sorted ascending by nameHash
+	unsigned long long nameHash;	// R_TexCacheDxt_Hash of the key
+	unsigned int offset;
+	unsigned int size;
+} texCachePackEntryV1_t;
+typedef struct {					// an opened pack or delta: named entries, hashed entries, or both
+	SceUID					fd;
+	texCachePackEntry_t		*entries;		// sorted by key
+	unsigned				count;
+	char					*names;			// the key bytes the entries point into
+	unsigned				namesSize;
+	texCachePackEntryV1_t	*hashed;		// sorted by nameHash
+	unsigned				hashedCount;
+} texCacheIndex_t;
+static texCacheIndex_t		s_texPack = { -1 };
 static qboolean				s_texPackTried;		// one open attempt per renderer lifetime
-static texCachePackEntry_t	*s_texPackIndex;
-static unsigned				s_texPackCount;
 
 // pack.delta: what the device bakes, appended as self-describing records with no index
-#define TEXCACHE_DELTA_MAGIC		0x44544B4Au	// "JKTD"
-#define TEXCACHE_DELTA_HDR_SIZE		20u			// u32 magic, u64 nameHash, u32 size, u32 pad, no alignment padding
+#define TEXCACHE_DELTA_MAGIC		0x45544B4Au	// "JKTE": u32 magic, u32 nameLen, u32 size, u32 pad, key bytes, entry
+#define TEXCACHE_DELTA_MAGIC_V1		0x44544B4Au	// "JKTD": u32 magic, u64 nameHash, u32 size, u32 pad, entry
+#define TEXCACHE_DELTA_HDR_SIZE		16u
+#define TEXCACHE_DELTA_HDR_SIZE_V1	20u
+#define TEXCACHE_DELTA_PEEK			( TEXCACHE_DELTA_HDR_SIZE + MAX_QPATH )	// one read covers either header and a key
 #define TEXCACHE_DELTA_MAX_COUNT	( 1u << 20 )
-static SceUID				s_texDeltaRdFd = -1;
-static texCachePackEntry_t	*s_texDeltaIndex;		// newest record per nameHash, sorted ascending
-static unsigned				s_texDeltaCount;
+static texCacheIndex_t		s_texDelta = { -1 };	// newest record per key
 static SceUID				s_texDeltaWrFd = -1;
 static qboolean				s_texDeltaWrTried;		// one append-side open per renderer lifetime
 static SceOff				s_texDeltaWrEnd;		// file length after the last whole record
@@ -1425,73 +1452,175 @@ static void R_TexCacheDxt_DeltaPath( char *out, int outSize )
 	Com_sprintf( out, outSize, "%s/texcache_dxt/pack.delta", ri.Cvar_VariableString( "fs_homepath" ) );
 }
 
-// Decodes one record header at pos; false when it is not a whole record inside the file.
-static qboolean R_TexCacheDxt_DeltaHdrParse( const byte *b, SceOff pos, SceOff fileSize,
-											 unsigned long long *hash, unsigned *size )
+// memcmp order on the key bytes, the shorter key first on a shared prefix.
+static int R_TexCacheDxt_KeyCmp( const char *a, unsigned alen, const char *b, unsigned blen )
 {
-	unsigned magic;
-	memcpy( &magic, b, 4 );
-	memcpy( hash, b + 4, 8 );
-	memcpy( size, b + 12, 4 );
-	return (qboolean)( magic == TEXCACHE_DELTA_MAGIC
-		&& *size >= sizeof(texCacheHdrDxt_t) + sizeof(unsigned) && *size <= TEXCACHE_PACK_MAX_ENTRY
-		&& pos + TEXCACHE_DELTA_HDR_SIZE + *size <= fileSize );
+	const int c = memcmp( a, b, alen < blen ? alen : blen );
+	if ( c ) return c;
+	return alen < blen ? -1 : ( alen > blen ? 1 : 0 );
 }
 
-static void R_TexCacheDxt_DeltaHdrBuild( byte *b, unsigned long long hash, unsigned size )
+typedef struct {					// one delta record header as read from the file
+	unsigned			hdrSize;	// bytes before the key (v2) or the entry (v1)
+	unsigned			nameLen;	// 0 for a v1 record
+	const char			*name;		// the key inside the caller's buffer, v2 only
+	unsigned long long	hash;		// v1 only
+	unsigned			size;		// entry bytes
+} texCacheDeltaRec_t;
+
+// Decodes the record at pos from its first have bytes; false when it is not a whole record inside the file.
+static qboolean R_TexCacheDxt_DeltaHdrParse( const byte *b, unsigned have, SceOff pos, SceOff fileSize, texCacheDeltaRec_t *rec )
+{
+	unsigned magic;
+	if ( have < TEXCACHE_DELTA_HDR_SIZE ) return qfalse;
+	memcpy( &magic, b, 4 );
+	rec->nameLen = 0;
+	rec->name = NULL;
+	rec->hash = 0;
+	if ( magic == TEXCACHE_DELTA_MAGIC )
+	{
+		rec->hdrSize = TEXCACHE_DELTA_HDR_SIZE;
+		memcpy( &rec->nameLen, b + 4, 4 );
+		memcpy( &rec->size, b + 8, 4 );
+		if ( rec->nameLen == 0 || rec->nameLen >= MAX_QPATH || have < rec->hdrSize + rec->nameLen ) return qfalse;
+		rec->name = (const char *)b + rec->hdrSize;
+	}
+	else if ( magic == TEXCACHE_DELTA_MAGIC_V1 )
+	{
+		rec->hdrSize = TEXCACHE_DELTA_HDR_SIZE_V1;
+		if ( have < rec->hdrSize ) return qfalse;
+		memcpy( &rec->hash, b + 4, 8 );
+		memcpy( &rec->size, b + 12, 4 );
+	}
+	else
+	{
+		return qfalse;
+	}
+	return (qboolean)( rec->size >= sizeof(texCacheHdrDxt_t) + sizeof(unsigned) && rec->size <= TEXCACHE_PACK_MAX_ENTRY
+		&& pos + rec->hdrSize + rec->nameLen + rec->size <= fileSize );
+}
+
+// Writes a 'JKTE' record header and its key into b; returns the bytes written.
+static unsigned R_TexCacheDxt_DeltaHdrBuild( byte *b, const char *key, unsigned keyLen, unsigned size )
 {
 	const unsigned magic = TEXCACHE_DELTA_MAGIC, pad = 0;
 	memcpy( b, &magic, 4 );
-	memcpy( b + 4, &hash, 8 );
-	memcpy( b + 12, &size, 4 );
-	memcpy( b + 16, &pad, 4 );
+	memcpy( b + 4, &keyLen, 4 );
+	memcpy( b + 8, &size, 4 );
+	memcpy( b + 12, &pad, 4 );
+	memcpy( b + 16, key, keyLen );
+	return TEXCACHE_DELTA_HDR_SIZE + keyLen;
 }
 
-// Walks the records from the file start and returns the length of the whole-record prefix.
-static SceOff R_TexCacheDxt_DeltaScan( SceUID fd, SceOff fileSize, texCachePackEntry_t **idx, unsigned *count )
+// Grows list to at least need items of elem bytes, doubling from first up to maxCap; false leaves list untouched.
+static qboolean R_TexCacheDxt_Grow( void **list, unsigned *cap, unsigned need, unsigned elem, unsigned first, unsigned maxCap )
 {
-	texCachePackEntry_t *list = NULL;
-	unsigned n = 0, cap = 0;
-	qboolean indexing = (qboolean)( idx != NULL );
+	unsigned c = *cap;
+	while ( c < need ) c = c ? c * 2 : first;
+	if ( c == *cap ) return qtrue;
+	if ( c > maxCap ) return qfalse;
+	void *grown = realloc( *list, (size_t)c * elem );
+	if ( !grown ) return qfalse;
+	*list = grown;
+	*cap = c;
+	return qtrue;
+}
+
+// Walks the records from the file start and returns the length of the whole-record prefix; fills ix when given.
+static SceOff R_TexCacheDxt_DeltaScan( SceUID fd, SceOff fileSize, texCacheIndex_t *ix )
+{
+	texCachePackEntry_t *named = NULL;
+	texCachePackEntryV1_t *hashed = NULL;
+	char *names = NULL;
+	unsigned n = 0, nCap = 0, h = 0, hCap = 0, namesLen = 0, namesCap = 0;
+	qboolean indexing = (qboolean)( ix != NULL );
 	SceOff pos = 0;
 	for ( ;; )
 	{
-		byte b[TEXCACHE_DELTA_HDR_SIZE];
-		unsigned long long hash;
-		unsigned size;
-		if ( pos + TEXCACHE_DELTA_HDR_SIZE > fileSize
-			|| sceIoPread( fd, b, TEXCACHE_DELTA_HDR_SIZE, pos ) != (int)TEXCACHE_DELTA_HDR_SIZE
-			|| !R_TexCacheDxt_DeltaHdrParse( b, pos, fileSize, &hash, &size ) )
-		{
-			break;
-		}
+		byte b[TEXCACHE_DELTA_PEEK];
+		texCacheDeltaRec_t rec;
+		if ( pos + TEXCACHE_DELTA_HDR_SIZE > fileSize ) break;
+		const int have = sceIoPread( fd, b, sizeof(b), pos );
+		if ( have < (int)TEXCACHE_DELTA_HDR_SIZE || !R_TexCacheDxt_DeltaHdrParse( b, (unsigned)have, pos, fileSize, &rec ) ) break;
+		const SceOff entryPos = pos + rec.hdrSize + rec.nameLen;
 		// the index stops at its caps while the walk goes on, so the prefix length stays exact
-		if ( indexing && n == cap )
+		if ( indexing && entryPos + rec.size <= 0xFFFFFFFFll )
 		{
-			cap = cap ? cap * 2 : 256;
-			texCachePackEntry_t *grown = ( cap <= TEXCACHE_DELTA_MAX_COUNT )
-				? (texCachePackEntry_t *)realloc( list, cap * sizeof(*list) ) : NULL;
-			if ( grown ) list = grown; else indexing = qfalse;
+			if ( rec.name )
+			{
+				indexing = (qboolean)( R_TexCacheDxt_Grow( (void **)&named, &nCap, n + 1, sizeof(*named), 256, TEXCACHE_DELTA_MAX_COUNT )
+					&& R_TexCacheDxt_Grow( (void **)&names, &namesCap, namesLen + rec.nameLen, 1, 16384, TEXCACHE_DELTA_MAX_COUNT * MAX_QPATH ) );
+				if ( indexing )
+				{
+					memcpy( names + namesLen, rec.name, rec.nameLen );
+					named[n].nameOffset = namesLen;
+					named[n].nameLen = rec.nameLen;
+					named[n].offset = (unsigned)entryPos;
+					named[n].size = rec.size;
+					namesLen += rec.nameLen;
+					n++;
+				}
+			}
+			else
+			{
+				indexing = R_TexCacheDxt_Grow( (void **)&hashed, &hCap, h + 1, sizeof(*hashed), 256, TEXCACHE_DELTA_MAX_COUNT );
+				if ( indexing )
+				{
+					hashed[h].nameHash = rec.hash;
+					hashed[h].offset = (unsigned)entryPos;
+					hashed[h].size = rec.size;
+					h++;
+				}
+			}
 		}
-		if ( indexing && pos + TEXCACHE_DELTA_HDR_SIZE + size <= 0xFFFFFFFFll )
-		{
-			list[n].nameHash = hash;
-			list[n].offset = (unsigned)( pos + TEXCACHE_DELTA_HDR_SIZE );
-			list[n].size = size;
-			n++;
-		}
-		pos += TEXCACHE_DELTA_HDR_SIZE + size;
+		pos = entryPos + rec.size;
 	}
-	if ( idx ) { *idx = list; *count = n; } else free( list );
+	if ( ix )
+	{
+		ix->entries = named;
+		ix->count = n;
+		ix->names = names;
+		ix->namesSize = namesLen;
+		ix->hashed = hashed;
+		ix->hashedCount = h;
+	}
+	else
+	{
+		free( named );
+		free( hashed );
+		free( names );
+	}
 	return pos;
 }
 
-// Orders by nameHash, then file position, so the last of a run is the newest record for that name.
+static const char *s_texSortNames;	// name table of the index qsort is ordering
+
+// Orders by key, then file position, so the last of a run is the newest record for that key.
 static int R_TexCacheDxt_DeltaCmp( const void *a, const void *b )
 {
 	const texCachePackEntry_t *x = (const texCachePackEntry_t *)a, *y = (const texCachePackEntry_t *)b;
+	const int c = R_TexCacheDxt_KeyCmp( s_texSortNames + x->nameOffset, x->nameLen, s_texSortNames + y->nameOffset, y->nameLen );
+	if ( c ) return c;
+	return x->offset < y->offset ? -1 : ( x->offset > y->offset ? 1 : 0 );
+}
+
+// Orders by nameHash, then file position, so the last of a run is the newest v1 record for that hash.
+static int R_TexCacheDxt_DeltaCmpV1( const void *a, const void *b )
+{
+	const texCachePackEntryV1_t *x = (const texCachePackEntryV1_t *)a, *y = (const texCachePackEntryV1_t *)b;
 	if ( x->nameHash != y->nameHash ) return x->nameHash < y->nameHash ? -1 : 1;
 	return x->offset < y->offset ? -1 : ( x->offset > y->offset ? 1 : 0 );
+}
+
+// Closes the fd and frees the index arrays.
+static void R_TexCacheDxt_IndexClose( texCacheIndex_t *ix )
+{
+	if ( ix->fd >= 0 ) sceIoClose( ix->fd );
+	free( ix->entries );
+	free( ix->names );
+	free( ix->hashed );
+	memset( ix, 0, sizeof(*ix) );
+	ix->fd = -1;
 }
 
 // Indexes the delta once per renderer lifetime; a missing or empty file leaves it closed.
@@ -1502,26 +1631,42 @@ static void R_TexCacheDxt_DeltaOpen( void )
 	const SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
 	if ( fd < 0 ) return;
 	SceIoStat st;
-	texCachePackEntry_t *idx = NULL;
-	unsigned count = 0;
+	texCacheIndex_t ix;
+	memset( &ix, 0, sizeof(ix) );
+	ix.fd = fd;
 	if ( sceIoGetstatByFd( fd, &st ) >= 0 )
-		R_TexCacheDxt_DeltaScan( fd, st.st_size, &idx, &count );
-	if ( !count )
+		R_TexCacheDxt_DeltaScan( fd, st.st_size, &ix );
+	if ( !ix.count && !ix.hashedCount )
 	{
-		free( idx );
-		sceIoClose( fd );
+		R_TexCacheDxt_IndexClose( &ix );
 		return;
 	}
-	qsort( idx, count, sizeof(*idx), R_TexCacheDxt_DeltaCmp );
-	unsigned n = 0;
-	for ( unsigned i = 0; i < count; ++i )
+	if ( ix.count )
 	{
-		if ( i + 1 < count && idx[i + 1].nameHash == idx[i].nameHash ) continue;	// an older bake of the same name
-		idx[n++] = idx[i];
+		s_texSortNames = ix.names;
+		qsort( ix.entries, ix.count, sizeof(*ix.entries), R_TexCacheDxt_DeltaCmp );
+		unsigned n = 0;
+		for ( unsigned i = 0; i < ix.count; ++i )
+		{
+			const texCachePackEntry_t *e = &ix.entries[i];
+			if ( i + 1 < ix.count && !R_TexCacheDxt_KeyCmp( ix.names + e->nameOffset, e->nameLen,
+					ix.names + e[1].nameOffset, e[1].nameLen ) ) continue;	// an older bake of the same key
+			ix.entries[n++] = *e;
+		}
+		ix.count = n;
 	}
-	s_texDeltaRdFd = fd;
-	s_texDeltaIndex = idx;
-	s_texDeltaCount = n;
+	if ( ix.hashedCount )
+	{
+		qsort( ix.hashed, ix.hashedCount, sizeof(*ix.hashed), R_TexCacheDxt_DeltaCmpV1 );
+		unsigned n = 0;
+		for ( unsigned i = 0; i < ix.hashedCount; ++i )
+		{
+			if ( i + 1 < ix.hashedCount && ix.hashed[i + 1].nameHash == ix.hashed[i].nameHash ) continue;
+			ix.hashed[n++] = ix.hashed[i];
+		}
+		ix.hashedCount = n;
+	}
+	s_texDelta = ix;
 }
 
 // Sets the file length; false when the filesystem refused.
@@ -1555,7 +1700,7 @@ static void R_TexCacheDxt_DeltaOpenWrite( void )
 	const SceUID rd = sceIoOpen( path, SCE_O_RDONLY, 0 );
 	if ( rd >= 0 )
 	{
-		if ( sceIoGetstatByFd( rd, &st ) >= 0 ) valid = R_TexCacheDxt_DeltaScan( rd, st.st_size, NULL, NULL );
+		if ( sceIoGetstatByFd( rd, &st ) >= 0 ) valid = R_TexCacheDxt_DeltaScan( rd, st.st_size, NULL );
 		sceIoClose( rd );
 	}
 	if ( valid < 0 || ( valid < st.st_size && !R_TexCacheDxt_DeltaTruncate( fd, valid ) ) )
@@ -1581,51 +1726,74 @@ static void R_TexCacheDxt_PackOpen( void )
 	SceIoStat st;
 	if ( sceIoGetstatByFd( fd, &st ) < 0
 		|| sceIoRead( fd, &ph, sizeof(ph) ) != (int)sizeof(ph)
-		|| ph.magic != TEXCACHE_PACK_MAGIC || ph.version != TEXCACHE_PACK_VERSION
-		|| ph.count == 0 || ph.count > TEXCACHE_PACK_MAX_COUNT )
+		|| ph.magic != TEXCACHE_PACK_MAGIC
+		|| ( ph.version != TEXCACHE_PACK_VERSION && ph.version != TEXCACHE_PACK_VERSION_V1 )
+		|| ph.count == 0 || ph.count > TEXCACHE_PACK_MAX_COUNT
+		|| ( ph.version == TEXCACHE_PACK_VERSION && ph.namesSize > ph.count * ( MAX_QPATH - 1 ) ) )
 	{
 		sceIoClose( fd );
 		return;
 	}
-	const unsigned idxBytes  = ph.count * (unsigned)sizeof(texCachePackEntry_t);
-	const unsigned dataStart = (unsigned)sizeof(ph) + idxBytes;
-	texCachePackEntry_t *idx = (texCachePackEntry_t *)malloc( idxBytes );
-	if ( !idx || sceIoRead( fd, idx, idxBytes ) != (int)idxBytes )
+	const qboolean v1 = (qboolean)( ph.version == TEXCACHE_PACK_VERSION_V1 );
+	const unsigned entryBytes = v1 ? (unsigned)sizeof(texCachePackEntryV1_t) : (unsigned)sizeof(texCachePackEntry_t);
+	const unsigned namesSize = v1 ? 0u : ph.namesSize;
+	const unsigned idxBytes  = ph.count * entryBytes;
+	const unsigned dataStart = (unsigned)sizeof(ph) + idxBytes + namesSize;
+	void *idx = malloc( idxBytes );
+	char *names = namesSize ? (char *)malloc( namesSize ) : NULL;
+	qboolean ok = (qboolean)( idx && ( !namesSize || names )
+		&& sceIoRead( fd, idx, idxBytes ) == (int)idxBytes
+		&& ( !namesSize || sceIoRead( fd, names, namesSize ) == (int)namesSize ) );
+	for ( unsigned i = 0; ok && i < ph.count; ++i )
+	{
+		unsigned offset, size;
+		if ( v1 )
+		{
+			const texCachePackEntryV1_t *e = (const texCachePackEntryV1_t *)idx + i;
+			if ( i && e[-1].nameHash >= e->nameHash ) ok = qfalse;
+			offset = e->offset;
+			size = e->size;
+		}
+		else
+		{
+			const texCachePackEntry_t *e = (const texCachePackEntry_t *)idx + i;
+			if ( e->nameLen == 0 || e->nameLen >= MAX_QPATH || e->nameOffset > namesSize || e->nameOffset + e->nameLen > namesSize
+				|| ( i && R_TexCacheDxt_KeyCmp( names + e[-1].nameOffset, e[-1].nameLen, names + e->nameOffset, e->nameLen ) >= 0 ) )
+				ok = qfalse;
+			offset = e->offset;
+			size = e->size;
+		}
+		if ( size < sizeof(texCacheHdrDxt_t) + sizeof(unsigned) || size > TEXCACHE_PACK_MAX_ENTRY
+			|| offset < dataStart || (SceOff)offset + size > st.st_size )
+			ok = qfalse;
+	}
+	if ( !ok )
 	{
 		free( idx );
+		free( names );
 		sceIoClose( fd );
 		return;
 	}
-	for ( unsigned i = 0; i < ph.count; ++i )
+	s_texPack.fd = fd;
+	if ( v1 )
 	{
-		const texCachePackEntry_t *e = &idx[i];
-		if ( ( i && idx[i - 1].nameHash >= e->nameHash )
-			|| e->size < sizeof(texCacheHdrDxt_t) + sizeof(unsigned) || e->size > TEXCACHE_PACK_MAX_ENTRY
-			|| e->offset < dataStart || (SceOff)e->offset + e->size > st.st_size )
-		{
-			free( idx );
-			sceIoClose( fd );
-			return;
-		}
+		s_texPack.hashed = (texCachePackEntryV1_t *)idx;
+		s_texPack.hashedCount = ph.count;
 	}
-	s_texPackFd = fd;
-	s_texPackIndex = idx;
-	s_texPackCount = ph.count;
+	else
+	{
+		s_texPack.entries = (texCachePackEntry_t *)idx;
+		s_texPack.count = ph.count;
+		s_texPack.names = names;
+		s_texPack.namesSize = namesSize;
+	}
 }
 
 void R_TexCacheDxt_PackClose( void )
 {
-	if ( s_texPackFd >= 0 ) sceIoClose( s_texPackFd );
-	s_texPackFd = -1;
-	free( s_texPackIndex );
-	s_texPackIndex = NULL;
-	s_texPackCount = 0;
+	R_TexCacheDxt_IndexClose( &s_texPack );
 	s_texPackTried = qfalse;
-	if ( s_texDeltaRdFd >= 0 ) sceIoClose( s_texDeltaRdFd );
-	s_texDeltaRdFd = -1;
-	free( s_texDeltaIndex );
-	s_texDeltaIndex = NULL;
-	s_texDeltaCount = 0;
+	R_TexCacheDxt_IndexClose( &s_texDelta );
 	R_TexCacheDxt_DeltaLock();
 	if ( s_texDeltaWrFd >= 0 ) sceIoClose( s_texDeltaWrFd );
 	s_texDeltaWrFd = -1;
@@ -1633,44 +1801,66 @@ void R_TexCacheDxt_PackClose( void )
 	R_TexCacheDxt_DeltaUnlock();
 }
 
-// Reads the whole entry for name from a hash-sorted index in one positioned read; NULL when absent.
-static byte *R_TexCacheDxt_IndexedRead( SceUID fd, const texCachePackEntry_t *idx, unsigned count,
-										const char *name, unsigned *size )
+// Reads the whole entry for key in one positioned read, found by name, else by the v1 hash; NULL when absent.
+static byte *R_TexCacheDxt_IndexedRead( const texCacheIndex_t *ix, const char *key, unsigned *size )
 {
-	if ( fd < 0 ) return NULL;
-	const unsigned long long h = R_TexCacheDxt_Hash( name );
-	unsigned lo = 0, hi = count;
+	unsigned offset, len;
+	if ( ix->fd < 0 ) return NULL;
+	const unsigned keyLen = (unsigned)strlen( key );
+	unsigned lo = 0, hi = ix->count;
 	while ( lo < hi )
 	{
 		const unsigned mid = lo + ( hi - lo ) / 2;
-		if ( idx[mid].nameHash < h ) lo = mid + 1; else hi = mid;
+		const texCachePackEntry_t *e = &ix->entries[mid];
+		if ( R_TexCacheDxt_KeyCmp( ix->names + e->nameOffset, e->nameLen, key, keyLen ) < 0 ) lo = mid + 1; else hi = mid;
 	}
-	if ( lo == count || idx[lo].nameHash != h ) return NULL;
-	const texCachePackEntry_t *e = &idx[lo];
-	byte *entry = (byte *)R_Malloc( e->size, TAG_TEMP_WORKSPACE, qfalse );
+	if ( lo < ix->count && !R_TexCacheDxt_KeyCmp( ix->names + ix->entries[lo].nameOffset, ix->entries[lo].nameLen, key, keyLen ) )
+	{
+		offset = ix->entries[lo].offset;
+		len = ix->entries[lo].size;
+	}
+	else if ( ix->hashedCount )
+	{
+		const unsigned long long h = R_TexCacheDxt_Hash( key );
+		lo = 0;
+		hi = ix->hashedCount;
+		while ( lo < hi )
+		{
+			const unsigned mid = lo + ( hi - lo ) / 2;
+			if ( ix->hashed[mid].nameHash < h ) lo = mid + 1; else hi = mid;
+		}
+		if ( lo == ix->hashedCount || ix->hashed[lo].nameHash != h ) return NULL;
+		offset = ix->hashed[lo].offset;
+		len = ix->hashed[lo].size;
+	}
+	else
+	{
+		return NULL;
+	}
+	byte *entry = (byte *)R_Malloc( len, TAG_TEMP_WORKSPACE, qfalse );
 	if ( !entry ) return NULL;
-	if ( sceIoPread( fd, entry, e->size, (SceOff)e->offset ) != (int)e->size )
+	if ( sceIoPread( ix->fd, entry, len, (SceOff)offset ) != (int)len )
 	{
 		R_Free( entry );
 		return NULL;
 	}
-	*size = e->size;
+	*size = len;
 	return entry;
 }
 
-static byte *R_TexCacheDxt_PackRead( const char *name, unsigned *size )
+static byte *R_TexCacheDxt_PackRead( const char *key, unsigned *size )
 {
 	R_TexCacheDxt_PackOpen();
-	return R_TexCacheDxt_IndexedRead( s_texPackFd, s_texPackIndex, s_texPackCount, name, size );
+	return R_TexCacheDxt_IndexedRead( &s_texPack, key, size );
 }
 
-static byte *R_TexCacheDxt_DeltaRead( const char *name, unsigned *size )
+static byte *R_TexCacheDxt_DeltaRead( const char *key, unsigned *size )
 {
 	R_TexCacheDxt_PackOpen();
-	return R_TexCacheDxt_IndexedRead( s_texDeltaRdFd, s_texDeltaIndex, s_texDeltaCount, name, size );
+	return R_TexCacheDxt_IndexedRead( &s_texDelta, key, size );
 }
 
-// Header checks shared by the packed and loose readers.
+// Header checks shared by the packed and loose readers; a lower baked picmip passes for R_TexCacheDxt_Picmip to trim.
 static qboolean R_TexCacheDxt_HdrOk( const texCacheHdrDxt_t *hdr, qboolean mipmap, qboolean allowPicmip )
 {
 	if ( hdr->magic != TEXCACHE_MAGIC_DXT
@@ -1679,7 +1869,7 @@ static qboolean R_TexCacheDxt_HdrOk( const texCacheHdrDxt_t *hdr, qboolean mipma
 		|| hdr->width == 0 || hdr->height == 0
 		|| ( hdr->width & ( hdr->width - 1 ) ) || ( hdr->height & ( hdr->height - 1 ) )
 		|| (int)hdr->width > glConfig.maxTextureSize || (int)hdr->height > glConfig.maxTextureSize
-		|| hdr->picmip != (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 )
+		|| hdr->picmip > (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 )
 		// an unmipmapped entry would otherwise be given mip sampling downstream
 		|| ( ( hdr->flags & TEXCACHE_FLAG_VALID )
 			&& ( ( hdr->flags & TEXCACHE_FLAG_MIPMAP ) != 0 ) != ( mipmap != qfalse ) ) )
@@ -1701,11 +1891,37 @@ static unsigned R_TexCacheDxt_Total( const texCacheHdrDxt_t *hdr, const unsigned
 	return total;
 }
 
-// Validates one entry held in memory and returns its mip payload, or NULL.
+// Drops the leading mip levels a higher r_picmip would have halved away; false when the chain runs out first.
+static qboolean R_TexCacheDxt_Picmip( texCacheHdrDxt_t *hdr, unsigned *mipSizes, qboolean allowPicmip, unsigned *skipBytes )
+{
+	const unsigned want = (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 );
+	unsigned w = hdr->width, h = hdr->height, lvl = 0, ofs = 0;
+	for ( unsigned skip = want - hdr->picmip; skip > 0 && ( w > 1 || h > 1 ); --skip )
+	{
+		if ( lvl + 1 >= hdr->mipCount ) return qfalse;
+		ofs += mipSizes[lvl++];
+		w >>= 1; if ( w < 1 ) w = 1;
+		h >>= 1; if ( h < 1 ) h = 1;
+	}
+	if ( lvl )
+	{
+		hdr->mipCount -= lvl;
+		memmove( mipSizes, mipSizes + lvl, hdr->mipCount * sizeof(unsigned) );
+		hdr->width = w;
+		hdr->height = h;
+		hdr->totalSize -= ofs;
+	}
+	hdr->picmip = want;
+	*skipBytes = ofs;
+	return qtrue;
+}
+
+// Validates one entry held in memory and returns the mip payload for this r_picmip, or NULL.
 static byte *R_TexCacheDxt_ParseEntry( byte *entry, unsigned size, qboolean mipmap, qboolean allowPicmip,
 									   texCacheHdrDxt_t *hdr, unsigned *mipSizes, unsigned *total )
 {
 	const unsigned hdrLen = (unsigned)sizeof(*hdr);
+	unsigned skip = 0;
 	if ( size < hdrLen ) return NULL;
 	memcpy( hdr, entry, hdrLen );
 	if ( !R_TexCacheDxt_HdrOk( hdr, mipmap, allowPicmip ) ) return NULL;
@@ -1714,17 +1930,19 @@ static byte *R_TexCacheDxt_ParseEntry( byte *entry, unsigned size, qboolean mipm
 	memcpy( mipSizes, entry + hdrLen, mipLen );
 	*total = R_TexCacheDxt_Total( hdr, mipSizes );
 	if ( !*total || size != hdrLen + mipLen + *total ) return NULL;
-	return entry + hdrLen + mipLen;
+	if ( !R_TexCacheDxt_Picmip( hdr, mipSizes, allowPicmip, &skip ) ) return NULL;
+	*total = hdr->totalSize;
+	return entry + hdrLen + mipLen + skip;
 }
 
-// The validated entry for name from the delta, then the pack, with *blob at its mip payload; NULL on a miss.
-static byte *R_TexCacheDxt_ReadPacked( const char *name, qboolean mipmap, qboolean allowPicmip,
+// The validated entry for key from the delta, then the pack, with *blob at its mip payload; NULL on a miss.
+static byte *R_TexCacheDxt_ReadPacked( const char *key, qboolean mipmap, qboolean allowPicmip,
 									   texCacheHdrDxt_t *hdr, unsigned *mipSizes, unsigned *total, byte **blob )
 {
 	for ( int src = 0; src < 2; ++src )
 	{
 		unsigned size = 0;
-		byte *entry = src == 0 ? R_TexCacheDxt_DeltaRead( name, &size ) : R_TexCacheDxt_PackRead( name, &size );
+		byte *entry = src == 0 ? R_TexCacheDxt_DeltaRead( key, &size ) : R_TexCacheDxt_PackRead( key, &size );
 		if ( !entry ) continue;
 		*blob = R_TexCacheDxt_ParseEntry( entry, size, mipmap, allowPicmip, hdr, mipSizes, total );
 		if ( *blob ) return entry;
@@ -1746,49 +1964,48 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		R_IssuePendingRenderCommands();
 	}
 #endif
+	char key[MAX_QPATH];
+	R_TexCacheDxt_Key( name, key );
+	if ( !key[0] ) return NULL;
 	texCacheHdrDxt_t hdr;
 	unsigned mipSizes[TEXCACHE_MAX_MIPS];
 	unsigned total = 0;
 	byte *blob = NULL;											// the mip payload inside entry
-	byte *entry = R_TexCacheDxt_ReadPacked( name, mipmap, allowPicmip, &hdr, mipSizes, &total, &blob );	// owns the bytes the upload reads
+	byte *entry = R_TexCacheDxt_ReadPacked( key, mipmap, allowPicmip, &hdr, mipSizes, &total, &blob );	// owns the bytes the upload reads
 	if ( !entry )
 	{
 		// loose files: the sharded entry, then the flat layout that predates sharding
 		char path[256];
-		R_TexCacheDxt_Path( name, path, sizeof(path) );
+		R_TexCacheDxt_Path( key, path, sizeof(path) );
 		SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
 		if ( fd < 0 ) {
-			R_TexCacheDxt_PathFlat( name, path, sizeof(path) );
+			R_TexCacheDxt_PathFlat( key, path, sizeof(path) );
 			fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
 		}
 		if ( fd < 0 ) return NULL;
 
-		if ( sceIoRead( fd, &hdr, sizeof(hdr) ) != (int)sizeof(hdr)
-			|| !R_TexCacheDxt_HdrOk( &hdr, mipmap, allowPicmip ) )
+		SceIoStat st;
+		if ( sceIoGetstatByFd( fd, &st ) < 0
+			|| st.st_size < (SceOff)( sizeof(hdr) + sizeof(unsigned) ) || st.st_size > (SceOff)TEXCACHE_PACK_MAX_ENTRY )
 		{
 			sceIoClose( fd );
 			return NULL;
 		}
-		if ( sceIoRead( fd, mipSizes, hdr.mipCount * sizeof(unsigned) ) != (int)( hdr.mipCount * sizeof(unsigned) ) )
-		{
-			sceIoClose( fd );
-			return NULL;
-		}
-		total = R_TexCacheDxt_Total( &hdr, mipSizes );
-		if ( !total )
-		{
-			sceIoClose( fd );
-			return NULL;
-		}
-		entry = (byte *)R_Malloc( total, TAG_TEMP_WORKSPACE, qfalse );
-		if ( !entry || sceIoRead( fd, entry, total ) != (int)total )
+		const unsigned size = (unsigned)st.st_size;
+		entry = (byte *)R_Malloc( size, TAG_TEMP_WORKSPACE, qfalse );
+		if ( !entry || sceIoRead( fd, entry, size ) != (int)size )
 		{
 			if ( entry ) R_Free( entry );
 			sceIoClose( fd );
 			return NULL;
 		}
 		sceIoClose( fd );
-		blob = entry;
+		blob = R_TexCacheDxt_ParseEntry( entry, size, mipmap, allowPicmip, &hdr, mipSizes, &total );
+		if ( !blob )
+		{
+			R_Free( entry );
+			return NULL;
+		}
 	}
 
 	const GLenum glFmt = ( hdr.format == TEXCACHE_FMT_DXT5 )
@@ -1871,21 +2088,25 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	return image;
 }
 
-// Appends one record to pack.delta; the entry bytes are what a loose file or pack blob holds.
+// Appends one 'JKTE' record to pack.delta: the key, then the entry bytes a loose file or pack blob holds.
 static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 								const unsigned *mipSizes, const byte *blob )
 {
 	if ( !r_texCacheCompressed || !r_texCacheCompressed->integer || !hdr || !mipSizes || !blob ) return;
+	char key[MAX_QPATH];
+	R_TexCacheDxt_Key( name, key );
+	const unsigned keyLen = (unsigned)strlen( key );
+	if ( !keyLen ) return;
 	const unsigned hdrLen = (unsigned)sizeof(*hdr), mipLen = hdr->mipCount * (unsigned)sizeof(unsigned);
 	const unsigned entrySize = hdrLen + mipLen + hdr->totalSize;
-	const unsigned recSize = TEXCACHE_DELTA_HDR_SIZE + entrySize;
+	const unsigned recSize = TEXCACHE_DELTA_HDR_SIZE + keyLen + entrySize;
 	// one buffer, one write: the file gains a whole record or a tail the reader rejects
 	byte *rec = (byte *)malloc( recSize );
 	if ( !rec ) return;
-	R_TexCacheDxt_DeltaHdrBuild( rec, R_TexCacheDxt_Hash( name ), entrySize );
-	memcpy( rec + TEXCACHE_DELTA_HDR_SIZE, hdr, hdrLen );
-	memcpy( rec + TEXCACHE_DELTA_HDR_SIZE + hdrLen, mipSizes, mipLen );
-	memcpy( rec + TEXCACHE_DELTA_HDR_SIZE + hdrLen + mipLen, blob, hdr->totalSize );
+	byte *p = rec + R_TexCacheDxt_DeltaHdrBuild( rec, key, keyLen, entrySize );
+	memcpy( p, hdr, hdrLen );
+	memcpy( p + hdrLen, mipSizes, mipLen );
+	memcpy( p + hdrLen + mipLen, blob, hdr->totalSize );
 	R_TexCacheDxt_DeltaLock();
 	R_TexCacheDxt_DeltaOpenWrite();
 	if ( s_texDeltaWrFd >= 0 )
