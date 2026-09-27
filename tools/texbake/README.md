@@ -29,14 +29,13 @@ Anything the game compresses on the Vita that was not in `pack.bin` is appended 
 `pack.delta` in the same folder. The game reads it on the next start, so nothing is
 compressed twice. Every build with the card plugged in folds it in: the merged pack
 takes `pack.delta` first, then the fresh build, then the card's old `pack.bin`, then
-any loose `.bin` entries an older build left behind, and `pack.delta` is deleted only
+any loose `.bin` entries in the folder, and `pack.delta` is deleted only
 after the copy on the card has been read back and verified. To fold without baking,
 pick option 3 in the menu, or:
 
-    texbake.exe --pack F:\data\JAVITA\texcache_dxt
+    texbake.exe --pack <card>:\data\JAVITA\texcache_dxt
 
-Nothing writes loose files any more; the ones already on a card still work and are
-folded in the same way.
+The game writes only `pack.delta`; loose `.bin` files from older caches are still read and folded in the same way.
 
 ## Settings and the game
 
@@ -48,7 +47,7 @@ device. To build for a coarser setting only, pass the number:
 
     texbake.exe "...\GameData\base" --picmip 2
 
-Changing the setting re-bakes everything, so the tool notices and does it for you.
+A changed `--picmip` or `--fast` re-bakes the whole pack.
 
 ## Looking inside
 
@@ -89,10 +88,7 @@ Some textures are never cached, by the game's own rules, and the tool skips them
 to match: anything a shader marks `notc`, which includes most skyboxes and the
 main menu background, and anything whose size is not a power of two.
 
-A handful of images that the menus load may end up with the wrong flags, because
-that is decided in code rather than in a shader file. Those get re-compressed once
-on the device, land in `pack.delta`, and are then correct forever. Nothing breaks
-either way.
+Images the modules register without mipmaps under a name built at runtime cannot be predicted; the device compresses those once into `pack.delta`.
 
 The encoder is the game's own, so the result is what the Vita would have produced,
 except that the tool uses the higher-quality setting a PC can afford.

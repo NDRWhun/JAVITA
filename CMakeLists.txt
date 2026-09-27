@@ -33,8 +33,8 @@ if(NOT CMAKE_LINKER)
   find_program(CMAKE_LINKER arm-vita-eabi-ld)
 endif()
 
-set(PORT_VERSION  "1.0.0")
-set(VITA_VERSION  "01.00")	# SFO APP_VER is NN.NN and cannot carry the patch digit
+set(PORT_VERSION  "1.1.0")
+set(VITA_VERSION  "01.10")	# SFO APP_VER is NN.NN and cannot carry the patch digit
 
 set(SP_APP_NAME   "JAVITA: Jedi Academy")
 set(SP_TITLEID    "JAVITA001")
@@ -61,8 +61,7 @@ set(JK_ARCH_FLAGS
   -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
   -ffast-math -fsigned-char -fno-short-enums
   -fsingle-precision-constant -fno-optimize-sibling-calls
-  # the C modules carry no unwind tables otherwise, and an ERR_DROP thrown
-  # under a cgame frame then aborts instead of unwinding to Com_Frame
+  # unwind tables, so an ERR_DROP thrown from C reaches Com_Frame
   -funwind-tables
 )
 add_compile_options(${JK_ARCH_FLAGS})

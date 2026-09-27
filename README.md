@@ -4,7 +4,7 @@
 
 <img src="docs/logo-circle.png" alt="JAVITA" width="128" height="128">
 
-<h3 align="center">JAVITA 1.0</h3>
+<h3 align="center">JAVITA 1.1</h3>
 
 <p align="center">
   <b>Star Wars Jedi Knight: Jedi Academy — single-player and multiplayer, on the PS Vita</b>
@@ -44,7 +44,7 @@
         <li><a href="#combo-layer--hold-rear-top-left-then-press">Combo layer</a></li>
         <li><a href="#combo-layer-in-multiplayer">Combo layer in multiplayer</a></li>
         <li><a href="#console">Console</a></li>
-        <li><a href="#aim-assist-optional">Aim assist</a></li>
+        <li><a href="#aim-assist-single-player-optional">Aim assist</a></li>
       </ul>
     </li>
     <li><a href="#performance--tuning">Performance &amp; tuning</a></li>
@@ -129,7 +129,7 @@ The rear panel is split into four corner zones. A cross-shaped dead band down th
 
 ### Combo layer in multiplayer
 
-Multiplayer uses the same sticks, base layer and rear zones. Only the combo layer differs:
+Multiplayer uses the same sticks, base layer and rear zones, except Select (datapad) which is single-player only. Only the combo layer differs:
 
 | Combo | Action |
 |:--:|--------|
@@ -139,7 +139,7 @@ Multiplayer uses the same sticks, base layer and rear zones. Only the combo laye
 | <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-up.svg" width="18" alt="D-pad Up"> <img src="docs/icons/dpad-down.svg" width="18" alt="D-pad Down"> | Inventory next / previous |
 | <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-left.svg" width="18" alt="D-pad Left"> <img src="docs/icons/dpad-right.svg" width="18" alt="D-pad Right"> | Force power previous / next |
 
-The combo layer only fires instant commands. The modifier role is latched per button at the moment it is pressed, so releasing the rear modifier mid-press can't strand a held action. The combo layer is inactive while a menu is open.
+The combo layer fires instant commands only and is inactive while a menu is open.
 
 Defaults are applied on first launch only, so rebinds persist. Set `vita_defaultBinds 1` and relaunch to restore them.
 
@@ -147,7 +147,7 @@ Defaults are applied on first launch only, so rebinds persist. Set `vita_default
 
 Open with **Start + Select** — the on-screen keyboard pops up. Type a command, press **Enter** to run it. Close with **Circle** or **Start + Select** again.
 
-### Aim assist (optional)
+### Aim assist (single-player, optional)
 
 On by default. When an enemy is near your crosshair it gently steers your view toward them and slows your look speed so you overshoot less. Set `g_aimAssist 0` to turn it off.
 
@@ -161,10 +161,12 @@ On by default. When an enemy is near your crosshair it gently steers your view t
 
 ## Performance & tuning
 
-Tune by editing `ux0:data/JAVITA/base/openjk_sp.cfg` on the card, or from the in-game console (**Start + Select**). *(latched)* renderer cvars need a `vid_restart`; the latched sound cvars need a relaunch.
+Tune by editing `ux0:data/JAVITA/base/openjk_sp.cfg` on the card, or from the in-game console (**Start + Select**). *(latched)* renderer cvars need a `vid_restart`; the latched sound cvars need `snd_restart` or a relaunch.
 
 Presentation is vsync-locked to the Vita's 60 Hz panel. `com_maxfps` still applies, but its
 default of `125` sits above that ceiling.
+
+This is the single-player table. Multiplayer has `r_renderThread`, `r_worldVBO` (applies at the next map load), `r_texCacheCompressed`, `r_dropTexturesOnLoad`, `r_distanceCull`, `r_forceFog`, the `s_*` rows and `vita_rearTouch`.
 
 | Cvar | Default | What it does |
 |------|---------|--------------|
@@ -191,14 +193,12 @@ default of `125` sits above that ceiling.
 | `s_khz` | `22` | Mixer rate — the MP3 assets are decoded straight to it *(latched)* |
 | `vita_rearTouch` | `1` | Rear-touch panel controls — `0` disables them |
 
-The stencil and projected modes are not finished: `2` casts onto the ground plane, reaches walls only as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry.
+The stencil and projected modes are not finished, and the renderer resets `cg_shadows 2` to `1` at launch — set it from the console each session. `2` casts onto the ground plane, reaches walls only as far as `r_shadowExtrude` allows, and pushing that too far lets shadows show through geometry.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Known issues
 
-- Mirrors and portals draw unclipped — the backend has no user clip planes. Visible on the few
-  maps that use mirrors.
 - Dynamic glow (`r_DynamicGlow`) is not implemented.
 
 ## Build (for developers)
@@ -215,7 +215,7 @@ bash tools/build.sh        # vdpm deps + SDL + port -> build/JAVITA.vpk, build/J
 ```
 
 `bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. If the clone
-was made without `--recursive`, the script runs `git submodule update --init` itself.
+was made without `--recursive`, the script runs `git submodule update --init` itself (not with `--skip-deps`).
 
 Single-player builds from `src/code/`, multiplayer from `src/codemp/`, and both share the renderer
 backend in [`src/rd-gxm/`](src/rd-gxm). Its shaders are Cg sources under
