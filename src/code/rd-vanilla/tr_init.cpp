@@ -2154,6 +2154,7 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 		}
 		// the render thread owns the GXM context; join it before the window goes away
 		R_StopRenderThread();
+		R_TexCacheDxt_PackClose();
 #endif
 		ri.WIN_Shutdown();
 #ifdef VITA

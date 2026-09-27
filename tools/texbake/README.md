@@ -40,6 +40,21 @@ Changing the setting re-bakes everything, so the tool notices and does it for yo
 | `--threads <n>` | Worker threads. Default is one per core. |
 | `--copy <path>` | Copy to that card root when finished, no questions. |
 | `--no-copy` | Never offer to copy. |
+| `--pack <dir>` | Only build `pack.bin` from the entries already in `<dir>`, no baking. |
+
+## pack.bin
+
+Every run ends by writing `pack.bin` next to the entries: the same files, packed
+behind one index, so the game opens one file per session instead of one per
+texture. The loose files stay and are still read when an entry is not in the
+pack, so a cache without a `pack.bin` keeps working as before.
+
+To pack a cache you already have on the card, without baking anything:
+
+    texbake.exe --pack F:\data\JAVITA\texcache_dxt
+
+Entries the game bakes on the device after that are not in the pack until it is
+rebuilt the same way.
 
 ## What it does and does not cover
 

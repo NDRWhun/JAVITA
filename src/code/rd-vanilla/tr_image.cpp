@@ -1361,12 +1361,18 @@ Returns NULL if it fails, not a default image.
 #include <psp2/io/stat.h>
 
 // DXT mip-chain cache (see the block above Upload32)
+static unsigned long long R_TexCacheDxt_Hash( const char *name )
+{
+	unsigned long long h = 14695981039346656037ULL;	// FNV-1a 64-bit of the asset name
+	for ( const char *p = name; *p; ++p ) { h ^= (unsigned char)*p; h *= 1099511628211ULL; }
+	return h;
+}
+
 // sharded on the top hash byte: an exFAT lookup scans the directory, and one flat
 // folder holds every baked entry
 static unsigned R_TexCacheDxt_Path( const char *name, char *out, int outSize )
 {
-	unsigned long long h = 14695981039346656037ULL;	// FNV-1a 64-bit of the asset name
-	for ( const char *p = name; *p; ++p ) { h ^= (unsigned char)*p; h *= 1099511628211ULL; }
+	const unsigned long long h = R_TexCacheDxt_Hash( name );
 	const unsigned shard = (unsigned)( h >> 56 );
 	// the home path already resolves per game, so no game name belongs here
 	Com_sprintf( out, outSize, "%s/texcache_dxt/%02x/%016llx.bin",
@@ -1377,10 +1383,153 @@ static unsigned R_TexCacheDxt_Path( const char *name, char *out, int outSize )
 // where entries baked before the sharding lived; a card full of them still reads
 static void R_TexCacheDxt_PathFlat( const char *name, char *out, int outSize )
 {
-	unsigned long long h = 14695981039346656037ULL;
-	for ( const char *p = name; *p; ++p ) { h ^= (unsigned char)*p; h *= 1099511628211ULL; }
 	Com_sprintf( out, outSize, "%s/texcache_dxt/%016llx.bin",
-		ri.Cvar_VariableString( "fs_homepath" ), h );
+		ri.Cvar_VariableString( "fs_homepath" ), R_TexCacheDxt_Hash( name ) );
+}
+
+// pack.bin: the loose entries byte-for-byte behind one index, so a hit is one read on one fd
+#define TEXCACHE_PACK_MAGIC		0x50544B4Au	// "JKTP"
+#define TEXCACHE_PACK_VERSION	1u
+#define TEXCACHE_PACK_MAX_COUNT	( 1u << 20 )
+#define TEXCACHE_PACK_MAX_ENTRY	( 32u * 1024 * 1024 + 65536 )	// caps the alloc a corrupt index could ask for
+typedef struct {
+	unsigned int magic, version, count, pad;
+} texCachePackHdr_t;
+typedef struct {					// index sorted ascending by nameHash
+	unsigned long long nameHash;	// R_TexCacheDxt_Hash of the asset name
+	unsigned int offset;			// entry start from the file start
+	unsigned int size;				// header + mip sizes + payload
+} texCachePackEntry_t;
+static SceUID				s_texPackFd = -1;
+static qboolean				s_texPackTried;		// one open attempt per renderer lifetime
+static texCachePackEntry_t	*s_texPackIndex;
+static unsigned				s_texPackCount;
+
+// Opens the pack once and keeps its index; any defect leaves it closed and the loose files serve.
+static void R_TexCacheDxt_PackOpen( void )
+{
+	if ( s_texPackTried ) return;
+	s_texPackTried = qtrue;
+	char path[256];
+	Com_sprintf( path, sizeof(path), "%s/texcache_dxt/pack.bin", ri.Cvar_VariableString( "fs_homepath" ) );
+	const SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
+	if ( fd < 0 ) return;
+	texCachePackHdr_t ph;
+	SceIoStat st;
+	if ( sceIoGetstatByFd( fd, &st ) < 0
+		|| sceIoRead( fd, &ph, sizeof(ph) ) != (int)sizeof(ph)
+		|| ph.magic != TEXCACHE_PACK_MAGIC || ph.version != TEXCACHE_PACK_VERSION
+		|| ph.count == 0 || ph.count > TEXCACHE_PACK_MAX_COUNT )
+	{
+		sceIoClose( fd );
+		return;
+	}
+	const unsigned idxBytes  = ph.count * (unsigned)sizeof(texCachePackEntry_t);
+	const unsigned dataStart = (unsigned)sizeof(ph) + idxBytes;
+	texCachePackEntry_t *idx = (texCachePackEntry_t *)malloc( idxBytes );
+	if ( !idx || sceIoRead( fd, idx, idxBytes ) != (int)idxBytes )
+	{
+		free( idx );
+		sceIoClose( fd );
+		return;
+	}
+	for ( unsigned i = 0; i < ph.count; ++i )
+	{
+		const texCachePackEntry_t *e = &idx[i];
+		if ( ( i && idx[i - 1].nameHash >= e->nameHash )
+			|| e->size < sizeof(texCacheHdrDxt_t) + sizeof(unsigned) || e->size > TEXCACHE_PACK_MAX_ENTRY
+			|| e->offset < dataStart || (SceOff)e->offset + e->size > st.st_size )
+		{
+			free( idx );
+			sceIoClose( fd );
+			return;
+		}
+	}
+	s_texPackFd = fd;
+	s_texPackIndex = idx;
+	s_texPackCount = ph.count;
+}
+
+void R_TexCacheDxt_PackClose( void )
+{
+	if ( s_texPackFd >= 0 ) sceIoClose( s_texPackFd );
+	s_texPackFd = -1;
+	free( s_texPackIndex );
+	s_texPackIndex = NULL;
+	s_texPackCount = 0;
+	s_texPackTried = qfalse;
+}
+
+// Reads the whole packed entry for name in one positioned read; NULL when the pack lacks it.
+static byte *R_TexCacheDxt_PackRead( const char *name, unsigned *size )
+{
+	R_TexCacheDxt_PackOpen();
+	if ( s_texPackFd < 0 ) return NULL;
+	const unsigned long long h = R_TexCacheDxt_Hash( name );
+	unsigned lo = 0, hi = s_texPackCount;
+	while ( lo < hi )
+	{
+		const unsigned mid = lo + ( hi - lo ) / 2;
+		if ( s_texPackIndex[mid].nameHash < h ) lo = mid + 1; else hi = mid;
+	}
+	if ( lo == s_texPackCount || s_texPackIndex[lo].nameHash != h ) return NULL;
+	const texCachePackEntry_t *e = &s_texPackIndex[lo];
+	byte *entry = (byte *)R_Malloc( e->size, TAG_TEMP_WORKSPACE, qfalse );
+	if ( !entry ) return NULL;
+	if ( sceIoPread( s_texPackFd, entry, e->size, (SceOff)e->offset ) != (int)e->size )
+	{
+		R_Free( entry );
+		return NULL;
+	}
+	*size = e->size;
+	return entry;
+}
+
+// Header checks shared by the packed and loose readers.
+static qboolean R_TexCacheDxt_HdrOk( const texCacheHdrDxt_t *hdr, qboolean mipmap, qboolean allowPicmip )
+{
+	if ( hdr->magic != TEXCACHE_MAGIC_DXT
+		|| ( hdr->format != TEXCACHE_FMT_DXT1 && hdr->format != TEXCACHE_FMT_DXT5 )
+		|| hdr->mipCount < 1 || hdr->mipCount > TEXCACHE_MAX_MIPS
+		|| hdr->width == 0 || hdr->height == 0
+		|| ( hdr->width & ( hdr->width - 1 ) ) || ( hdr->height & ( hdr->height - 1 ) )
+		|| (int)hdr->width > glConfig.maxTextureSize || (int)hdr->height > glConfig.maxTextureSize
+		|| hdr->picmip != (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 )
+		// an unmipmapped entry would otherwise be given mip sampling downstream
+		|| ( ( hdr->flags & TEXCACHE_FLAG_VALID )
+			&& ( ( hdr->flags & TEXCACHE_FLAG_MIPMAP ) != 0 ) != ( mipmap != qfalse ) ) )
+	{
+		return qfalse;
+	}
+	return qtrue;
+}
+
+// Sum of the mip sizes when they agree with the header, else 0.
+static unsigned R_TexCacheDxt_Total( const texCacheHdrDxt_t *hdr, const unsigned *mipSizes )
+{
+	unsigned total = 0;
+	for ( unsigned i = 0; i < hdr->mipCount; ++i ) total += mipSizes[i];
+	if ( total != hdr->totalSize || total == 0 || total > (unsigned)( hdr->width * hdr->height * 2 + 4096 ) )
+	{
+		return 0;
+	}
+	return total;
+}
+
+// Validates one entry held in memory and returns its mip payload, or NULL.
+static byte *R_TexCacheDxt_ParseEntry( byte *entry, unsigned size, qboolean mipmap, qboolean allowPicmip,
+									   texCacheHdrDxt_t *hdr, unsigned *mipSizes, unsigned *total )
+{
+	const unsigned hdrLen = (unsigned)sizeof(*hdr);
+	if ( size < hdrLen ) return NULL;
+	memcpy( hdr, entry, hdrLen );
+	if ( !R_TexCacheDxt_HdrOk( hdr, mipmap, allowPicmip ) ) return NULL;
+	const unsigned mipLen = hdr->mipCount * (unsigned)sizeof(unsigned);
+	if ( size < hdrLen + mipLen ) return NULL;
+	memcpy( mipSizes, entry + hdrLen, mipLen );
+	*total = R_TexCacheDxt_Total( hdr, mipSizes );
+	if ( !*total || size != hdrLen + mipLen + *total ) return NULL;
+	return entry + hdrLen + mipLen;
 }
 
 // Build an image_t straight from a cached DXT mip chain, no decode or encode. Returns NULL on a
@@ -1396,52 +1545,59 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 		R_IssuePendingRenderCommands();
 	}
 #endif
-	char path[256];
-	R_TexCacheDxt_Path( name, path, sizeof(path) );
-	SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
-	if ( fd < 0 ) {
-		R_TexCacheDxt_PathFlat( name, path, sizeof(path) );
-		fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
-	}
-	if ( fd < 0 ) return NULL;
-
 	texCacheHdrDxt_t hdr;
 	unsigned mipSizes[TEXCACHE_MAX_MIPS];
-	if ( sceIoRead( fd, &hdr, sizeof(hdr) ) != (int)sizeof(hdr)
-		|| hdr.magic != TEXCACHE_MAGIC_DXT
-		|| ( hdr.format != TEXCACHE_FMT_DXT1 && hdr.format != TEXCACHE_FMT_DXT5 )
-		|| hdr.mipCount < 1 || hdr.mipCount > TEXCACHE_MAX_MIPS
-		|| hdr.width == 0 || hdr.height == 0
-		|| ( hdr.width & ( hdr.width - 1 ) ) || ( hdr.height & ( hdr.height - 1 ) )
-		|| (int)hdr.width > glConfig.maxTextureSize || (int)hdr.height > glConfig.maxTextureSize
-		|| hdr.picmip != (unsigned)( allowPicmip && r_picmip ? r_picmip->integer : 0 )
-		// an unmipmapped entry would otherwise be given mip sampling downstream
-		|| ( ( hdr.flags & TEXCACHE_FLAG_VALID )
-			&& ( ( hdr.flags & TEXCACHE_FLAG_MIPMAP ) != 0 ) != ( mipmap != qfalse ) ) )
+	unsigned total = 0, entrySize = 0;
+	byte *entry = R_TexCacheDxt_PackRead( name, &entrySize );	// owns the bytes the upload reads
+	byte *blob = NULL;											// the mip payload inside entry
+	if ( entry )
 	{
-		sceIoClose( fd );
-		return NULL;
+		blob = R_TexCacheDxt_ParseEntry( entry, entrySize, mipmap, allowPicmip, &hdr, mipSizes, &total );
+		if ( !blob )
+		{
+			R_Free( entry );
+			entry = NULL;
+		}
 	}
-	if ( sceIoRead( fd, mipSizes, hdr.mipCount * sizeof(unsigned) ) != (int)( hdr.mipCount * sizeof(unsigned) ) )
+	if ( !entry )
 	{
+		// loose files: the sharded entry, then the flat layout that predates sharding
+		char path[256];
+		R_TexCacheDxt_Path( name, path, sizeof(path) );
+		SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
+		if ( fd < 0 ) {
+			R_TexCacheDxt_PathFlat( name, path, sizeof(path) );
+			fd = sceIoOpen( path, SCE_O_RDONLY, 0 );
+		}
+		if ( fd < 0 ) return NULL;
+
+		if ( sceIoRead( fd, &hdr, sizeof(hdr) ) != (int)sizeof(hdr)
+			|| !R_TexCacheDxt_HdrOk( &hdr, mipmap, allowPicmip ) )
+		{
+			sceIoClose( fd );
+			return NULL;
+		}
+		if ( sceIoRead( fd, mipSizes, hdr.mipCount * sizeof(unsigned) ) != (int)( hdr.mipCount * sizeof(unsigned) ) )
+		{
+			sceIoClose( fd );
+			return NULL;
+		}
+		total = R_TexCacheDxt_Total( &hdr, mipSizes );
+		if ( !total )
+		{
+			sceIoClose( fd );
+			return NULL;
+		}
+		entry = (byte *)R_Malloc( total, TAG_TEMP_WORKSPACE, qfalse );
+		if ( !entry || sceIoRead( fd, entry, total ) != (int)total )
+		{
+			if ( entry ) R_Free( entry );
+			sceIoClose( fd );
+			return NULL;
+		}
 		sceIoClose( fd );
-		return NULL;
+		blob = entry;
 	}
-	unsigned total = 0;
-	for ( unsigned i = 0; i < hdr.mipCount; ++i ) total += mipSizes[i];
-	if ( total != hdr.totalSize || total == 0 || total > (unsigned)( hdr.width * hdr.height * 2 + 4096 ) )
-	{
-		sceIoClose( fd );
-		return NULL;
-	}
-	byte *blob = (byte *)R_Malloc( total, TAG_TEMP_WORKSPACE, qfalse );
-	if ( !blob || sceIoRead( fd, blob, total ) != (int)total )
-	{
-		if ( blob ) R_Free( blob );
-		sceIoClose( fd );
-		return NULL;
-	}
-	sceIoClose( fd );
 
 	const GLenum glFmt = ( hdr.format == TEXCACHE_FMT_DXT5 )
 		? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
@@ -1478,7 +1634,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 #else
 	const int uploaded = 1;
 #endif
-	R_Free( blob );
+	R_Free( entry );
 
 	if ( !uploaded || qglGetError() != GL_NO_ERROR )
 	{

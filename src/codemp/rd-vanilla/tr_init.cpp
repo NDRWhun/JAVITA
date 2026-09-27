@@ -2104,6 +2104,9 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
+#ifdef VITA
+		R_TexCacheDxt_PackClose();
+#endif
 		ri.WIN_Shutdown();
 	}
 

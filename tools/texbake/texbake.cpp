@@ -12,6 +12,8 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -55,6 +57,7 @@ struct Options {
 	std::string		assets;					// folder holding the pk3 files
 	std::string		out;					// folder that receives texcache_dxt
 	std::string		copyTo;					// card path, empty = ask
+	std::string		pack;					// texcache_dxt folder to pack without baking
 	int				picmip      = 1;		// r_picmip the device runs
 	int				highQuality = 1;		// DXT refine passes: 1 = slow and better
 	int				force       = 0;		// rebake entries that already exist
@@ -797,12 +800,173 @@ static void PrintSize( long long bytes, char *out )
 	else sprintf( out, "%.1f MB", bytes / ( 1024.0 * 1024 ) );
 }
 
+// ---------------------------------------------------------------- pack
+// pack.bin: header, index sorted by name hash, then every loose entry byte-for-byte.
+// Must match the reader in src/code*/rd-vanilla/tr_image.cpp.
+
+#define TEXCACHE_PACK_MAGIC		0x50544B4Au		// "JKTP"
+#define TEXCACHE_PACK_VERSION	1u
+#define TEXCACHE_PACK_ALIGN		16
+
+struct texCachePackHdr_t {
+	uint32_t magic, version, count, pad;
+};
+
+struct texCachePackEntry_t {
+	uint64_t nameHash;
+	uint32_t offset, size;
+};
+
+struct PackSource {
+	uint64_t	hash;
+	std::string	path;
+};
+
+// <16 hex>.bin, as both the sharded and the flat layouts name their entries
+static bool ParseEntryName( const char *name, uint64_t &hash )
+{
+	if ( strlen( name ) != 20 || _stricmp( name + 16, ".bin" ) != 0 ) return false;
+	for ( int i = 0; i < 16; i++ ) if ( !isxdigit( (unsigned char)name[i] ) ) return false;
+	hash = strtoull( std::string( name, 16 ).c_str(), NULL, 16 );
+	return true;
+}
+
+static void ListEntries( const std::string &dir, std::set<uint64_t> &seen, std::vector<PackSource> &out )
+{
+	WIN32_FIND_DATAA fd;
+	const HANDLE h = FindFirstFileA( ( dir + "\\*.bin" ).c_str(), &fd );
+	if ( h == INVALID_HANDLE_VALUE ) return;
+	do {
+		uint64_t hash;
+		if ( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) continue;
+		if ( !ParseEntryName( fd.cFileName, hash ) ) continue;
+		if ( !seen.insert( hash ).second ) continue;
+		out.push_back( { hash, dir + "\\" + fd.cFileName } );
+	} while ( FindNextFileA( h, &fd ) );
+	FindClose( h );
+}
+
+// the file as the device validates it: header, mip table, payload, nothing else
+static bool ReadEntry( const std::string &path, std::vector<uint8_t> &buf )
+{
+	FILE *f = fopen( path.c_str(), "rb" );
+	if ( !f ) return false;
+	fseek( f, 0, SEEK_END );
+	const long len = ftell( f );
+	fseek( f, 0, SEEK_SET );
+	if ( len < (long)( sizeof( texCacheHdrDxt_t ) + 4 ) || len > 64L * 1024 * 1024 ) { fclose( f ); return false; }
+	buf.resize( (size_t)len );
+	const bool ok = fread( buf.data(), 1, (size_t)len, f ) == (size_t)len;
+	fclose( f );
+	if ( !ok ) return false;
+
+	texCacheHdrDxt_t hdr;
+	memcpy( &hdr, buf.data(), sizeof( hdr ) );
+	if ( hdr.magic != TEXCACHE_MAGIC_DXT || hdr.mipCount < 1 || hdr.mipCount > TEXCACHE_MAX_MIPS ) return false;
+	if ( (size_t)len < sizeof( hdr ) + hdr.mipCount * 4 ) return false;
+	uint32_t total = 0;
+	for ( uint32_t i = 0; i < hdr.mipCount; i++ ) {
+		uint32_t m;
+		memcpy( &m, buf.data() + sizeof( hdr ) + i * 4, 4 );
+		total += m;
+	}
+	return total == hdr.totalSize && total != 0 && (size_t)len == sizeof( hdr ) + hdr.mipCount * 4 + total;
+}
+
+// every loose entry under dir into dir\pack.bin; the loose files stay where they are
+static bool BuildPack( const std::string &dir )
+{
+	std::set<uint64_t> seen;
+	std::vector<PackSource> src;
+	for ( int s = 0; s < 256; s++ ) {
+		char sub[16];
+		sprintf( sub, "\\%02x", s );
+		ListEntries( dir + sub, seen, src );
+	}
+	ListEntries( dir, seen, src );		// the flat layout that predates sharding
+	if ( src.empty() ) {
+		printf( "  no cache entries in %s, no pack written\n", dir.c_str() );
+		return false;
+	}
+	std::sort( src.begin(), src.end(), []( const PackSource &a, const PackSource &b ) { return a.hash < b.hash; } );
+
+	const std::string path = dir + "\\pack.bin";
+	const std::string tmp  = path + ".tmp";
+	FILE *f = fopen( tmp.c_str(), "wb" );
+	if ( !f ) {
+		printf( "  cannot write %s\n", tmp.c_str() );
+		return false;
+	}
+
+	// index space for every candidate; the header count covers only those that read back clean
+	std::vector<texCachePackEntry_t> index;
+	index.reserve( src.size() );
+	texCachePackHdr_t ph = { TEXCACHE_PACK_MAGIC, TEXCACHE_PACK_VERSION, 0, 0 };
+	const uint64_t dataStart = sizeof( ph ) + src.size() * sizeof( texCachePackEntry_t );
+	uint64_t pos = dataStart;
+	std::vector<uint8_t> buf;
+	int bad = 0;
+	bool ok = fwrite( &ph, 1, sizeof( ph ), f ) == sizeof( ph )
+		&& _fseeki64( f, (long long)dataStart, SEEK_SET ) == 0;
+
+	for ( size_t i = 0; ok && i < src.size(); i++ ) {
+		if ( ( i & 255 ) == 0 ) {
+			printf( "\r  packing %d / %d ", (int)i, (int)src.size() );
+			fflush( stdout );
+		}
+		if ( !ReadEntry( src[i].path, buf ) ) { bad++; continue; }
+
+		const uint64_t aligned = ( pos + TEXCACHE_PACK_ALIGN - 1 ) & ~(uint64_t)( TEXCACHE_PACK_ALIGN - 1 );
+		if ( aligned + buf.size() > 0xFFFFFFFFull ) {
+			printf( "\r  pack would exceed 4 GB, stopping\n" );
+			ok = false;
+			break;
+		}
+		if ( aligned > pos ) {
+			static const uint8_t zero[TEXCACHE_PACK_ALIGN] = { 0 };
+			const size_t pad = (size_t)( aligned - pos );
+			if ( fwrite( zero, 1, pad, f ) != pad ) { ok = false; break; }
+		}
+		if ( fwrite( buf.data(), 1, buf.size(), f ) != buf.size() ) { ok = false; break; }
+		index.push_back( { src[i].hash, (uint32_t)aligned, (uint32_t)buf.size() } );
+		pos = aligned + buf.size();
+	}
+
+	if ( ok ) {
+		ph.count = (uint32_t)index.size();
+		const size_t idxBytes = index.size() * sizeof( texCachePackEntry_t );
+		ok = _fseeki64( f, 0, SEEK_SET ) == 0
+			&& fwrite( &ph, 1, sizeof( ph ), f ) == sizeof( ph )
+			&& fwrite( index.data(), 1, idxBytes, f ) == idxBytes;
+	}
+	fclose( f );
+
+	if ( !ok || index.empty() ) {
+		DeleteFileA( tmp.c_str() );
+		printf( "\r  pack.bin not written                    \n" );
+		return false;
+	}
+	DeleteFileA( path.c_str() );
+	if ( !MoveFileA( tmp.c_str(), path.c_str() ) ) {
+		printf( "\r  cannot replace %s\n", path.c_str() );
+		return false;
+	}
+
+	char sz[32];
+	PrintSize( (long long)pos, sz );
+	printf( "\r  pack.bin: %d entries, %s", (int)index.size(), sz );
+	if ( bad ) printf( ", %d unreadable entries left out", bad );
+	printf( "                    \n" );
+	return true;
+}
+
 static void Usage( void )
 {
 	printf(
 		"texbake -- pre-compress Jedi Academy textures for the Vita\n"
 		"\n"
 		"  texbake [<folder with the pk3 files>] [options]\n"
+		"  texbake --pack <texcache_dxt folder>\n"
 		"\n"
 		"  -o <folder>    where to put texcache_dxt (default: .\\texcache_out)\n"
 		"  --picmip <n>   the r_picmip the Vita runs (default 1; must match the game)\n"
@@ -810,7 +974,8 @@ static void Usage( void )
 		"  --force        rebake entries that already exist\n"
 		"  --threads <n>  worker threads (default: one per core)\n"
 		"  --copy <path>  copy to this card root when finished, no questions\n"
-		"  --no-copy      never offer to copy\n" );
+		"  --no-copy      never offer to copy\n"
+		"  --pack <dir>   only build pack.bin from the entries already in <dir>, no baking\n" );
 }
 
 // keeps the output honest when a setting that changes the pixels is altered
@@ -848,6 +1013,7 @@ int main( int argc, char **argv )
 		else if ( a == "--picmip" && i + 1 < argc ) opt.picmip = atoi( argv[++i] );
 		else if ( a == "--threads" && i + 1 < argc ) opt.threads = atoi( argv[++i] );
 		else if ( a == "--copy" && i + 1 < argc ) opt.copyTo = argv[++i];
+		else if ( a == "--pack" && i + 1 < argc ) opt.pack = argv[++i];
 		else if ( a == "--fast" ) opt.highQuality = 0;
 		else if ( a == "--force" ) opt.force = 1;
 		else if ( a == "--no-copy" ) opt.noCopy = 1;
@@ -856,6 +1022,16 @@ int main( int argc, char **argv )
 	}
 
 	if ( opt.picmip < 0 || opt.picmip > 16 ) { printf( "  picmip must be 0..16\n" ); return 1; }
+
+	if ( !opt.pack.empty() ) {
+		std::string dir = opt.pack;
+		while ( !dir.empty() && ( dir.back() == '\\' || dir.back() == '/' ) ) dir.pop_back();
+		if ( DirExists( dir + "\\texcache_dxt" ) ) dir += "\\texcache_dxt";
+		printf( "  packing : %s\n\n", dir.c_str() );
+		const bool ok = BuildPack( dir );
+		printf( "\n" );
+		return ok ? 0 : 1;
+	}
 
 	if ( opt.assets.empty() ) opt.assets = AutoDetectAssets();
 	if ( opt.assets.empty() ) {
@@ -1019,8 +1195,10 @@ int main( int argc, char **argv )
 	printf( "\n\n" );
 
 	if ( g_jobs.empty() ) {
-		printf( "  nothing to do.\n\n" );
+		printf( "  nothing to encode.\n\n" );
 		for ( size_t i = 0; i < g_arch.size(); i++ ) zr_close( &g_arch[i] );
+		BuildPack( outDir );
+		printf( "\n" );
 		return 0;
 	}
 
@@ -1065,6 +1243,9 @@ int main( int argc, char **argv )
 	}
 
 	for ( size_t i = 0; i < g_arch.size(); i++ ) zr_close( &g_arch[i] );
+
+	printf( "\n" );
+	BuildPack( outDir );
 
 	// ---- put it on the card
 	printf( "\n  Copy this folder to your Vita:\n"
@@ -1119,6 +1300,12 @@ int main( int argc, char **argv )
 		printf( "\r  copied %d files", copied );
 		if ( failed ) printf( ", %d failed", failed );
 		printf( "\n" );
+
+		const std::string packFrom = outDir + "\\pack.bin";
+		if ( FileExists( packFrom ) ) {
+			if ( CopyFileA( packFrom.c_str(), ( dest + "\\pack.bin" ).c_str(), FALSE ) ) printf( "  copied pack.bin\n" );
+			else printf( "  pack.bin copy failed\n" );
+		}
 	}
 
 	printf( "\n" );
