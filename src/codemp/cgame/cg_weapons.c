@@ -2322,46 +2322,62 @@ qboolean CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle ) {
 Ghoul2 Insert Start
 */
 
-// create one instance of all the weapons we are going to use so we can just copy this info into each clients gun ghoul2 object in fast way
+// one shared ghoul2 instance per weapon, built on first use and copied into each client's gun slot
 static void *g2WeaponInstances[MAX_WEAPONS];
+static qboolean g2WeaponInstanceBuilt[MAX_WEAPONS];
 
+// drops any instances left from an earlier map so they are rebuilt on demand from the current item list
 void CG_InitG2Weapons(void)
 {
-	int i = 0;
+	CG_ShutDownG2Weapons();
+}
+
+// returns the shared instance for a weapon, creating it from the item's world model on the first request
+static void *CG_G2WeaponInstanceForWeapon(int weapon)
+{
+	void		**instance;
 	gitem_t		*item;
-	memset(g2WeaponInstances, 0, sizeof(g2WeaponInstances));
+
+	if (weapon <= WP_NONE || weapon >= MAX_WEAPONS)
+	{
+		return NULL;
+	}
+
+	instance = &g2WeaponInstances[weapon];
+	if (g2WeaponInstanceBuilt[weapon])
+	{
+		return *instance;
+	}
+	g2WeaponInstanceBuilt[weapon] = qtrue;
+
 	for ( item = bg_itemlist + 1 ; item->classname ; item++ )
 	{
-		if ( item->giType == IT_WEAPON )
+		if ( item->giType == IT_WEAPON && item->giTag == weapon )
 		{
-			assert(item->giTag < MAX_WEAPONS);
-
-			// initialise model
-			trap->G2API_InitGhoul2Model(&g2WeaponInstances[/*i*/item->giTag], item->world_model[0], 0, 0, 0, 0, 0);
-//			trap->G2API_InitGhoul2Model(&g2WeaponInstances[i], item->world_model[0],G_ModelIndex( item->world_model[0] ) , 0, 0, 0, 0);
-			if (g2WeaponInstances[/*i*/item->giTag])
-			{
-				// indicate we will be bolted to model 0 (ie the player) on bolt 0 (always the right hand) when we get copied
-				trap->G2API_SetBoltInfo(g2WeaponInstances[/*i*/item->giTag], 0, 0);
-				// now set up the gun bolt on it
-				if (item->giTag == WP_SABER)
-				{
-					trap->G2API_AddBolt(g2WeaponInstances[/*i*/item->giTag], 0, "*blade1");
-				}
-				else
-				{
-					trap->G2API_AddBolt(g2WeaponInstances[/*i*/item->giTag], 0, "*flash");
-				}
-				i++;
-			}
-			if (i == MAX_WEAPONS)
-			{
-				assert(0);
-				break;
-			}
-
+			break;
 		}
 	}
+	if ( !item->classname )
+	{
+		return NULL;
+	}
+
+	trap->G2API_InitGhoul2Model(instance, item->world_model[0], 0, 0, 0, 0, 0);
+	if (*instance)
+	{
+		// indicate we will be bolted to model 0 (ie the player) on bolt 0 (always the right hand) when we get copied
+		trap->G2API_SetBoltInfo(*instance, 0, 0);
+		// now set up the gun bolt on it
+		if (weapon == WP_SABER)
+		{
+			trap->G2API_AddBolt(*instance, 0, "*blade1");
+		}
+		else
+		{
+			trap->G2API_AddBolt(*instance, 0, "*flash");
+		}
+	}
+	return *instance;
 }
 
 // clean out any g2 models we instanciated for copying purposes
@@ -2371,6 +2387,7 @@ void CG_ShutDownG2Weapons(void)
 	for (i=0; i<MAX_WEAPONS; i++)
 	{
 		trap->G2API_CleanGhoul2Models(&g2WeaponInstances[i]);
+		g2WeaponInstanceBuilt[i] = qfalse;
 	}
 }
 
@@ -2380,13 +2397,13 @@ void *CG_G2WeaponInstance(centity_t *cent, int weapon)
 
 	if (weapon != WP_SABER)
 	{
-		return g2WeaponInstances[weapon];
+		return CG_G2WeaponInstanceForWeapon(weapon);
 	}
 
 	if (cent->currentState.eType != ET_PLAYER &&
 		cent->currentState.eType != ET_NPC)
 	{
-		return g2WeaponInstances[weapon];
+		return CG_G2WeaponInstanceForWeapon(weapon);
 	}
 
 	if (cent->currentState.eType == ET_NPC)
@@ -2400,7 +2417,7 @@ void *CG_G2WeaponInstance(centity_t *cent, int weapon)
 
 	if (!ci)
 	{
-		return g2WeaponInstances[weapon];
+		return CG_G2WeaponInstanceForWeapon(weapon);
 	}
 
 	//Try to return the custom saber instance if we can.
@@ -2411,7 +2428,7 @@ void *CG_G2WeaponInstance(centity_t *cent, int weapon)
 	}
 
 	//If no custom then just use the default.
-	return g2WeaponInstances[weapon];
+	return CG_G2WeaponInstanceForWeapon(weapon);
 }
 
 // what ghoul2 model do we want to copy ?

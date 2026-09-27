@@ -645,10 +645,8 @@ Ghoul2 Insert End
 	// make sure the render thread is stopped
 	R_IssuePendingRenderCommands(); //
 
-	int iLODStart = 0;
-	if (strstr (name, ".md3")) {
-		iLODStart = MD3_MAX_LODS-1;	//this loads the md3s in reverse so they can be biased
-	}
+	// md3 LODs are probed base first and only while every lower LOD exists
+	const int iLODEnd = strstr( name, ".md3" ) ? MD3_MAX_LODS - 1 : 0;
 	mod->numLods = 0;
 
 	//
@@ -656,7 +654,7 @@ Ghoul2 Insert End
 	//
 	numLoaded = 0;
 
-	for ( lod = iLODStart; lod >= 0 ; lod-- ) {
+	for ( lod = 0; lod <= iLODEnd; lod++ ) {
 		char filename[1024];
 
 		strcpy( filename, name );
@@ -674,11 +672,7 @@ Ghoul2 Insert End
 		qboolean bAlreadyCached = qfalse;
 		if (!RE_RegisterModels_GetDiskFile(filename, (void **)&buf, &bAlreadyCached))
 		{
-			if (numLoaded)	//we loaded one already, but a higher LOD is missing!
-			{
-				Com_Error (ERR_DROP, "R_LoadMD3: %s has LOD %d but is missing LOD %d ('%s')!", mod->name, lod+1, lod, filename);
-			}
-			continue;
+			break;
 		}
 
 		//loadmodel = mod;	// this seems to be fairly pointless
@@ -733,22 +727,10 @@ Ghoul2 Insert End
 		} else {
 			mod->numLods++;
 			numLoaded++;
-			// if we have a valid model and are biased
-			// so that we won't see any higher detail ones,
-			// stop loading them
-			if ( lod <= r_lodbias->integer ) {
-				break;
-			}
 		}
 	}
 
 	if ( numLoaded ) {
-		// duplicate into higher lod spots that weren't
-		// loaded, in case the user changes r_lodbias on the fly
-		for ( lod-- ; lod >= 0 ; lod-- ) {
-			mod->numLods++;
-			mod->md3[lod] = mod->md3[lod+1];
-		}
 /*
 Ghoul2 Insert Start
 */

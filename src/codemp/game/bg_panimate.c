@@ -38,6 +38,75 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #endif
 
 extern saberInfo_t *BG_MySaber( int clientNum, int saberNum );
+
+// hashed animTable lookup with GetIDForString semantics: first name match wins, -1 when absent
+#define ANIM_HASH_SIZE 4096
+_Static_assert( MAX_ANIMATIONS < ANIM_HASH_SIZE, "animTable must leave empty slots in the anim name hash" );
+static unsigned short bgAnimHash[ANIM_HASH_SIZE];	// animTable index + 1, 0 = empty
+static qboolean bgAnimHashBuilt = qfalse;
+
+// folds a-z exactly like Q_stricmp so names that compare equal hash equal
+static unsigned int BG_AnimNameHash( const char *name )
+{
+	unsigned int hash = 5381;
+	int c;
+
+	while ( ( c = *name++ ) != 0 )
+	{
+		if ( c >= 'a' && c <= 'z' )
+		{
+			c -= ( 'a' - 'A' );
+		}
+		hash = hash * 33 + c;
+	}
+	return hash & ( ANIM_HASH_SIZE - 1 );
+}
+
+static void BG_BuildAnimHash( void )
+{
+	int i;
+
+	memset( bgAnimHash, 0, sizeof( bgAnimHash ) );
+	for ( i = 0; animTable[i].name != NULL && animTable[i].name[0] != 0; i++ )
+	{
+		unsigned int slot = BG_AnimNameHash( animTable[i].name );
+
+		while ( bgAnimHash[slot] && Q_stricmp( animTable[bgAnimHash[slot] - 1].name, animTable[i].name ) )
+		{
+			slot = ( slot + 1 ) & ( ANIM_HASH_SIZE - 1 );
+		}
+		if ( !bgAnimHash[slot] )
+		{
+			bgAnimHash[slot] = (unsigned short)( i + 1 );
+		}
+	}
+	bgAnimHashBuilt = qtrue;
+}
+
+static int BG_AnimIDForString( const char *name )
+{
+	unsigned int slot;
+
+	if ( !name )
+	{
+		return -1;
+	}
+	if ( !bgAnimHashBuilt )
+	{
+		BG_BuildAnimHash();
+	}
+	slot = BG_AnimNameHash( name );
+	while ( bgAnimHash[slot] )
+	{
+		if ( !Q_stricmp( animTable[bgAnimHash[slot] - 1].name, name ) )
+		{
+			return animTable[bgAnimHash[slot] - 1].id;
+		}
+		slot = ( slot + 1 ) & ( ANIM_HASH_SIZE - 1 );
+	}
+	return -1;
+}
+
 /*
 ==============================================================================
 BEGIN: Animation utility functions (sequence checking)
@@ -1823,7 +1892,7 @@ void ParseAnimationEvtBlock(const char *aeb_filename, animevent_t *animEvents, a
 		//	just need offsets.
 		//This way when animation numbers change, this table won't have to be updated,
 		//	at least not much.
-		animNum = GetIDForString(animTable, token);
+		animNum = BG_AnimIDForString(token);
 		if(animNum == -1)
 		{//Unrecognized ANIM ENUM name, or we're skipping this line, keep going till you get a good one
 			Com_Printf(S_COLOR_YELLOW"WARNING: Unknown token %s in animEvent file %s\n", token, aeb_filename );
@@ -2426,7 +2495,7 @@ int BG_ParseAnimationFile(const char *filename, animation_t *animset, qboolean i
 			break;
 		}
 
-		animNum = GetIDForString(animTable, token);
+		animNum = BG_AnimIDForString(token);
 		if(animNum == -1)
 		{
 //#ifndef FINAL_BUILD
