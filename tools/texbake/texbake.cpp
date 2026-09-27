@@ -707,8 +707,8 @@ static bool IsImageName( const std::string &n )
 // R_FindShader mipRawImage=false and so loads them unmipmapped and unpicmipped
 static bool IsNoMipFamily( const std::string &key )
 {
-	static const char *pre[] = { "fonts/", "levelshots/", "menu/art/", "ui/assets/",
-								 "gfx/menus/", "gfx/hud/", "gfx/mp/", NULL };
+	static const char *pre[] = { "fonts/", "levelshots/", "menu/art/", "menu/video/", "ui/assets/",
+								 "gfx/menus/", "gfx/hud/", "gfx/mp/", "gfx/2d/numbers/", "gfx/2d/crosshair", NULL };
 	for ( int i = 0; pre[i]; i++ ) {
 		const size_t n = strlen( pre[i] );
 		if ( key.size() > n && key.compare( 0, n, pre[i] ) == 0 ) return true;
