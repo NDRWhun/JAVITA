@@ -1,3 +1,24 @@
+/*
+===========================================================================
+Copyright (C) 2026, JAVITA contributors
+
+This file is part of JAVITA, a PS Vita port built on the OpenJK
+source code.
+
+OpenJK is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, see <http://www.gnu.org/licenses/>.
+===========================================================================
+*/
+
 // texbake -- pre-compress Jedi Academy textures into the Vita DXT cache.
 //
 // Reads the game's pk3 archives on a PC, produces the same texcache_dxt entries the
@@ -375,8 +396,7 @@ static bool BakeImage( std::vector<uint8_t> &pix, int w, int h, bool mipmap, boo
 		if ( pix[(size_t)i * 4 + 3] != 255 ) { isDxt5 = 1; break; }
 	}
 
-	// r_gamma, r_intensity and r_overBrightBits are all identity on the Vita, so
-	// R_LightScaleTexture is a no-op here and the pixels go straight to the encoder.
+	// no light scaling: the Vita runs gamma, intensity and overbright at identity
 
 	out.blob.assign( (size_t)w * h * 2 + 4096, 0 );
 	int ofs = 0, mipCount = 0;
@@ -703,8 +723,7 @@ static bool IsImageName( const std::string &n )
 	return e == "tga" || e == "jpg" || e == "jpeg" || e == "png";
 }
 
-// the ui and cgame modules reach these through RegisterShaderNoMip, which hands
-// R_FindShader mipRawImage=false and so loads them unmipmapped and unpicmipped
+// name families the modules register through RegisterShaderNoMip
 static bool IsNoMipFamily( const std::string &key )
 {
 	static const char *pre[] = { "fonts/", "levelshots/", "menu/art/", "menu/video/", "ui/assets/",
@@ -838,8 +857,7 @@ static void ParseShaderText( const std::string &text )
 	}
 }
 
-// .menu files name their art through background / asset_shader, both of which
-// ui_shared.c registers with RegisterShaderNoMip
+// background and asset_shader values in .menu files load unmipmapped
 static void ParseMenuText( const std::string &text )
 {
 	std::vector<Token> t;
@@ -1095,9 +1113,6 @@ static std::string FindGame( void )
 	static const char *guesses[] = {
 		"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Jedi Academy\\GameData\\base",
 		"C:\\Program Files\\Steam\\steamapps\\common\\Jedi Academy\\GameData\\base",
-		"D:\\SteamLibrary\\steamapps\\common\\Jedi Academy\\GameData\\base",
-		"E:\\SteamLibrary\\steamapps\\common\\Jedi Academy\\GameData\\base",
-		"F:\\SteamLibrary\\steamapps\\common\\Jedi Academy\\GameData\\base",
 		"C:\\Program Files (x86)\\LucasArts\\Star Wars Jedi Knight Jedi Academy\\GameData\\base",
 	};
 	for ( const char *g : guesses ) {
@@ -1130,7 +1145,7 @@ static void PrintSize( long long bytes, char *out )
 }
 
 // ---------------------------------------------------------------- loose entries
-// <xx>\<hash>.bin and <hash>.bin, as earlier builds wrote them; read only, so an old card still folds
+// loose <xx>\<hash>.bin and <hash>.bin entries; read only
 
 struct PackSource {
 	uint64_t	hash;
@@ -1318,7 +1333,7 @@ static bool FoldPacks( const std::vector<FoldSource> &src, const std::string &de
 				sprintf( sub, "\\%02x", s );
 				ListEntries( src[i].path + sub, seen, loose[i] );
 			}
-			ListEntries( src[i].path, seen, loose[i] );		// the flat layout that predates sharding
+			ListEntries( src[i].path, seen, loose[i] );		// the flat layout
 			if ( !loose[i].empty() ) printf( "  %-24s %d entries\n", src[i].label, (int)loose[i].size() );
 			candidates += loose[i].size();
 			break;
