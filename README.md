@@ -7,10 +7,10 @@
 <h3 align="center">JAVITA 1.0</h3>
 
 <p align="center">
-  <b>Star Wars Jedi Knight: Jedi Academy — single-player, on the PS Vita</b>
+  <b>Star Wars Jedi Knight: Jedi Academy — single-player and multiplayer, on the PS Vita</b>
   <br />
   <br />
-  A port of Jedi Academy's single-player to the PS Vita,
+  A port of Jedi Academy to the PS Vita,
   <br />
   built on <a href="https://github.com/JACoders/OpenJK">OpenJK</a> with a native sceGxm rendering backend.
   <br />
@@ -42,6 +42,7 @@
         <li><a href="#base-layer-physical-buttons">Base layer</a></li>
         <li><a href="#rear-touch-panel">Rear touch panel</a></li>
         <li><a href="#combo-layer--hold-rear-top-left-then-press">Combo layer</a></li>
+        <li><a href="#combo-layer-in-multiplayer">Combo layer in multiplayer</a></li>
         <li><a href="#console">Console</a></li>
         <li><a href="#aim-assist-optional">Aim assist</a></li>
       </ul>
@@ -57,10 +58,13 @@
 
 You need your own legally-owned copy of Jedi Academy (eg.: from Steam)
 
-- Install `JAVITA.vpk` (from [Releases](../../releases)) with VitaShell.
+- Install `JAVITA.vpk` (single-player) and `JAMPVITA.vpk` (multiplayer) from
+  [Releases](../../releases) with VitaShell. They are separate apps — install either or both.
 - Copy your JKA `base/` PK3s — `assets0.pk3`, `assets1.pk3`, `assets2.pk3`, `assets3.pk3` — to
-  `ux0:data/JAVITA/base/`.
-- Launch from the LiveArea. Settings live in `ux0:data/JAVITA/base/openjk_sp.cfg`.
+  `ux0:data/JAVITA/base/`. Both apps read that same folder.
+- Launch from the LiveArea. Single-player settings are in `ux0:data/JAVITA/base/openjk_sp.cfg`.
+  Multiplayer writes `openjk.cfg` into whichever mod folder it is running — `base/` unless a server
+  put you in one.
 
 The first time you visit a level it loads slower, because each texture is compressed once and cached
 to `ux0:data/JAVITA/texcache_dxt`. Later loads of that level read the cache instead and are quicker.
@@ -121,6 +125,18 @@ The rear panel is split into four corner zones. A cross-shaped dead band down th
 | <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-up.svg" width="18" alt="D-pad Up"> <img src="docs/icons/dpad-down.svg" width="18" alt="D-pad Down"> | Inventory next / previous |
 | <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-left.svg" width="18" alt="D-pad Left"> | Use inventory item (`invuse`) |
 | <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-right.svg" width="18" alt="D-pad Right"> | Quick-select lightsaber (`weapon 1`) |
+
+### Combo layer in multiplayer
+
+Multiplayer uses the same sticks, base layer and rear zones. Only the combo layer differs:
+
+| Combo | Action |
+|:--:|--------|
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/triangle.svg" width="18" alt="Triangle"> | Taunt |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/circle.svg" width="18" alt="Circle"> | Engage duel |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/square.svg" width="18" alt="Square"> | Cycle saber stance |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-up.svg" width="18" alt="D-pad Up"> <img src="docs/icons/dpad-down.svg" width="18" alt="D-pad Down"> | Inventory next / previous |
+| <img src="docs/icons/rear-tl.svg" width="22" alt="Rear top-left"> + <img src="docs/icons/dpad-left.svg" width="18" alt="D-pad Left"> <img src="docs/icons/dpad-right.svg" width="18" alt="D-pad Right"> | Force power previous / next |
 
 The combo layer only fires instant commands. The modifier role is latched per button at the moment it is pressed, so releasing the rear modifier mid-press can't strand a held action. The combo layer is inactive while a menu is open.
 
@@ -194,13 +210,14 @@ subproject, so nothing is installed over the copies VitaSDK ships.
 
 ```bash
 git clone --recursive https://github.com/NDRWhun/JAVITA && cd JAVITA
-bash tools/build.sh        # vdpm deps + SDL + port -> build/JAVITA.vpk
+bash tools/build.sh        # vdpm deps + SDL + port -> build/JAVITA.vpk, build/JAMPVITA.vpk
 ```
 
 `bash tools/build.sh --skip-deps` rebuilds just the port once the deps are installed. If the clone
 was made without `--recursive`, the script runs `git submodule update --init` itself.
 
-The renderer backend lives in [`src/rd-gxm/`](src/rd-gxm). Its shaders are Cg sources under
+Single-player builds from `src/code/`, multiplayer from `src/codemp/`, and both share the renderer
+backend in [`src/rd-gxm/`](src/rd-gxm). Its shaders are Cg sources under
 `shaders/`, compiled ahead of time into `gxm_shaders.h` — change a `.cg` and you need to re-run
 `build_shaders.py`, which needs Sony's shader compiler, so the generated header is committed.
 

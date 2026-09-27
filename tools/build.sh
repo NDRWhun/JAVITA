@@ -3,7 +3,7 @@
 # build.sh - build JAVITA from a fresh checkout, all the way to the VPK.
 #
 #   git clone --recursive https://github.com/NDRWhun/JAVITA && cd JAVITA
-#   bash tools/build.sh               # vdpm deps + port -> build/JAVITA.vpk
+#   bash tools/build.sh               # vdpm deps + port -> build/JAVITA.vpk + build/JAMPVITA.vpk
 #   bash tools/build.sh --skip-deps   # rebuild only the port (deps already installed)
 #
 # Needs VitaSDK + vdpm on PATH, plus git, cmake and ninja.
@@ -38,4 +38,4 @@ cmake -S "$ROOT" -B "$ROOT/build" -G Ninja \
 cmake --build "$ROOT/build" -j"$JOBS"
 
 echo
-echo "==> Done -> build/JAVITA.vpk"
+echo "==> Done -> build/JAVITA.vpk, build/JAMPVITA.vpk"
