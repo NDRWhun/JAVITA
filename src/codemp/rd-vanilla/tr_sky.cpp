@@ -369,7 +369,7 @@ static float	s_skyTexCoords[SKY_SUBDIVISIONS+1][SKY_SUBDIVISIONS+1][2];
 ================
 DrawSkySideGxm
 
-The grid as an indexed triangle list; the strips it replaces were immediate mode.
+Draws the sky side grid as one indexed triangle list.
 ================
 */
 #define SKY_GRID_VERTS	( ( SKY_SUBDIVISIONS + 1 ) * ( SKY_SUBDIVISIONS + 1 ) )

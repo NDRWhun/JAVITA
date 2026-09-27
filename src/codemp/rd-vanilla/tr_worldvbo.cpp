@@ -19,9 +19,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// tr_worldvbo.cpp -- static world VBO (Vita, r_worldVBO). Eligible opaque world
-// surfaces bake into a resident vertex buffer; indices stage per shader run.
-// Ineligible/dlit/fogged fall back to tess. Grids bake at full LOD.
+// tr_worldvbo.cpp -- static world VBO (r_worldVBO): eligible opaque surfaces bake into a resident buffer, the rest draw via tess
 
 #include "tr_local.h"
 #ifdef USE_GXM_NATIVE
@@ -61,7 +59,7 @@ typedef struct {
 	int			numIndexes;
 } wvboSurf_t;
 
-// Not stored in tr/world_t: both are memset every map load, which would leak the GL buffer.
+// kept outside tr/world_t, which are memset every map load
 static struct {
 #ifdef USE_GXM_NATIVE
 	void		*data;		// GPU-mapped vertex buffer, read straight by the backend
@@ -77,8 +75,7 @@ static struct {
 	qboolean	ready;
 } s_wvbo;
 
-// backend-thread-only batch state; a run stages indices and flushes as one draw
-// (per-surface draws drown in per-draw state and program churn)
+// backend-thread batch state; a run stages indices and flushes as one draw
 #define WVBO_STAGE_MAX 32768
 static glIndex_t	s_wvboStage[WVBO_STAGE_MAX];
 static int			s_wvboStaged;
@@ -111,8 +108,7 @@ static qboolean WorldVbo_Eligible( const shader_t *sh, int surfaceType )
 	if ( sh->sky || ( sh->surfaceFlags & SURF_SKY ) ) return qfalse;
 	if ( sh->polygonOffset || sh->numDeforms != 0 ) return qfalse;
 	if ( sh->sort != SS_OPAQUE || sh->numUnfoggedPasses != 1 ) return qfalse;
-	// JKA lightstyles animate per-frame; styled surfaces normally produce extra
-	// stages (rejected above) but keep the bake strictly static-style-0 anyway.
+	// only unstyled (style 0) surfaces bake; lightstyles animate per frame
 	if ( sh->styles[0] != LS_NORMAL && sh->styles[0] < LS_UNUSED ) return qfalse;
 	if ( sh->styles[1] < LS_UNUSED ) return qfalse;
 
@@ -136,8 +132,7 @@ static qboolean WorldVbo_Eligible( const shader_t *sh, int surfaceType )
 	default:
 		return qfalse;
 	}
-	// The bake hardwires st0=diffuse/st1=lightmap; admit only that exact layout
-	// (CollapseMultitexture also merges non-lightmap stage pairs -> reject those).
+	// only the st0=diffuse, st1=lightmap layout bakes
 	const textureBundle_t *b0 = &st->bundle[0];
 	if ( !b0->image || b0->isVideoMap || b0->numImageAnimations > 1 ) return qfalse;
 	if ( b0->tcGen != TCGEN_TEXTURE || b0->isLightmap ) return qfalse;
@@ -151,8 +146,7 @@ static qboolean WorldVbo_Eligible( const shader_t *sh, int surfaceType )
 	return qtrue;
 }
 
-// Reproduce ComputeColors for the eligible cgens. Eligible surfaces are opaque and
-// unblended, so alpha is never sampled -> bake 255.
+// ComputeColors for the eligible cgens; alpha bakes as 255 (eligible surfaces are opaque)
 static void WorldVbo_BakeColor( const shaderStage_t *st, const byte *raw, byte *out )
 {
 	switch ( st->rgbGen ) {
@@ -194,8 +188,7 @@ void R_FreeWorldVBO( void )
 	}
 #else
 	if ( s_wvbo.vbo ) {
-		// the GL path kept per-array vbo references (written through at draw); re-point
-		// the arrays we used before deleting so no dangling buffer pointer survives.
+		// re-point the vertex arrays off the buffer before deleting it
 		glBindBuffer( GL_ARRAY_BUFFER, 0 );
 		qglVertexPointer( 3, GL_FLOAT, 16, NULL );
 		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, NULL );
@@ -219,15 +212,13 @@ void R_FreeWorldVBO( void )
 	s_wvboBatchFogArmed = qfalse;
 }
 
-// Two passes (count, then fill) select the identical surface set. Caller must have
-// parked the render thread (the GL upload runs on the main thread).
+// count and fill passes select the same surfaces; runs on main with the render thread parked
 void R_BuildWorldVBO( world_t *w )
 {
 	R_FreeWorldVBO();
 	if ( !r_worldVBO || !r_worldVBO->integer || !w || w->numsurfaces <= 0 ) return;
 
-	// world model (bmodels[0]) only: inline bmodel surfaces render as entities and
-	// would be dead weight in the VBO (the entityNum guard never draws them).
+	// world model (bmodels[0]) only; inline bmodels render as entities
 	const int surfFirst = w->bmodels ? (int)( w->bmodels[0].firstSurface - w->surfaces ) : 0;
 	const int surfLast  = w->bmodels ? surfFirst + w->bmodels[0].numSurfaces : w->numsurfaces;
 
@@ -383,8 +374,7 @@ static wvboSurf_t *WorldVbo_Lookup( const void *surfData )
 	return NULL;
 }
 
-// Mirror DrawMultitextured's per-surface GL, but with the vertex VBO bound and byte
-// offsets. Indices stay client-side (staged), so ELEMENT_ARRAY is never bound.
+// DrawMultitextured's state with the vertex VBO bound at byte offsets; indices stay client-side
 static void WorldVbo_SetupBatch( shader_t *sh, int fogNum )
 {
 	const shaderStage_t *st = &sh->stages[0];
@@ -442,8 +432,7 @@ static void WorldVbo_SetupBatch( shader_t *sh, int fogNum )
 	s_wvboBatchFog = fogNum;
 }
 
-// End the current VBO batch: flush staged indices, undo the tmu1 enable and
-// (critically) unbind the buffer, so tess client-pointer arrays aren't read as offsets.
+// ends the batch: flushes staged indices, disables tmu1 and unbinds the buffer for tess client arrays
 void RB_EndWorldVBO( void )
 {
 	if ( !s_wvboBatch ) return;
@@ -469,8 +458,7 @@ void RB_EndWorldVBO( void )
 	s_wvboBatchFogArmed = qfalse;
 }
 
-// Returns qtrue if the surface was staged for the VBO; qfalse -> caller draws via tess.
-// A same-shader run accumulates indices and flushes as one draw at run end.
+// stages the surface into the current same-shader run; qfalse = draw via tess
 qboolean RB_TryWorldVBO( void *surface, shader_t *shader, int fogNum, int dlighted, int entityNum )
 {
 	if ( !s_wvbo.ready || !r_worldVBO->integer

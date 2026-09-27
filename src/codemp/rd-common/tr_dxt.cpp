@@ -21,8 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// tr_dxt.cpp -- DXT1/DXT5 block compression.
-// Endpoints come from the block's principal axis, then a least-squares refit.
+// tr_dxt.cpp -- DXT1/DXT5 block compression: principal-axis endpoints, then a least-squares refit
 
 #include "tr_dxt.h"
 
@@ -82,8 +81,7 @@ static unsigned int MatchIndices( const byte *src, const int pal[4][3] )
 ================
 RefitEndpoints
 
-Least squares over the assigned indices: with the weights fixed, the endpoints
-that minimise total error are the solution of a 2x2 system per channel.
+Solves a 2x2 least-squares system per channel for the endpoints of the assigned indices.
 ================
 */
 static void RefitEndpoints( const byte *src, unsigned int bits,
@@ -127,10 +125,7 @@ static void RefitEndpoints( const byte *src, unsigned int bits,
 ================
 AxisEndpoints
 
-The four palette entries lie on a line, so the endpoints belong on the block's
-principal axis. A bounding box only agrees with that when the colours happen to
-run along its diagonal; on a two-tone block it can miss both colours entirely.
-Power iteration on the covariance is enough to find the axis.
+Places the endpoints on the block's principal axis, found by power iteration on the colour covariance.
 ================
 */
 static bool AxisEndpoints( const byte *src, unsigned short *c0, unsigned short *c1 )

@@ -55,7 +55,7 @@ void GXM_TexFree( unsigned int texnum );
 void GXM_TexBind( int tmu, unsigned int texnum );
 void GXM_TexFilter( unsigned int texnum, int linear, int clampToEdge );
 
-// --- state the engine sets through what used to be GL calls ---
+// --- state the engine sets through the qgl shim ---
 void GXM_SetProjection( const float *m );	// column-major, as glLoadMatrixf takes it
 void GXM_SetModelView( const float *m );
 void GXM_SetStateBits( unsigned int stateBits );
@@ -103,8 +103,7 @@ void GXM_ImmEnd( void );
 // draw the current tess contents
 void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexes );
 
-// draw from a vertex buffer that already lives in GPU memory, laid out as
-// xyz(12) uv0(8) uv1(8) rgba(4); only the indices pass through the ring
+// draws a resident GPU vertex buffer laid out xyz(12) uv0(8) uv1(8) rgba(4); only indices go through the ring
 void GXM_DrawStaticBuffer( const void *vertexBuffer, const unsigned short *indexes,
 						   int numIndexes, int vertexColor );
 

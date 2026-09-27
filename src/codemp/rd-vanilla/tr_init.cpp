@@ -843,8 +843,7 @@ static void InitOpenGL( void )
 		if ( r_renderThread && r_renderThread->integer )
 		{
 			extern void Sys_BootMark( const char *s );
-			// bring the GXM context up on the render thread, which owns it
-			// from here on; see the semaphore protocol in tr_cmds.cpp
+			// the GXM context comes up on the render thread, which owns it (protocol in tr_cmds.cpp)
 			ri.WIN_InitSDLVideo();
 			Sys_BootMark( "gl: sdlvideo" );
 			R_StartRenderThread();
@@ -1759,8 +1758,7 @@ void R_Register( void )
 	// 1 = backend on a dedicated render thread (default), 0 = inline on main
 	r_renderThread       = ri.Cvar_Get( "r_renderThread",       "1", CVAR_ARCHIVE | CVAR_LATCH, "" );
 	r_worldVBO           = ri.Cvar_Get( "r_worldVBO",           "1", CVAR_ARCHIVE, "" );	// takes effect on next map load
-	// 1 = drop old-map textures at shutdown; stock keeps both maps resident until the
-	// new map's first frame (the transition OOM peak). Reload comes from the DXT cache.
+	// 1 = drop old-map textures at map shutdown instead of the new map's first frame
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE, "" );
 	// DXT compression + the ux0 mip-chain cache; drives r_ext_compress_textures
 	r_texCacheCompressed = ri.Cvar_Get( "r_texCacheCompressed", "1", CVAR_ARCHIVE_ND | CVAR_LATCH, "" );
@@ -1824,7 +1822,7 @@ void R_Register( void )
 	r_shadows							= ri.Cvar_Get( "cg_shadows",						"1",						CVAR_NONE, "" );
 #ifdef VITA
 	if ( r_shadows->integer == 2 ) {
-		ri.Cvar_Set( "cg_shadows", "1" );	// blob shadows; revisit now the backend expands immediate mode
+		ri.Cvar_Set( "cg_shadows", "1" );	// blob shadows
 		r_shadows->integer = 1;
 	}
 #endif
@@ -1944,8 +1942,7 @@ void R_Init( void ) {
 	max_polyverts = Q_min( r_maxpolyverts->integer, DEFAULT_MAX_POLYVERTS );
 
 #ifdef VITA
-	// second command buffer only when the render thread is on; when off, both
-	// slots share one buffer so the default path costs no extra memory
+	// a second command buffer only with the render thread on; otherwise both slots share one
 	{
 		const int slots = ( r_renderThread && r_renderThread->integer ) ? 2 : 1;
 		for ( int slot = 0; slot < slots; slot++ ) {
@@ -2083,8 +2080,7 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 		if (destroyWindow)
 		{
 #ifdef VITA
-			// vid_restart: stop + join the GXM-owning thread so the remaining
-			// teardown GL runs single-threaded
+			// vid_restart: stop and join the render thread before the remaining teardown GL
 			{
 				extern void R_BakeShutdown( void );
 				R_BakeShutdown();

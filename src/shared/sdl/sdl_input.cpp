@@ -1397,8 +1397,7 @@ void IN_Frame (void) {
 	qboolean loading;
 
 #ifdef VITA
-	// On-screen keyboard follows the console and any menu field taking text: SDL_StartTextInput
-	// pops the IME, whose text and Enter feed that field. Reopen if it closed itself after Enter.
+	// the on-screen keyboard is open while the console or a menu field takes text, reopened if it closed after Enter
 	{
 		qboolean wantsText     = (qboolean)( ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0
 								|| ( cl_vitaTextInput && cl_vitaTextInput->integer ) );

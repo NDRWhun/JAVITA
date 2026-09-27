@@ -21,9 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// gxm_backend.cpp -- the renderer's draw path on sceGxm.
-// A draw may start as soon as sceGxmDraw returns, so its data is complete before
-// the call and stays untouched in the frame ring until the fence retires it.
+// gxm_backend.cpp -- the renderer's draw path on sceGxm; draw data is final before sceGxmDraw and stays in the frame ring until its fence retires
 
 #include "gxm_backend.h"
 #include "gxm_device.h"
@@ -45,8 +43,7 @@ void GXM_SetTessArraysHook( gxmTessArraysFn_t fn )
 	gxm_tessArrays = fn;
 }
 
-// keyed by live texture, not by texnum: the engine's texnums start at 2048 and
-// climb without reuse, so any fixed ceiling is only a question of when
+// slots are keyed by live texture; texnums are never reused
 #define GXM_MAX_TEXTURES	4096
 #define GXM_TEXMAP_SIZE		8192		// power of two, kept under half full
 #define GXM_SLOT_NONE		(-1)
@@ -183,8 +180,7 @@ static bool			gxm_backendOk;
 // the viewport transform is rebuilt whenever either half of it moves
 static int			gxm_viewX, gxm_viewY, gxm_viewW, gxm_viewH;
 static float		gxm_depthScale = 0.5f, gxm_depthOffset = 0.5f;
-// libgxm keeps programs, streams, textures and depth state until they change,
-// so the last-set values are shadowed and only differences are re-issued
+// shadow of the context state, so only changes are re-issued
 static SceGxmVertexProgram		*gxm_curVertProg;
 static SceGxmFragmentProgram	*gxm_curFragProg;
 static const SceGxmTexture		*gxm_curTex[2];
@@ -373,9 +369,7 @@ void GXM_BackendShutdown( void )
 	}
 }
 
-// ---------------------------------------------------------------------------
-// textures
-// ---------------------------------------------------------------------------
+// --- textures ---
 
 // the slot address survives a re-upload, so a shadowed bind would go stale
 static void ForgetTexture( int slot )
@@ -456,12 +450,9 @@ void GXM_TexFilter( unsigned int texnum, int linear, int clampToEdge )
 	}
 }
 
-// ---------------------------------------------------------------------------
-// state
-// ---------------------------------------------------------------------------
+// --- state ---
 
-// GL matrices are column-major and the shader does mul(v, uMVP), so the product
-// is taken in the order the engine already stores them
+// column-major product, the order the engine stores its matrices
 static void MulMat( float *out, const float *a, const float *b )
 {
 	for ( int c = 0; c < 4; c++ ) {
@@ -735,9 +726,7 @@ void GXM_SetDepthRange( float zNear, float zFar )
 	}
 }
 
-// ---------------------------------------------------------------------------
-// draw
-// ---------------------------------------------------------------------------
+// --- draw ---
 
 static SceGxmFragmentProgram *ResolveFragment( int ntex, int env, int vcol, int fog,
 											   const gxmProgramKey_t *key )
@@ -777,8 +766,7 @@ static SceGxmFragmentProgram *ResolveFragment( int ntex, int env, int vcol, int 
 
 void GXM_DrawTess( int numIndexes, const unsigned short *indexes, int numVertexes )
 {
-	// the override usually points at caller stack, so it is taken and cleared
-	// before any early return can leave it dangling for the next draw
+	// the array override is consumed here, whichever path returns
 	const float *ovXyz = gxm_ovXyz, *ovUv0 = gxm_ovUv0, *ovUv1 = gxm_ovUv1;
 	const unsigned char *ovRgba = gxm_ovRgba;
 	gxm_ovXyz = gxm_ovUv0 = gxm_ovUv1 = NULL;
@@ -1063,11 +1051,7 @@ void GXM_DrawStaticBuffer( const void *vertexBuffer, const unsigned short *index
 		SCE_GXM_INDEX_FORMAT_U16, idx, numIndexes );
 }
 
-// ---------------------------------------------------------------------------
-// immediate mode
-//
-// glBegin/glVertex geometry accumulates here and leaves as one draw.
-// ---------------------------------------------------------------------------
+// --- immediate mode: glBegin/glVertex geometry accumulates here and leaves as one draw ---
 
 #define GXM_IMM_MAX_VERTS	16384
 

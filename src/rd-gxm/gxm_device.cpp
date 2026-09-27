@@ -163,8 +163,7 @@ static void GXM_FreeNow( SceUID uid )
 	sceKernelFreeMemBlock( uid );
 }
 
-// Unmapping a page a scene in flight still samples is a gpu mmu fault, so blocks are
-// retired here and released once the frames that could reference them have completed.
+// deferred frees: a block is unmapped once every frame that could read it has completed
 #define GXM_RETIRE_MAX	512
 
 typedef struct {
@@ -430,8 +429,7 @@ static bool GXM_InitSwapChain( void )
 		}
 	}
 
-	// depth is tile-local during normal rendering; the allocation exists so a
-	// partial render has somewhere to spill
+	// depth surface backing for partial-render spills
 	const unsigned int alignedW = ALIGN( GXM_DISPLAY_WIDTH, SCE_GXM_TILE_SIZEX );
 	const unsigned int alignedH = ALIGN( GXM_DISPLAY_HEIGHT, SCE_GXM_TILE_SIZEY );
 	void *depthData = GXM_Alloc( SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
@@ -574,8 +572,7 @@ bool GXM_DeviceInit( void )
 	gxm_frontBuffer = 0;
 	gxm_deviceOk    = true;
 
-	// the renderer expects a scene to already be open; the first Present would
-	// otherwise end one that was never begun
+	// opens the first scene so Present always has one to end
 	GXM_BeginFrame();
 
 	GXM_Log( "GXM device: %dx%d, %d buffers, %d MiB parameter buffer",
@@ -675,8 +672,7 @@ void GXM_EndFrame( void )
 	}
 	gxm_sceneOpen = false;
 
-	// tell the gpu to stamp this slice's notification when its vertex work completes,
-	// so GXM_RingBeginFrame knows when the slice is safe to overwrite
+	// the ring slice's notification is stamped when this scene's vertex work completes
 	sceGxmEndScene( gxm_context, GXM_RingSceneNotification(), NULL );
 
 	// hand the back buffer over after the scene ends, so the console IME composites into this flip

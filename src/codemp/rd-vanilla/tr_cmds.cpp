@@ -93,15 +93,13 @@ SceUID rend_mutex_in = -1;
 SceUID rend_mutex_out = -1;
 // init handshakes only; reusing rend_mutex_out would eat the frame-1 prime token
 SceUID rend_init_done = -1;
-// One-shot: set by main after WIN_CreateWindow (ordered by the handshake); the render
-// thread's first wake runs the context init instead of a frame.
+// set by main after WIN_CreateWindow; the render thread's next wake runs the context init instead of a frame
 volatile qboolean pendingCtxInit = qfalse;
 static SceUID rend_thid = -1;
 static volatile qboolean rend_should_exit = qfalse;
 static volatile int rend_handedBuffer = 0;	// index of the frame being handed off; written before Signal(in), read after Wait(in)
 static volatile qboolean rend_parked = qfalse;	// backend sits on Wait(in) until the next hand-off
-// the backend raises Com_Error, which throws; on this thread an escaping throw
-// reaches std::terminate, so it is parked here and re-raised on main
+// a Com_Error thrown on the render thread, held here and re-raised on main
 static volatile int rend_pendingError = 0;
 
 /*
@@ -109,13 +107,11 @@ Render-thread semaphore protocol (all created at 0; R = render thread, M = main)
 
   init:  M starts R -> R: WIN_LoadGL (device init on R), Signal(init) -> M: create window,
          pendingCtxInit=true, Signal(in) -> R: ctx init + clear-only first scene,
-         Signal(init), Signal(out) <- this one unconsumed token is the frame-1 credit.
+         Signal(init), Signal(out) (the frame-1 credit).
   frame: M: Wait(out), Signal(in), flip activeBackEnd/tessPtr -> R: Wait(in),
          RB_ExecuteRenderCommands, Signal(out), flip rendBackEnd.
-
-  Every frame ends [in=0 out=1] with R parked on Wait(in), same as post-init, so
-  no wakeup is ever lost. The drain (R_IssuePendingRenderCommands) does
-  Wait(out)+Signal(out): blocks until R parks, leaves the token balance intact.
+  idle:  [in=0 out=1], R parked on Wait(in).
+  drain: R_IssuePendingRenderCommands does Wait(out)+Signal(out).
 */
 extern "C" int sceGxmTransferFinish( void );	// GXM transfer-queue sync (SDK)
 
@@ -133,8 +129,7 @@ static int renderThread( SceSize argc, void *argv ) {
 			break;
 		}
 		if ( pendingCtxInit ) {
-			// One-shot context init on this thread. SDL's current-window TLS was set on
-			// main; without MakeCurrent here every present from this thread no-ops.
+			// context init on this thread; MakeCurrent sets SDL's current window for its presents
 			Sys_BootMark( "rt: ctx start" );
 			ri.WIN_MakeCurrent();
 			GL_SetDefaultState();
@@ -167,8 +162,7 @@ static int renderThread( SceSize argc, void *argv ) {
 		// signalled even on error, or main waits on a frame that never completes
 		sceKernelSignalSema( rend_mutex_out, 1 );
 	}
-	// plain exit: R_StopRenderThread joins and then deletes, and a self-delete
-	// would leave that join waiting on a thid the kernel may already have reused
+	// plain exit; R_StopRenderThread joins and deletes the thread
 	return sceKernelExitThread( 0 );
 }
 
@@ -192,8 +186,7 @@ qboolean R_OnRenderThread( void ) {
 	return (qboolean)( rend_thid >= 0 && sceKernelGetThreadId() == rend_thid );
 }
 
-// vid_restart teardown: wake the render thread out of its Wait(in) with the exit
-// flag set, join it, delete the semaphores so a later R_Init re-creates the thread.
+// wakes the render thread with the exit flag set, joins it and deletes the semaphores
 void R_StopRenderThread( void ) {
 	if ( rend_thid < 0 ) {
 		return;
@@ -287,8 +280,7 @@ void R_IssuePendingRenderCommands( void ) {
 		return;
 	}
 #ifdef VITA
-	// nothing can unpark the backend but a hand-off, so a second drain over an
-	// empty list would only buy two semaphore round trips at vsync cadence
+	// a parked backend with nothing queued has nothing to drain
 	if ( r_renderThread && r_renderThread->integer && rend_parked && !backEndData->commands.used ) {
 		return;
 	}
@@ -296,9 +288,7 @@ void R_IssuePendingRenderCommands( void ) {
 	R_IssueRenderCommands( qfalse, qfalse );
 
 #ifdef VITA
-	// The hand-off above is asynchronous; wait until the backend is parked so
-	// main-thread GL can't race the GXM context. Wait(out)+Signal(out) blocks
-	// until "done" and leaves the token balance unchanged.
+	// block until the backend parks, leaving the token balance unchanged
 	if ( r_renderThread && r_renderThread->integer ) {
 		sceKernelWaitSema( rend_mutex_out, 1, NULL );
 		sceKernelSignalSema( rend_mutex_out, 1 );

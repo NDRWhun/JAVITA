@@ -106,8 +106,7 @@ static inline void Zone_Unlock(void) {}
 #endif
 
 #ifdef VITA
-// Boot-reserved contiguous arena for the multi-MB transient decode workspaces;
-// the fragmented load-time heap can't provide those holes.
+// contiguous arena reserved at boot for the multi-MB transient decode workspaces
 #define ARENA_MAGIC			0x41524E41u		// 'ARNA' — in use
 #define ARENA_FREE_MAGIC	0x46524545u		// 'FREE'
 #define ARENA_RESERVE		(22 * 1024 * 1024)	// load peak: 16 MB decode + 4 MB mip scratch
@@ -135,7 +134,7 @@ static void Arena_Init(void)
 	byte *raw = (byte *) malloc( ARENA_RESERVE + ARENA_ALIGN );	// heap pristine at boot -> contiguous
 	if (!raw)
 	{
-		s_arenaBase = s_arenaEnd = NULL;	// graceful: every Arena_Owns()==false, engine behaves as before
+		s_arenaBase = s_arenaEnd = NULL;	// no arena: Arena_Owns() is always false and everything uses the zone
 		return;
 	}
 	s_arenaBase = (byte *)(((size_t)raw + (ARENA_ALIGN-1)) & ~(size_t)(ARENA_ALIGN-1));

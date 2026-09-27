@@ -21,8 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// tr_gxm_bridge.cpp -- hands the renderer's tess and state to the GXM backend.
-// Lives here because tess and glState are private to the renderer.
+// tr_gxm_bridge.cpp -- hands the renderer's private tess and glState to the GXM backend
 
 #ifdef USE_GXM_NATIVE
 
@@ -33,7 +32,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ================
 GXM_GetTessArrays
 
-tess is private to the renderer, so the backend is handed pointers.
+Returns pointers to the current tess vertex arrays.
 ================
 */
 extern "C" void GXM_GetTessArrays( const float **xyz, const float **uv0,

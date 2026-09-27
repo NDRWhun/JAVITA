@@ -3459,8 +3459,7 @@ static void FS_ShutdownWorkerHandles( void ) {
 	sceKernelUnlockMutex( fs_workerMutex, 1 );
 }
 
-// whole-file read into a caller malloc'd buffer, same search order as FS_FOpenFileRead;
-// returns length or -1 (buffer==NULL queries length). safe from the sound worker thread.
+// thread-safe whole-file read in FS_FOpenFileRead order into a caller buffer; returns length or -1, NULL buffer queries length
 long FS_ReadFileWorker( const char *filename, void *buffer, long bufSize ) {
 	if ( fs_workerMutex < 0 || !filename || strstr(filename,"..") || strstr(filename,"::") ) return -1;
 	if ( filename[0]=='/' || filename[0]=='\\' ) filename++;

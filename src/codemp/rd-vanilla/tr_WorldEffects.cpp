@@ -1339,8 +1339,7 @@ ratl::vector_vs<CWeatherParticleCloud, MAX_PARTICLE_CLOUDS>	mParticleClouds;
 void R_InitWorldEffects(void)
 {
 #ifdef VITA
-	// the backend's world-effects pass iterates these containers one frame behind;
-	// park the render thread before freeing/clearing them
+	// the backend reads these containers a frame behind, so the render thread is parked before they are freed
 	if (r_renderThread && r_renderThread->integer) {
 		R_IssuePendingRenderCommands();
 	}

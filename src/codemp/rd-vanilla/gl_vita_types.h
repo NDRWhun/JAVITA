@@ -21,10 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-/*
-gl_vita_types.h -- the GL types and enums the renderer is written in, at their
-OpenGL registry values. Extension enums live in gl_vita_ext.h.
-*/
+// gl_vita_types.h -- the renderer's GL types and core enums at their OpenGL registry values
 #ifndef JAVITA_GL_VITA_TYPES_H
 #define JAVITA_GL_VITA_TYPES_H
 

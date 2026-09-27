@@ -19,30 +19,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-/*
-============================================================================
-JK2VITA — Vita GL extension compatibility shim (rd-vanilla).
-
-The OpenJK vanilla renderer references a handful of legacy desktop-GL
-extensions that the PS Vita's GXM does not implement:
-
-  * EXT_compiled_vertex_array   (qglLockArraysEXT / qglUnlockArraysEXT)
-  * ARB_vertex/fragment_program (the "dynamic glow" effect)
-  * NV_register_combiners       (an old multitexture-combine fallback)
-
-All of these are OPTIONAL and runtime-gated in the renderer: it checks the
-corresponding qgl* function pointer for NULL (or a support flag derived from
-it) before use. On the Vita we therefore declare them as NULL function
-pointers (with correct signatures so the gated call sites still type-check)
-plus the enum values they reference. The features stay disabled at runtime —
-the renderer's existing fallback paths handle their absence.
-
-It also supplies a no-op glTexParameterfv (the GL layer exposes only the integer
-form; the only use is GL_TEXTURE_BORDER_COLOR, irrelevant on GXM).
-
-Included only from qgl.h's VITA branch. Storage is defined in gl_vita_ext.cpp.
-============================================================================
-*/
+// NULL pointers and enums for the runtime-gated GL extensions GXM lacks (compiled arrays, ARB programs, NV combiners), plus no-op core shims
 #ifndef JK2VITA_GL_VITA_EXT_H
 #define JK2VITA_GL_VITA_EXT_H
 
@@ -50,7 +27,7 @@ Included only from qgl.h's VITA branch. Storage is defined in gl_vita_ext.cpp.
 
 #include "gl_vita_types.h"
 
-/* GL calling-convention macros (nothing here defines them; harmless empty). */
+/* empty GL calling-convention macros */
 #ifndef APIENTRY
 #define APIENTRY
 #endif
@@ -65,16 +42,12 @@ Included only from qgl.h's VITA branch. Storage is defined in gl_vita_ext.cpp.
 extern "C" {
 #endif
 
-/* ---- Missing core functions (best-effort shims) ---- */
-/* Border color: only the integer glTexParameter exists here. */
+/* no-op core shims */
 void glTexParameterfv(GLenum target, GLenum pname, const GLfloat *params);
-/* Single framebuffer on GXM: draw-buffer selection is a no-op. */
 void glDrawBuffer(GLenum mode);
-/* Immediate-mode array element: used only by the non-default conformance strip
-   path (Vita takes the glDrawElements path). No-op keeps it compiling. */
 void glArrayElement(GLint i);
 
-/* ---- Enums the Vita GL vocabulary lacks (real GL values; gated code only) ---- */
+/* extension enums at their GL registry values */
 /* ARB vertex/fragment program */
 #ifndef GL_VERTEX_PROGRAM_ARB
 #define GL_VERTEX_PROGRAM_ARB            0x8620
@@ -129,7 +102,7 @@ void glArrayElement(GLint i);
 #define GL_VARIABLE_D_NV                 0x8526
 #endif
 
-/* ---- Function-pointer types + NULL pointers for the unsupported funcs ---- */
+/* function-pointer types and NULL pointers for the unsupported extensions */
 
 /* EXT_compiled_vertex_array */
 typedef void (*PFNGLLOCKARRAYSEXTPROC)(GLint first, GLsizei count);

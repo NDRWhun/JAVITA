@@ -39,13 +39,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 //============================================================================
 
 #ifdef VITA
-// Sizes the newlib heap — the engine's whole malloc budget (Z_Malloc/Hunk_Alloc are
-// thin malloc wrappers), carved from the ~365 MiB USER partition before the GPU takes
-// its pools, so a bigger heap leaves the GPU less. JKA's yavin1 peaks past the
-// old 144 MiB (97 MiB zone + sound pool). A heavy yavin1b save peaks the zone at
+// newlib heap (the engine's whole malloc budget), carved from the USER partition before the GPU pools
 #ifdef SP_GAME
-// the boot-reserved arena in z_memman_pc.cpp pulls the transient workspace out of the zone,
-// so this heap mostly carries the level/model/sound working set
+// transient decode workspace lives in the z_memman_pc.cpp arena, outside this heap
 unsigned int _newlib_heap_size_user = 224 * 1024 * 1024;
 #else
 // module isolation triples the game/cgame/ui pools, so MP's static BSS is ~40 MiB larger

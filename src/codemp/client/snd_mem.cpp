@@ -686,7 +686,7 @@ static qboolean S_LoadSound_FileLoadAndNameAdjuster(char *psFilename, byte **pDa
 		}
 	}
 
-	// mp3 first: the assets hold 12769 mp3 to 302 wav, and each miss costs a real card open
+	// mp3 first: nearly every sound asset is mp3
 	psFilename[iNameStrlen-3] = 'm';
 	psFilename[iNameStrlen-2] = 'p';
 	psFilename[iNameStrlen-1] = '3';

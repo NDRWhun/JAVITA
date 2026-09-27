@@ -28,8 +28,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include <string.h>
 
-// mirrored from tr_local.h; the backend header drags in the whole engine, and
-// these values are part of the renderer's on-the-wire state, not private detail
+// GLS_ bits, mirrored from tr_local.h
 #define GLS_SRCBLEND_ZERO						0x00000001
 #define GLS_SRCBLEND_ONE						0x00000002
 #define GLS_SRCBLEND_DST_COLOR					0x00000003
@@ -221,8 +220,7 @@ const unsigned char *GXM_GlGetString( unsigned int name )
 	}
 }
 
-// referenced both as calls and as bare pointer tests by the renderer's
-// multitexture gates, so they need real symbols rather than macros
+// used as calls AND as bare pointer tests, so these need real symbols
 void GXM_NoOpTexUnit( unsigned int ) {}
 void GXM_NoOpMultiTexCoord2f( unsigned int, float, float ) {}
 void GXM_NoOpStencilOpSeparate( unsigned int, unsigned int, unsigned int, unsigned int ) {}

@@ -2055,8 +2055,7 @@ static void UI_DrawMapPreview(rectDef_t *rect, float scale, vec4_t color, qboole
 	if (uiInfo.mapList[map].levelShot == -1) {
 		uiInfo.mapList[map].levelShot = trap->R_RegisterShaderNoMip(uiInfo.mapList[map].imageName);
 		if (!uiInfo.mapList[map].levelShot) {
-			// a failed register returns 0, not -1, so the fallback is cached here
-			// rather than re-registered on every paint
+			// a failed register returns 0, so the fallback shader is cached in its place
 			uiInfo.mapList[map].levelShot = trap->R_RegisterShaderNoMip("menu/art/unknownmap_mp");
 		}
 	}
@@ -9439,7 +9438,7 @@ static void UI_BuildQ3Model_List( void )
 	int		numdirs;
 	int		numfiles;
 	char	dirlist[2048];
-	char	filelist[16384];	// holds every player skin at once; retail needs 7506 bytes
+	char	filelist[16384];	// every player skin in one listing
 	char	skinname[64];
 	char	headName[sizeof( uiInfo.q3HeadNames[0] )];
 	char*	dirptr;
@@ -9459,7 +9458,7 @@ static void UI_BuildQ3Model_List( void )
 
 	uiInfo.q3HeadCount = 0;
 
-	// one listing for every skin: a scan per model directory re-walks all 23k pak entries each time
+	// one listing for every skin, filtered per model directory below
 	numfiles = trap->FS_GetFileList( "models/players", "skin", filelist, sizeof(filelist) );
 
 	// iterate directory of all player models

@@ -623,7 +623,6 @@ static int S_MixerThread( SceSize argc, void *argv )
 			S_Update_();
 		} catch ( ... ) {
 			// an escaping throw would terminate the process and leave the mix lock held
-			extern void Sys_BootMark( const char *s );
 			Sys_BootMark( "snd: mixer thread raised an error" );
 		}
 		S_MixUnlock();

@@ -441,11 +441,7 @@ void S_SoundInfo_f(void) {
 }
 
 #ifdef VITA
-// ===========================================================================
-// async sound loading: a worker reads the file bytes off the main thread (the
-// SD I/O is the hitch); the main thread decodes+finalizes in S_AsyncLoad_Poll.
-// Behind s_asyncLoad; on any failure it falls back to the synchronous path.
-// ===========================================================================
+// async sound loading (s_asyncLoad): a worker reads file bytes, S_AsyncLoad_Poll decodes on main, failures load synchronously
 #include <psp2/kernel/threadmgr.h>
 
 #define ASYNC_SND_QUEUE	64	// ring size
@@ -499,7 +495,6 @@ static int S_AsyncLoad_Worker( SceSize argSize, void *argp )
 			job.ok = S_LoadSound_ReadFile( sfx, job.sLoadName, sizeof(job.sLoadName), &job.data, &job.size, qtrue );
 		} catch ( ... ) {
 			// this thread has no handler, so an escaping throw would terminate the process
-			extern void Sys_BootMark( const char *s );
 			Sys_BootMark( "snd: async loader raised an error" );
 			job.ok = qfalse;
 		}
@@ -552,8 +547,7 @@ static void S_AsyncLoad_Init( void )
 	sceKernelStartThread( s_asyncThread, 0, NULL );
 }
 
-// enqueue sfx for the worker. qtrue = handled (skip playing this instance);
-// qfalse = caller should load synchronously (async off / full / unavailable).
+// queues sfx for the worker; qtrue = queued (skip this play), qfalse = load synchronously
 static qboolean S_AsyncLoad_Enqueue( sfx_t *sfx )
 {
 	if ( !s_asyncLoad || !s_asyncLoad->integer || s_asyncThread < 0 )
@@ -628,7 +622,6 @@ static int S_MixerThread( SceSize argc, void *argv )
 			S_Update_();
 		} catch ( ... ) {
 			// an escaping throw would terminate the process and leave the mix lock held
-			extern void Sys_BootMark( const char *s );
 			Sys_BootMark( "snd: mixer thread raised an error" );
 		}
 		S_MixUnlock();

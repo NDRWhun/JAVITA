@@ -47,8 +47,7 @@ extern char com_errorMessage[];
 extern qboolean com_errorEntered;
 static void NORETURN Sys_Exit( int ex );
 
-// an escaping throw dies here with the stack intact, so this is the only place
-// that can still name what raised it
+// terminate handler: logs the thread and exception type to the boot trail, then exits
 static void Sys_TerminateHandler( void )
 {
 	char line[512];
@@ -749,8 +748,7 @@ void Sys_SigHandler( int signal )
 	static qboolean signalcaught = qfalse;
 
 #ifdef VITA
-	// the teardown below is indistinguishable from a normal quit in the trail,
-	// so name the signal before anything else runs
+	// log the signal to the trail before teardown
 	{
 		extern void Sys_BootMark( const char *s );
 		extern char g_lastBootMark[64];

@@ -30,8 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 extern "C" {
 #endif
 
-// src is 16 RGBA texels, row-major within the 4x4; dst takes 8 bytes for DXT1
-// and 16 for DXT5
+// src is a row-major 4x4 of RGBA texels; dst takes 8 bytes for DXT1, 16 for DXT5
 void R_CompressDxtBlock( unsigned char *dst, const unsigned char *src,
 						 int isDxt5, int highQuality );
 

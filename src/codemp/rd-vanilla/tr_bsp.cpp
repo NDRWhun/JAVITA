@@ -92,8 +92,7 @@ static void HSVtoRGB( float h, float s, float v, float rgb[3] )
 	}
 }
 
-// 255/max as a fixed point reciprocal; this core has no integer divide instruction.
-// Sized for a shift of 2, the largest r_mapOverBrightBits the engine uses.
+// fixed-point 255/max reciprocals (no integer divide on this core), sized for r_mapOverBrightBits up to 2
 #define NORM_RECIP_SIZE 1021
 static int s_normRecip[NORM_RECIP_SIZE];
 
@@ -2118,8 +2117,7 @@ void RE_LoadWorldMap_Actual( const char *name, world_t &worldData, int index )
 		tr.world = &worldData;
 
 #ifdef VITA
-		// (re)build the static world VBO; park the render thread first since
-		// the GL upload runs here on the main thread
+		// park the render thread, then build the static world VBO on main
 		R_IssuePendingRenderCommands();
 		R_BuildWorldVBO( &worldData );
 #endif

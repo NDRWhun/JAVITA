@@ -411,9 +411,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define GL_RGB8 GL_RGB
 // ARB alias for the core multitexture coord
 #define qglMultiTexCoord2fARB glMultiTexCoord2f
-// internal-format enums the Vita GL vocabulary lacks. real GL values keep the
-// format-select switch cases distinct; the backend ignores them and picks the GXM
-// format from format/type anyway.
+// internal-format enums at real GL values; the backend picks the GXM format from format/type
 #ifndef GL_RGBA4
 #define GL_RGBA4 0x8056
 #endif
@@ -451,9 +449,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifndef GL_TEXTURE_WRAP_R
 #define GL_TEXTURE_WRAP_R 0x8072
 #endif
-// typedefs + null pointers for extensions the Vita lacks (NV combiners, ARB
-// programs, EXT compiled arrays) plus a glTexParameterfv shim, so the gated
-// call sites still compile
+// NULL extension pointers and no-op shims for the gated call sites
 #include "gl_vita_ext.h"
 #else
 #if !defined(__APPLE__)

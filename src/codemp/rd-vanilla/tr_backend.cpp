@@ -85,8 +85,7 @@ void GL_Bind( image_t *image ) {
 		qglBindTexture (GL_TEXTURE_2D, texnum);
 	}
 #ifdef USE_GXM_NATIVE
-	// unconditional: a texture bound before its bake finished has no slot yet, and the
-	// GL-side cache would otherwise never let it resolve
+	// bypasses the GL-side cache so a texture bound before its bake finished resolves once its slot exists
 	GXM_TexBind( glState.currenttmu, texnum );
 #endif
 }
@@ -1393,8 +1392,7 @@ void RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *
 	}
 
 #ifdef VITA
-	// Render-thread mode: all GL runs on the render thread, so record a command
-	// with a staged copy of the frame instead of drawing from here.
+	// render-thread mode: queue a command with a staged copy of the frame
 	if ( r_renderThread && r_renderThread->integer ) {
 		if ( (cols&(cols-1)) || (rows&(rows-1)) ) {
 			Com_Error (ERR_DROP, "Draw_StretchRaw: size not a power of 2: %i by %i", cols, rows);
@@ -1819,9 +1817,7 @@ const void *RB_RotatePic2 ( const void *data )
 
 
 #ifdef VITA
-// Render-scale / dynamic resolution: draw the 3D world into an offscreen FBO at a
-// fraction of 960x544, upscale before the HUD. DRS nudges the scale to hold a target
-// frame time. One offscreen pass + one blit (each FBO bind is a tile flush on TBDR).
+// render scale / DRS: the world draws into a scaled offscreen FBO, upscaled before the HUD; DRS adjusts the scale to a target frame time
 static float    rs_activeScale = 1.0f;
 static GLuint   rs_fbo = 0, rs_colorTex = 0, rs_depthRb = 0;
 static qboolean rs_fboFailed = qfalse;
@@ -1909,8 +1905,7 @@ static void RB_DRSUpdate( void ) {
 	if ( rs_activeScale > 1.0f )   rs_activeScale = 1.0f;
 }
 
-// Bind the scene FBO and shrink the viewport for the main world view. Returns true
-// if scaling is active -- caller MUST then call RB_RenderScaleEnd after the surf list.
+// binds the scaled scene FBO and viewport; a true return is paired with RB_RenderScaleEnd after the surf list
 static qboolean RB_RenderScaleBegin( void ) {
 	RB_RenderScaleInitCvars();
 
@@ -1944,8 +1939,7 @@ static qboolean RB_RenderScaleBegin( void ) {
 static void RB_RenderScaleEnd( void ) {
 	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
 
-	// glBlitFramebuffer can't reliably stretch to the default framebuffer here,
-	// so upscale with a plain full-screen textured quad instead.
+	// upscale with a full-screen textured quad
 	const int   w = glConfig.vidWidth, h = glConfig.vidHeight;
 	const float u = (float)rs_scaledW / (float)w;
 	float v0 = 0.0f, v1 = (float)rs_scaledH / (float)h;
@@ -2353,8 +2347,7 @@ const void	*RB_WorldEffects( const void *data )
 }
 
 #ifdef VITA
-// Cinematic frame (recorded by RE_StretchRaw in render-thread mode): upload the
-// staged pixels into the scratch image and draw the stretched quad.
+// draws a cinematic frame queued by RE_StretchRaw: uploads the staged pixels and draws the stretched quad
 static const void *RB_Cinematic( const void *data ) {
 	const cinematicCommand_t *cmd = (const cinematicCommand_t *)data;
 	image_t *img = tr.scratchImage[cmd->client];
@@ -2435,9 +2428,7 @@ void RB_ExecuteRenderCommands( const void *data ) {
 
 #ifdef VITA
 	if ( r_renderThread && r_renderThread->integer ) {
-		// Until one FFP glDrawElements draw has gone through on this thread, subsequent
-		// FFP draws silently produce no fragments. This off-screen (fully clipped ->
-		// invisible) one-shot provides the prime right after context init.
+		// one fully clipped draw primes FFP draws on this thread after context init
 		static qboolean s_ffpPrimed = qfalse;
 		if ( !s_ffpPrimed && tr.whiteImage ) {
 			s_ffpPrimed = qtrue;

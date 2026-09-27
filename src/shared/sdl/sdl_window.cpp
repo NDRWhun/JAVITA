@@ -155,14 +155,12 @@ void GLimp_Minimize(void)
 void WIN_Present( window_t *window )
 {
 #ifdef USE_GXM_NATIVE
-	// the IME draws and reads input only while this is pumped, and SDL only did it
-	// from the GL swap this path replaces
+	// the IME draws and reads input only while sceImeUpdate is pumped
 	if ( SDL_IsScreenKeyboardShown( screen ) ) {
 		sceImeUpdate();
 	}
 
-	// end the frame's scene, queue the flip, and open the next one so the
-	// renderer always has a scene to draw into
+	// end the scene, queue the flip and open the next scene
 	GXM_EndFrame();
 	GXM_BeginFrame();
 	GXM_RingBeginFrame();
@@ -932,8 +930,7 @@ so the GXM context is owned here
 void WIN_LoadGL( void )
 {
 #ifdef USE_GXM_NATIVE
-	// SDL loads this only from its GL path, which a native device never takes;
-	// without it every sceIme import resolves to zero and the console keyboard faults
+	// SDL loads the IME module only from its GL path
 	sceSysmoduleLoadModule( SCE_SYSMODULE_IME );
 	if ( !GXM_DeviceInit() || !GXM_RingInit( 4 * 1024 * 1024 ) || !GXM_BackendInit() )
 	{
@@ -1003,8 +1000,7 @@ render thread must call this before its first present
 void WIN_MakeCurrent( void )
 {
 #ifndef USE_GXM_NATIVE
-	// SDL's GL hooks are absent without a GL video driver, and this one is
-	// dispatched unchecked; the native present owns its context anyway
+	// SDL's GL hooks exist only with a GL video driver
 	if ( SDL_GL_MakeCurrent( screen, opengl_context ) < 0 )
 	{
 		Com_Printf( "WIN_MakeCurrent: SDL_GL_MakeCurrent failed (%s)\n", SDL_GetError() );

@@ -789,8 +789,7 @@ public:
 #ifdef _G2_GORE
 #define MAX_RENDER_SURFACES (2048)
 #ifdef VITA
-// Two pools indexed by the frontend's double-buffer slot: the backend draws frame X's
-// entries while the frontend allocates frame X+1's. activeBackEnd stays 0 single-threaded.
+// one pool per frontend double-buffer slot (activeBackEnd), so the backend draws one frame while the frontend fills the next
 static CRenderableSurface RSStorage[2][MAX_RENDER_SURFACES];
 static unsigned int NextRS[2]={0,0};
 
@@ -3503,9 +3502,7 @@ static inline float G2_GetVertBoneWeightNotSlow( const mdxmVertex_t *pVert, cons
 }
 
 #ifdef VITA
-// Render-thread Ghoul2 split: the frontend snapshots each visible character's bone
-// matrices (the only G2 state whose lazy Eval mutates the CBoneCache) and the backend
-// skins from that immutable snapshot, overlapped with the next frame's scene build.
+// render-thread Ghoul2: the frontend snapshots each visible character's bone matrices and the backend skins from the snapshot
 #define G2MT_MAX_CHARS			192		// past this a character's surfaces drop for the frame
 #define G2MT_MAX_SURFS_PER_CHAR	128
 #define G2MT_MAX_BONES			512		// per-cache dedup bitmask range
@@ -3547,8 +3544,7 @@ void R_FreeGhoulSkinArena( void )
 	}
 }
 
-// Skin one surface's vertices from a bone snapshot on the frontend; same math as
-// the backend loop in RB_SurfaceGhoul so the two paths stay identical.
+// skins one surface from a bone snapshot with the same math as RB_SurfaceGhoul
 static void G2_PreSkinSurface( const mdxmSurface_t *surface, const mdxaBone_t *snap, float *out )
 {
 	const int numVerts = surface->numVerts;
@@ -3612,8 +3608,7 @@ static void G2_PreSkinSurface( const mdxmSurface_t *surface, const mdxaBone_t *s
 #undef PS_BONE
 }
 
-// --- anim worker (core 1): drains whole characters (bone eval + pre-skin) with core 0.
-// Safe per character: each job owns its CBoneCache; G2_TransformBone is statics-free now.
+// anim worker (core 1) drains whole characters (bone eval + pre-skin) alongside core 0; each job owns its CBoneCache
 static volatile int  s_g2JobNext = 0;		// shared take-index over s_g2Groups, atomic
 
 // entity light setup shares the drain: per-entity lightgrid sample + dlight adds
@@ -3625,8 +3620,7 @@ static volatile int   s_lightEntNext = 0;
 void R_QueueEntityLightJob( trRefEntity_t *ent )
 {
 	if ( r_renderThread && r_renderThread->integer && s_lightEntCount < G2MT_MAX_LIGHT_ENTS ) {
-		// a mirror or portal view re-adds the same entity, and two workers accumulating
-		// into one entity would double its light, so it is queued once
+		// queued once per entity even when a mirror or portal view re-adds it
 		for ( int i = 0; i < s_lightEntCount; i++ ) {
 			if ( s_lightEnts[i] == ent ) {
 				return;
@@ -3712,9 +3706,7 @@ static qboolean G2_EnsureSkinWorker( void )
 	return qtrue;
 }
 
-// Render-thread mode only: called from R_AddDrawSurfCmd on the FRONTEND, once per view.
-// Every bone Eval must happen here, before hand-off; an Eval on the render thread races
-// the frontend's next-frame G2_TransformGhoulBones.
+// render-thread mode: runs every bone Eval on the frontend, once per view from R_AddDrawSurfCmd, before hand-off
 void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 {
 	const qboolean mt = (qboolean)( r_renderThread && r_renderThread->integer );
@@ -3736,7 +3728,7 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		}
 	}
 	if ( !s_g2SkinArena[buf] ) {
-		s_g2SkinArena[buf] = (byte*)malloc( G2_SKIN_ARENA_SIZE );	// best-effort; NULL -> pre-skin skipped
+		s_g2SkinArena[buf] = (byte*)malloc( G2_SKIN_ARENA_SIZE );	// NULL skips pre-skin
 	}
 	s_g2NumGroups = 0;
 
@@ -3949,8 +3941,7 @@ void RB_SurfaceGhoul( CRenderableSurface *surf )
 	CBoneCache *bones = surf->boneCache;
 
 #ifdef VITA
-	// no bone snapshot (prep cap/arena overflow): drop the surface for this frame -
-	// a live CBoneCache Eval here would race the frontend building the next frame
+	// no bone snapshot (prep cap or arena overflow): the surface drops for this frame
 	if ( r_renderThread && r_renderThread->integer && !surf->boneMats )
 	{
 		static int s_dropWarn = 0;

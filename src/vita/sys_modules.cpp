@@ -1,8 +1,8 @@
 /*
 ===========================================================================
-Copyright (C) 2026, JAMPVITA contributors
+Copyright (C) 2026, JAVITA contributors
 
-This file is part of JAMPVITA, a PS Vita port built on the OpenJK
+This file is part of JAVITA, a PS Vita port built on the OpenJK
 source code.
 
 OpenJK is free software; you can redistribute it and/or modify it
@@ -19,9 +19,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// Static module dispatch. game/cgame/ui are each partially linked (ld -r) with
-// every symbol localized except GetModuleAPI renamed per module (objcopy), so
-// one ELF carries three modules whose bg_* copies can't collide.
+// static dispatch to game/cgame/ui, each linked with ld -r, symbols localized and GetModuleAPI renamed per module
 
 #include <string.h>
 #include <stdio.h>

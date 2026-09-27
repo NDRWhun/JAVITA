@@ -1430,11 +1430,7 @@ void CL_KeyUpEvent( int key, unsigned time )
 }
 
 #ifdef VITA
-// --- Vita combo (held-modifier) layer ----------------------------------------
-// Rear-touch top-left zone (A_AUX1 from IN_VitaRearTouch) is a held modifier: while
-// down, face/d-pad buttons fire INSTANT alternate commands instead of their bind.
-// Only instant commands live here so a released modifier can't strand a held (+) command;
-// the alt role is latched per key at its down edge. Index = key - A_JOY0.
+// combo layer: while A_AUX1 (rear top-left) is held, face/d-pad keys fire instant alt commands latched per key at the down edge; index = key - A_JOY0
 static qboolean			vita_modDown  = qfalse;
 static unsigned			vita_altLatch = 0;
 static qboolean			vita_circleClosedConsole = qfalse;

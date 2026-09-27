@@ -21,8 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-// gxm_state.h -- the engine's GLS_ bitmask translated for GXM.
-// Blending is not context state here; it is compiled into program instances.
+// gxm_state.h -- the engine's GLS_ bitmask translated for GXM; blending is compiled into program instances
 
 #ifndef GXM_STATE_H
 #define GXM_STATE_H

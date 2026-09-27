@@ -59,8 +59,7 @@ void	 GXM_FreeVertexUsse( SceUID uid );
 void	*GXM_AllocFragmentUsse( unsigned int size, SceUID *uid, unsigned int *usseOffset );
 void	 GXM_FreeFragmentUsse( SceUID uid );
 
-// call on the thread that will own rendering; every other entry point below
-// must then be called from that same thread
+// the calling thread owns rendering; every entry point below runs on it
 bool     GXM_DeviceInit( void );
 void	 GXM_DeviceShutdown( void );
 

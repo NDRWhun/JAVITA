@@ -599,12 +599,10 @@ Upload32
 ===============
 */
 #ifdef VITA
-// DXT cache on ux0: encode once, later loads upload the pre-compressed mip chain.
-// Gated by r_texCacheCompressed; any failure falls back to the stock RGBA path.
+// DXT mip-chain cache on ux0 (r_texCacheCompressed); any failure uses the RGBA path
 #define TEXCACHE_MAGIC_DXT 0x41435456u	// "VTCA"; bump to invalidate
 #define TEXCACHE_MAX_MIPS  16
-// flags occupy what used to be texbits, which was written as zero and never read;
-// an entry without VALID predates the field, so the checks it guards are skipped
+// header flags; an entry without VALID skips the checks the other flags drive
 #define TEXCACHE_FLAG_VALID		0x80000000u
 #define TEXCACHE_FLAG_MIPMAP	0x00000001u
 enum { TEXCACHE_FMT_DXT1 = 1, TEXCACHE_FMT_DXT5 = 5 };
@@ -615,7 +613,7 @@ typedef struct {					// 32-byte LE header, native Vita byte order
 	unsigned int height;
 	unsigned int mipCount;			// 1..TEXCACHE_MAX_MIPS
 	unsigned int picmip;			// r_picmip it was baked with, 0 when the image ignores picmip; mismatch = rebuild
-	unsigned int flags;				// TEXCACHE_FLAG_*; 0 in entries baked before the field existed
+	unsigned int flags;				// TEXCACHE_FLAG_*; 0 in legacy entries
 	unsigned int totalSize;			// sum of per-mip sizes
 } texCacheHdrDxt_t;
 
@@ -626,8 +624,7 @@ static void R_TexCacheStoreDxt( const char *name, const texCacheHdrDxt_t *hdr,
 static char s_uploadDxtKey[MAX_QPATH];	// asset name of the in-flight Upload32, set by R_CreateImage
 static qboolean s_texCacheKeep;			// the cache file validated but its upload failed, so the rebuild must not overwrite it
 
-// Encode one mip as row-major, edge-clamped 4x4 DXT blocks into blob+blobOfs, upload it
-// pre-compressed, return the level's byte size.
+// encodes one mip as edge-clamped DXT blocks at blob+blobOfs, uploads it and returns its byte size
 static int R_DxtEncodeUploadAppend( int level, GLenum glFmt, int w, int h, const byte *rgba,
 									byte *blob, int blobOfs )
 {
@@ -929,7 +926,7 @@ static qboolean R_BakeEnqueue( image_t *image, unsigned *pic, int width, int hei
 	const int blobCap = w * h * 2 + 4096;	// a full DXT5 chain is under w*h*4/3
 	const int bytes   = width * height * 4 + blobCap;
 
-	// the decoder shares the temp arena, so earlier jobs are waited out rather than piled up
+	// the decoder shares the temp arena, so pending jobs drain until this one fits the in-flight budget
 	while ( s_bakePending && s_bakeInflight + bytes > BAKE_INFLIGHT_MAX )
 		R_BakeDrain( qtrue, qfalse );
 	R_BakeDrain( qfalse, qfalse );
@@ -1120,8 +1117,7 @@ static void Upload32( unsigned *data,
 		*pUploadHeight = height;
 
 #ifdef VITA
-		// DXT cache write path: encode the mip chain, upload it pre-compressed, store it.
-		// Alloc failure falls through to stock RGBA.
+		// DXT cache write: encode, upload and store the mip chain; alloc failure uses the RGBA path
 		if ( !bRectangle && r_texCacheCompressed && r_texCacheCompressed->integer && s_uploadDxtKey[0]
 			&& ( *pformat == GL_COMPRESSED_RGB_S3TC_DXT1_EXT || *pformat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ) )
 		{
@@ -1595,8 +1591,7 @@ image_t *R_CreateImage( const char *name, const byte *pic, int width, int height
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 
-// DXT mip-chain cache (see the block above Upload32); dir shared with JA SP (same assets)
-// FNV-1a 64 of a key: how the v1 pack index, 'JKTD' delta records and loose files are looked up.
+// FNV-1a 64 cache key hash for the v1 pack index, 'JKTD' delta records and loose files; the dir is shared with JA SP
 static unsigned long long R_TexCacheDxt_Hash( const char *name )
 {
 	unsigned long long h = 14695981039346656037ULL;
@@ -1610,17 +1605,15 @@ static void R_TexCacheDxt_Key( const char *name, char out[MAX_QPATH] )
 	R_ImageMappingName( name, out, MAX_QPATH );
 }
 
-// sharded on the top hash byte: an exFAT lookup scans the directory, and one flat
-// folder holds every baked entry
-static unsigned R_TexCacheDxt_Path( const char *name, char *out, int outSize )
+// sharded on the top hash byte to keep exFAT directory scans short
+static void R_TexCacheDxt_Path( const char *name, char *out, int outSize )
 {
 	const unsigned long long h = R_TexCacheDxt_Hash( name );
 	const unsigned shard = (unsigned)( h >> 56 );
 	Com_sprintf( out, outSize, "ux0:data/JAVITA/texcache_dxt/%02x/%016llx.bin", shard, h );
-	return shard;
 }
 
-// where entries baked before the sharding lived; a card full of them still reads
+// legacy unsharded entry path, still read
 static void R_TexCacheDxt_PathFlat( const char *name, char *out, int outSize )
 {
 	Com_sprintf( out, outSize, "ux0:data/JAVITA/texcache_dxt/%016llx.bin", R_TexCacheDxt_Hash( name ) );
@@ -2176,8 +2169,7 @@ static byte *R_TexCacheDxt_ReadPacked( const char *key, qboolean mipmap, qboolea
 	return NULL;
 }
 
-// Build an image_t straight from a cached DXT mip chain, no decode or encode. Returns NULL
-// on a miss, version/picmip mismatch, or corruption so the caller falls back to the load path.
+// builds an image_t from a cached DXT mip chain; NULL on a miss, version/picmip mismatch or corruption
 static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qboolean allowPicmip,
 										   qboolean allowTC, int glWrapClampMode )
 {
@@ -2196,7 +2188,7 @@ static image_t *R_CreateImageFromDxtCache( const char *name, qboolean mipmap, qb
 	byte *entry = R_TexCacheDxt_ReadPacked( key, mipmap, allowPicmip, &hdr, mipSizes, &total, &blob );	// owns the bytes the upload reads
 	if ( !entry )
 	{
-		// loose files: the sharded entry, then the flat layout that predates sharding
+		// loose files: the sharded path, then the flat path
 		char path[256];
 		R_TexCacheDxt_Path( key, path, sizeof(path) );
 		SceUID fd = sceIoOpen( path, SCE_O_RDONLY, 0 );

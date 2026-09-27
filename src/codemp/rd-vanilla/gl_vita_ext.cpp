@@ -19,21 +19,14 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-/*
-============================================================================
-JK2VITA — Vita GL extension compatibility shim, storage + stubs.
-See gl_vita_ext.h. These unsupported-extension function pointers stay NULL so
-the renderer's runtime gates (`if (qgl... )`) skip the corresponding paths.
-============================================================================
-*/
+// storage for the NULL extension pointers declared in gl_vita_ext.h, and the no-op core shims
 #ifdef VITA
 
 #include "gl_vita_ext.h"
 
 extern "C" {
 
-/* only the integer glTexParameter exists here; the float form is used solely for
-   GL_TEXTURE_BORDER_COLOR, which has no effect under GXM. Best-effort no-op. */
+/* only caller sets GL_TEXTURE_BORDER_COLOR, which GXM ignores */
 void glTexParameterfv(GLenum target, GLenum pname, const GLfloat *params)
 {
 	(void)target; (void)pname; (void)params;
