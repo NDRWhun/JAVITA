@@ -103,6 +103,7 @@ volatile qboolean pendingCtxInit = qfalse;
 static SceUID rend_thid = -1;
 static volatile qboolean rend_should_exit = qfalse;
 static volatile int rend_handedBuffer = 0;
+static volatile qboolean rend_parked = qfalse;	// backend sits on Wait(in) until the next hand-off
 static volatile int rend_error = 0;	// index of the frame being handed off; written before Signal(in), read after Wait(in)
 
 /*
@@ -187,6 +188,7 @@ void R_StartRenderThread( void ) {
 	rend_should_exit = qfalse;
 	pendingCtxInit   = qfalse;
 	rend_error       = 0;
+	rend_parked      = qfalse;
 	rend_init_done = sceKernelCreateSema( "rend_init", 0, 0, 2, NULL );
 	rend_mutex_in  = sceKernelCreateSema( "rend_in",   0, 0, 1, NULL );
 	rend_mutex_out = sceKernelCreateSema( "rend_out",  0, 0, 1, NULL );
@@ -208,6 +210,7 @@ void R_StopRenderThread( void ) {
 		return;
 	}
 	rend_should_exit = qtrue;
+	rend_parked      = qfalse;
 	sceKernelSignalSema( rend_mutex_in, 1 );
 	// bounded, so a backend stuck in gxm reports itself instead of hanging teardown
 	SceUInt tmo = 5 * 1000 * 1000;
@@ -266,6 +269,7 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters, qboolean endOfFrame
 			R_PerformanceCounters();
 		}
 		rend_handedBuffer = activeBackEnd;
+		rend_parked = qfalse;
 		sceKernelSignalSema( rend_mutex_in, 1 );
 		if ( endOfFrame ) {
 			activeBackEnd = !activeBackEnd;
@@ -302,6 +306,13 @@ void R_IssuePendingRenderCommands( void ) {
 	if ( !tr.registered ) {
 		return;
 	}
+#ifdef VITA
+	// nothing can unpark the backend but a hand-off, so a second drain over an
+	// empty list would only buy two semaphore round trips at vsync cadence
+	if ( r_renderThread && r_renderThread->integer && rend_parked && !backEndData->commands.used ) {
+		return;
+	}
+#endif
 	R_IssueRenderCommands( qfalse, qfalse );
 
 #ifdef VITA
@@ -311,6 +322,7 @@ void R_IssuePendingRenderCommands( void ) {
 	if ( r_renderThread && r_renderThread->integer ) {
 		sceKernelWaitSema( rend_mutex_out, 1, NULL );
 		sceKernelSignalSema( rend_mutex_out, 1 );
+		rend_parked = qtrue;
 	}
 #endif
 }
