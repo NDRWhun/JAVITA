@@ -603,6 +603,8 @@ char   *FS_BuildOSPath( const char *base, const char *game, const char *qpath );
 qboolean FS_MountDownloadedPak( const char *localName );
 
 int		FS_GetFileList(  const char *path, const char *extension, char *listbuf, int bufsize );
+int		FS_Generation( void );
+// changes whenever the visible search path does: restart, mounted download, pure list
 int		FS_GetModList(  char *listbuf, int bufsize );
 
 fileHandle_t	FS_FOpenFileWrite( const char *qpath, qboolean safe=qtrue );

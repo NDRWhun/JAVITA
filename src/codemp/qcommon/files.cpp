@@ -39,6 +39,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #endif
 #include <minizip/unzip.h>
 
+#ifdef VITA
+#include <psp2/io/stat.h>
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -220,6 +224,9 @@ typedef struct directory_s {
 	char		path[MAX_OSPATH];		// c:\jediacademy\gamedata
 	char		fullpath[MAX_OSPATH];	// c:\jediacademy\gamedata\base
 	char		gamedir[MAX_OSPATH];	// base
+#ifdef VITA
+	qboolean	present;				// a missing dir still costs a real sceIoOpen per lookup
+#endif
 } directory_t;
 
 typedef struct searchpath_s {
@@ -278,6 +285,7 @@ static fileHandleData_t	fsh[MAX_FILE_HANDLES];
 // TTimo - https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=540
 // wether we did a reorder on the current search path when joining the server
 static qboolean fs_reordered = qfalse;
+static int		fs_generation = 0;		// moves whenever the visible search path changes
 
 // never load anything from pk3 files that are not present at the server when pure
 static int		fs_numServerPaks = 0;
@@ -536,6 +544,27 @@ char *FS_BuildOSPath( const char *base, const char *game, const char *qpath ) {
 	return ospath[toggle];
 }
 
+#ifdef VITA
+/*
+============
+FS_RestatSearchDirs
+
+Refreshes the "directory exists" flag the read path uses to skip dead searchpaths.
+============
+*/
+static void FS_RestatSearchDirs( void )
+{
+	for ( searchpath_t *sp = fs_searchpaths ; sp ; sp = sp->next ) {
+		if ( !sp->dir || sp->dir->present ) {
+			continue;
+		}
+		SceIoStat st;
+		sp->dir->present = (qboolean)( sceIoGetstat( sp->dir->fullpath, &st ) >= 0
+			&& SCE_S_ISDIR( st.st_mode ) );
+	}
+}
+#endif
+
 /*
 ============
 FS_CreatePath
@@ -574,6 +603,9 @@ qboolean FS_CreatePath (char *OSPath) {
 			*ofs = PATH_SEP;
 		}
 	}
+#ifdef VITA
+	FS_RestatSearchDirs();	// a dir created now must stop being skipped by the read path
+#endif
 	return qfalse;
 }
 
@@ -1531,6 +1563,11 @@ long FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean unique
 				}
 
 				dir = search->dir;
+#ifdef VITA
+				if ( !dir->present ) {
+					continue;
+				}
+#endif
 
 				netpath = FS_BuildOSPath( dir->path, dir->gamedir, filename );
 				fsh[*file].handleFiles.file.o = fopen (netpath, "rb");
@@ -2531,6 +2568,10 @@ int	FS_GetFileList(  const char *path, const char *extension, char *listbuf, int
 	return nFiles;
 }
 
+int FS_Generation( void ) {
+	return fs_generation;
+}
+
 /*
 =======================
 Sys_ConcatenateFileLists
@@ -3114,6 +3155,13 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	Q_strncpyz( search->dir->path, path, sizeof( search->dir->path ) );
 	Q_strncpyz( search->dir->fullpath, curpath, sizeof( search->dir->fullpath ) );
 	Q_strncpyz( search->dir->gamedir, dir, sizeof( search->dir->gamedir ) );
+#ifdef VITA
+	{
+		SceIoStat st;
+		search->dir->present = (qboolean)( sceIoGetstat( curpath, &st ) >= 0
+			&& SCE_S_ISDIR( st.st_mode ) );
+	}
+#endif
 	search->next = fs_searchpaths;
 	fs_searchpaths = search;
 
@@ -3656,6 +3704,7 @@ qboolean FS_MountDownloadedPak( const char *localName ) {
 	search->pack = pak;
 	search->next = *link;
 	*link = search;
+	fs_generation++;
 
 	FS_ReorderPurePaks();
 	return qtrue;
@@ -3865,6 +3914,7 @@ void FS_Startup( const char *gameName ) {
 	}
 #endif
 	Com_Printf( "%d files in pk3 files\n", fs_packFiles );
+	fs_generation++;
 #ifdef VITA
 	FS_InitWorkerHandles();
 #endif
@@ -4103,10 +4153,18 @@ void FS_PureServerSetLoadedPaks( const char *pakSums, const char *pakNames ) {
 		c = MAX_SEARCH_PATHS;
 	}
 
+	// the pure list decides what FS_ListFilteredFiles and FS_FOpenFileRead can see
+	if ( c != fs_numServerPaks ) {
+		fs_generation++;
+	}
 	fs_numServerPaks = c;
 
 	for ( i = 0 ; i < c ; i++ ) {
-		fs_serverPaks[i] = atoi( Cmd_Argv( i ) );
+		int sum = atoi( Cmd_Argv( i ) );
+		if ( fs_serverPaks[i] != sum ) {
+			fs_generation++;
+		}
+		fs_serverPaks[i] = sum;
 	}
 
 	if (fs_numServerPaks) {

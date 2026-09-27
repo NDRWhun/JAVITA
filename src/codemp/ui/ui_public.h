@@ -375,6 +375,7 @@ typedef struct uiImport_s {
 		float			(*R_Font_StrLenPixels)					( const char *text, const int iFontIndex, const float scale );
 		void			(*AddCommand)							( const char *cmd_name );
 		void			(*RemoveCommand)						( const char *cmd_name );
+		int				(*FS_Generation)						( void );
 	} ext;
 } uiImport_t;
 
