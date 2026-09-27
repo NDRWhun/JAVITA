@@ -33,5 +33,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: JAVITA-vpk
-          path: build/JAVITA.vpk
+          path: |
+            build/JAVITA.vpk
+            build/JAMPVITA.vpk
           if-no-files-found: error

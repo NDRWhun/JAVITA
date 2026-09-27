@@ -6,15 +6,21 @@ build*/
 *.o
 *.a
 param.sfo
+*.sfo
 eboot.bin
+*.patch
+*.log
 
 # your own game data
 /base/
 *.pk3
 
 # editor/os
+.vs/
 .vscode/
 .idea/
+*.user
+*.suo
 *.swp
 Thumbs.db
 .DS_Store
@@ -31,3 +37,5 @@ RELEASE-*.md
 tools/texbake/texbake.exe
 tools/texbake/obj/
 tools/texbake/texcache_out/
+__pycache__/
+*.pyc
