@@ -236,6 +236,23 @@ const int convert_code_mono	= 1;
 const int convert_code_stereo = 0;
 const int freq_limit		= 24000;	// no idea what this is about, but it's always this value so...
 
+// Largest reduction code (0..2) whose decode rate still covers iOutputRate, probed from the decoder's own rate for this header.
+static int C_MP3_ReductionCode(MPEG_HEAD *pHead, int iFrameBytes, int iTransformCode, int bStereoDesired, int iOutputRate)
+{
+	DEC_INFO decinfo;
+	int iReduction = 0;
+
+	if (iOutputRate <= 0 || !audio.decode_init(pHead, iFrameBytes, reduction_code, iTransformCode, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
+		return 0;
+
+	audio.decode_info(&decinfo);
+
+	while (iReduction < 2 && (decinfo.samprate >> (iReduction + 1)) >= iOutputRate)
+		iReduction++;
+
+	return iReduction;
+}
+
 // the entire decode mechanism uses this now...
 //
 MP3STREAM _MP3Stream;
@@ -321,7 +338,7 @@ char *C_MP3_IsValid(void *pvData, int iDataLen, int bStereoDesired)
 
 // char *return is NZ for any errors (no trailing CR!)
 //
-char* C_MP3_GetHeaderData(void *pvData, int iDataLen, int *piRate, int *piWidth, int *piChannels, int bStereoDesired)
+char* C_MP3_GetHeaderData(void *pvData, int iDataLen, int *piRate, int *piWidth, int *piChannels, int bStereoDesired, int iOutputRate)
 {
 	unsigned int iRealDataStart;
 	MPEG_HEAD head;
@@ -338,7 +355,7 @@ char* C_MP3_GetHeaderData(void *pvData, int iDataLen, int *piRate, int *piWidth,
 		return "MP3ERR: Bad or unsupported file!";
 	}
 
-	if (audio.decode_init(&head, iFrameBytes, reduction_code, iRealDataStart, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
+	if (audio.decode_init(&head, iFrameBytes, C_MP3_ReductionCode(&head, iFrameBytes, iRealDataStart, bStereoDesired, iOutputRate), iRealDataStart, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
 	{
 		audio.decode_info(&decinfo);
 
@@ -366,7 +383,7 @@ char* C_MP3_GetHeaderData(void *pvData, int iDataLen, int *piRate, int *piWidth,
 //
 // char *return is NZ for any errors (no trailing CR!)
 //
-char *C_MP3_GetUnpackedSize(void *pvData, int iSourceBytesRemaining, int *piUnpackedSize, int bStereoDesired )
+char *C_MP3_GetUnpackedSize(void *pvData, int iSourceBytesRemaining, int *piUnpackedSize, int bStereoDesired, int iOutputRate )
 {
 	int iReadLimit;
 	unsigned int iRealDataStart;
@@ -404,7 +421,7 @@ char *C_MP3_GetUnpackedSize(void *pvData, int iSourceBytesRemaining, int *piUnpa
 		{
 			// init decoder...
 
-			if (audio.decode_init(&head, iFrameBytes, reduction_code, iRealDataStart, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
+			if (audio.decode_init(&head, iFrameBytes, C_MP3_ReductionCode(&head, iFrameBytes, iRealDataStart, bStereoDesired, iOutputRate), iRealDataStart, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
 			{
 				audio.decode_info(&decinfo);
 
@@ -468,7 +485,7 @@ char *C_MP3_GetUnpackedSize(void *pvData, int iSourceBytesRemaining, int *piUnpa
 
 
 
-char *C_MP3_UnpackRawPCM( void *pvData, int iSourceBytesRemaining, int *piUnpackedSize, void *pbUnpackBuffer, int bStereoDesired)
+char *C_MP3_UnpackRawPCM( void *pvData, int iSourceBytesRemaining, int *piUnpackedSize, void *pbUnpackBuffer, int bStereoDesired, int iOutputRate)
 {
 	int iReadLimit;
 	unsigned int iRealDataStart;
@@ -503,7 +520,7 @@ char *C_MP3_UnpackRawPCM( void *pvData, int iSourceBytesRemaining, int *piUnpack
 		{
 			// init decoder...
 
-			if (audio.decode_init(&head, iFrameBytes, reduction_code, iRealDataStart, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
+			if (audio.decode_init(&head, iFrameBytes, C_MP3_ReductionCode(&head, iFrameBytes, iRealDataStart, bStereoDesired, iOutputRate), iRealDataStart, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
 			{
 				audio.decode_info(&decinfo);
 
@@ -594,51 +611,21 @@ char *C_MP3Stream_DecodeInit( LP_MP3STREAM pSFX_MP3Stream, void *pvSourceData, i
 	assert(pMP3Stream->iSourceFrameBytes);
 	if (pMP3Stream->iSourceFrameBytes)
 	{
-		if (audio.decode_init(&head, pMP3Stream->iSourceFrameBytes, reduction_code, pMP3Stream->iSourceReadIndex, bStereoDesired?convert_code_stereo:convert_code_mono, freq_limit))
+		pMP3Stream->iRewind_FinalConvertCode = bStereoDesired?convert_code_stereo:convert_code_mono;	// default = 1 (mono), OR with 8 for 8-bit output
+		if (iGameAudioSampleBits == 8)
+			pMP3Stream->iRewind_FinalConvertCode |= 8;
+
+		pMP3Stream->iRewind_FinalReductionCode = C_MP3_ReductionCode(&head, pMP3Stream->iSourceFrameBytes, pMP3Stream->iSourceReadIndex, bStereoDesired, iGameAudioSampleRate);	// 0 = full rate, 1 = half, 2 = quarter
+
+		if (audio.decode_init(&head, pMP3Stream->iSourceFrameBytes, pMP3Stream->iRewind_FinalReductionCode, pMP3Stream->iSourceReadIndex, pMP3Stream->iRewind_FinalConvertCode, freq_limit))
 		{
-			pMP3Stream->iRewind_FinalReductionCode = reduction_code;	// default = 0 (no reduction), 1=half, 2 = quarter
-
-			pMP3Stream->iRewind_FinalConvertCode   = bStereoDesired?convert_code_stereo:convert_code_mono;
-																		// default = 1 (mono), OR with 8 for 8-bit output
-
-			// only now can we ask what kind of properties this file has, and then adjust to fit what the game wants...
-			//
 			audio.decode_info(&decinfo);
 
-//			printf("\n output samprate = %6ld",decinfo.samprate);
-//			printf("\n output channels = %6d", decinfo.channels);
-//			printf("\n output bits     = %6d", decinfo.bits);
-//			printf("\n output type     = %6d", decinfo.type);
-
-			// decoder offers half or quarter rate adjustement only...
+			// sod it, no harm in one last check... (should never happen)
 			//
-			if (iGameAudioSampleRate == decinfo.samprate>>1)
-				pMP3Stream->iRewind_FinalReductionCode = 1;
-			else
-			if (iGameAudioSampleRate == decinfo.samprate>>2)
-				pMP3Stream->iRewind_FinalReductionCode = 2;
-
-			if (iGameAudioSampleBits == decinfo.bits>>1)	// if game wants 8 bit sounds, then setup for that
-				pMP3Stream->iRewind_FinalConvertCode |= 8;
-
-			if (audio.decode_init(&head, pMP3Stream->iSourceFrameBytes, pMP3Stream->iRewind_FinalReductionCode, pMP3Stream->iSourceReadIndex, pMP3Stream->iRewind_FinalConvertCode, freq_limit))
+			if ( iGameAudioSampleRate != decinfo.samprate || iGameAudioSampleBits != decinfo.bits )
 			{
-				audio.decode_info(&decinfo);
-#ifdef _DEBUG
-				assert( iGameAudioSampleRate == decinfo.samprate );
-				assert( iGameAudioSampleBits == decinfo.bits );
-#endif
-
-				// sod it, no harm in one last check... (should never happen)
-				//
-				if ( iGameAudioSampleRate != decinfo.samprate || iGameAudioSampleBits != decinfo.bits )
-				{
-					psReturn = "MP3ERR: Decoder unable to convert to current game audio settings";
-				}
-			}
-			else
-			{
-				psReturn = "MP3ERR: Decoder failed to initialise for pass 2 sample adjust";
+				psReturn = "MP3ERR: Decoder unable to convert to current game audio settings";
 			}
 		}
 		else
