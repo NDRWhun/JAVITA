@@ -75,6 +75,19 @@ float cgAbsorbFadeVal = 0;
 int cgProtectTime = 0;
 int cgProtectFadeTime = 0;
 float cgProtectFadeVal = 0;
+
+// zeroes the force power screen tint timers at cgame start
+void CG_ResetForceTints( void )
+{
+	cgRageTime = cgRageFadeTime = 0;
+	cgRageFadeVal = 0;
+	cgRageRecTime = cgRageRecFadeTime = 0;
+	cgRageRecFadeVal = 0;
+	cgAbsorbTime = cgAbsorbFadeTime = 0;
+	cgAbsorbFadeVal = 0;
+	cgProtectTime = cgProtectFadeTime = 0;
+	cgProtectFadeVal = 0;
+}
 //===============================================================
 
 
