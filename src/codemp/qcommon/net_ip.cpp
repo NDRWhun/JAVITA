@@ -60,6 +60,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifdef VITA
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
+#include <psp2/net/http.h>
 #include <psp2/sysmodule.h>
 #include <psp2/kernel/threadmgr.h>
 #endif
@@ -236,7 +237,7 @@ static qboolean Sys_VitaResolve( const char *host, uint32_t *addr ) {
 	dnsEntry_t	*slot;
 	size_t		i;
 	int			state = 0;
-	static int	s_rid = -1;
+	int			rid, ret;
 	SceNetInAddr ia;
 
 	for ( i = 0; i < ARRAY_LEN( s_dnsCache ); i++ ) {
@@ -249,11 +250,13 @@ static qboolean Sys_VitaResolve( const char *host, uint32_t *addr ) {
 	// newlib's resolver blocks without a bound, so the sceNet one is used with a timeout
 	if ( sceNetCtlInetGetState( &state ) < 0 || state != SCE_NETCTL_STATE_CONNECTED )
 		return qfalse;
-	if ( s_rid < 0 )
-		s_rid = sceNetResolverCreate( "jamp_dns", NULL, 0 );
-	if ( s_rid < 0 )
+	// one resolver per lookup, with the resolve timeout and retry count of the system HTTP library
+	rid = sceNetResolverCreate( "jamp_dns", NULL, 0 );
+	if ( rid < 0 )
 		return qfalse;
-	if ( sceNetResolverStartNtoa( s_rid, host, &ia, 2 * 1000 * 1000, 1, 0 ) < 0 )
+	ret = sceNetResolverStartNtoa( rid, host, &ia, SCE_HTTP_DEFAULT_RESOLVER_TIMEOUT, SCE_HTTP_DEFAULT_RESOLVER_RETRY, 0 );
+	sceNetResolverDestroy( rid );
+	if ( ret < 0 )
 		return qfalse;
 	*addr = ia.s_addr;
 
