@@ -37,6 +37,8 @@ extern void CG_RegisterNPCCustomSounds( clientInfo_t *ci );
 extern qboolean G_AddSexToMunroString ( char *string, qboolean qDoBoth );
 extern int G_ParseAnimFileSet( const char *skeletonName, const char *modelName=0);
 extern void CG_DrawDataPadInventorySelect( void );
+extern int cg_saberOnSoundTime[MAX_GENTITIES];
+extern void CG_ResetForceTints( void );
 
 void CG_Init( int serverCommandSequence );
 qboolean CG_ConsoleCommand( void );
@@ -2124,6 +2126,9 @@ void CG_PreInit() {
 	iCGResetCount = 0;
 	// no cgame dll reload in a static elf, so the last map's props would outlive it
 	NumMiscEnts = 0;
+	// clear the per-entity saber-on sound debounce
+	memset( cg_saberOnSoundTime, 0, sizeof( cg_saberOnSoundTime ) );
+	CG_ResetForceTints();
 
 	CG_RegisterCvars();
 
