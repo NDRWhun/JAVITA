@@ -624,6 +624,72 @@ void CL_ParseGamestate( msg_t *msg ) {
 
 //=====================================================================
 
+// blocks received ahead of the expected one, indexed by block number modulo the window
+static unsigned char	dlAheadData[MAX_DOWNLOAD_WINDOW][MAX_DOWNLOAD_BLKSIZE];
+static int				dlAheadSize[MAX_DOWNLOAD_WINDOW];
+static int				dlAheadBlock[MAX_DOWNLOAD_WINDOW];
+static qboolean			dlAheadValid[MAX_DOWNLOAD_WINDOW];
+
+/*
+=====================
+CL_WriteDownloadBlock
+
+Writes and acknowledges the expected block; returns qfalse once the file has finished or failed
+=====================
+*/
+static qboolean CL_WriteDownloadBlock( const unsigned char *data, int size ) {
+	// open the file if not opened yet
+	if (!clc.download)
+	{
+		clc.download = FS_SV_FOpenFileWrite( clc.downloadTempName );
+
+		if (!clc.download) {
+			Com_Printf( "Could not create %s\n", clc.downloadTempName );
+			CL_AddReliableCommand( "stopdl", qfalse );
+			CL_NextDownload();
+			return qfalse;
+		}
+
+		// a new file starts with no held blocks
+		Com_Memset( dlAheadValid, 0, sizeof( dlAheadValid ) );
+	}
+
+	if (size)
+		FS_Write( data, size, clc.download );
+
+	CL_AddReliableCommand( va("nextdl %d", clc.downloadBlock), qfalse );
+	clc.downloadBlock++;
+
+	clc.downloadCount += size;
+
+	// So UI gets access to it
+	Cvar_SetValue( "cl_downloadCount", clc.downloadCount );
+
+	if (!size) { // A zero length block means EOF
+		if (clc.download) {
+			FS_FCloseFile( clc.download );
+			clc.download = 0;
+
+			// rename the file
+			FS_SV_Rename ( clc.downloadTempName, clc.downloadName, qfalse );
+		}
+
+		// send intentions now
+		// We need this because without it, we would hold the last nextdl and then start
+		// loading right away.  If we take a while to load, the server is happily trying
+		// to send us that last block over and over.
+		// Write it twice to help make sure we acknowledge the download
+		CL_WritePacket();
+		CL_WritePacket();
+
+		// get another file if needed
+		CL_NextDownload ();
+		return qfalse;
+	}
+
+	return qtrue;
+}
+
 /*
 =====================
 CL_ParseDownload
@@ -670,53 +736,36 @@ void CL_ParseDownload ( msg_t *msg ) {
 
 	if((clc.downloadBlock & 0xFFFF) != block)
 	{
+		const int ahead = (uint16_t)( block - clc.downloadBlock );
+
+		// hold a block from later in the current file's window until the gap before it is filled
+		if ( clc.download && ahead < MAX_DOWNLOAD_WINDOW && size <= MAX_DOWNLOAD_BLKSIZE ) {
+			const int slot = ( clc.downloadBlock + ahead ) % MAX_DOWNLOAD_WINDOW;
+
+			Com_Memcpy( dlAheadData[slot], data, size );
+			dlAheadSize[slot] = size;
+			dlAheadBlock[slot] = clc.downloadBlock + ahead;
+			dlAheadValid[slot] = qtrue;
+			return;
+		}
+
 		Com_DPrintf( "CL_ParseDownload: Expected block %d, got %d\n", (clc.downloadBlock & 0xFFFF), block);
 		return;
 	}
 
-	// open the file if not opened yet
-	if (!clc.download)
-	{
-		clc.download = FS_SV_FOpenFileWrite( clc.downloadTempName );
+	if ( !CL_WriteDownloadBlock( data, size ) )
+		return;
 
-		if (!clc.download) {
-			Com_Printf( "Could not create %s\n", clc.downloadTempName );
-			CL_AddReliableCommand( "stopdl", qfalse );
-			CL_NextDownload();
-			return;
-		}
-	}
+	// write and acknowledge every held block that is now next in order
+	for ( ;; ) {
+		const int slot = clc.downloadBlock % MAX_DOWNLOAD_WINDOW;
 
-	if (size)
-		FS_Write( data, size, clc.download );
+		if ( !dlAheadValid[slot] || dlAheadBlock[slot] != clc.downloadBlock )
+			break;
 
-	CL_AddReliableCommand( va("nextdl %d", clc.downloadBlock), qfalse );
-	clc.downloadBlock++;
-
-	clc.downloadCount += size;
-
-	// So UI gets access to it
-	Cvar_SetValue( "cl_downloadCount", clc.downloadCount );
-
-	if (!size) { // A zero length block means EOF
-		if (clc.download) {
-			FS_FCloseFile( clc.download );
-			clc.download = 0;
-
-			// rename the file
-			FS_SV_Rename ( clc.downloadTempName, clc.downloadName, qfalse );
-		}
-
-		// send intentions now
-		// We need this because without it, we would hold the last nextdl and then start
-		// loading right away.  If we take a while to load, the server is happily trying
-		// to send us that last block over and over.
-		// Write it twice to help make sure we acknowledge the download
-		CL_WritePacket();
-		CL_WritePacket();
-
-		// get another file if needed
-		CL_NextDownload ();
+		dlAheadValid[slot] = qfalse;
+		if ( !CL_WriteDownloadBlock( dlAheadData[slot], dlAheadSize[slot] ) )
+			break;
 	}
 }
 
