@@ -4,3 +4,6 @@
 
 # PowerShell is happiest as CRLF on Windows.
 *.ps1 text eol=crlf
+
+# Shaders stay LF so psp2cgc's source hash in gxm_shaders.h matches on every checkout.
+*.cg text eol=lf
