@@ -52,6 +52,15 @@ extern bool g_bRenderGlowingObjects;
 #define MAX_GPUSKIN_DRAWS	128
 static gxmSkinDraw_t	gpuSkinDraws[MAX_GPUSKIN_DRAWS];
 static int				gpuSkinCount;
+
+// md3 surfaces of the current batch drawn from resident frames, after each stage's tess draw
+#define MAX_NATIVE_MESH_DRAWS	64
+static gxmMeshDraw_t	nativeMeshDraws[MAX_NATIVE_MESH_DRAWS];
+static int				nativeMeshCount;
+static float			nativeMeshBacklerp;
+static int				nativeMeshBatch;	// NMB_*: whether the batch's shader, entity and fog allow it
+static int				nativeMeshStatGpu, nativeMeshStatCpu;	// md3 surfaces since the last stats line
+enum { NMB_UNKNOWN, NMB_NO, NMB_YES };
 #endif
 
 /*
@@ -494,6 +503,8 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 #endif
 #ifdef USE_GXM_NATIVE
 	gpuSkinCount = 0;
+	nativeMeshCount = 0;
+	nativeMeshBatch = NMB_UNKNOWN;
 #endif
 
 	tess.registration++;
@@ -1468,6 +1479,14 @@ static void RB_FogPass( void ) {
 	}
 
 	R_DrawElements( tess.numIndexes, tess.indexes, tess.numVertexes );
+#ifdef USE_GXM_NATIVE
+	if ( nativeMeshCount ) {
+		gxmWorldFog_t wf;
+		RB_CalcFogPassInputs( tess.fogNum, &wf );
+		GXM_SetStateBits( glState.glStateBits );
+		GXM_DrawMeshFog( &wf, nativeMeshBacklerp, nativeMeshDraws, nativeMeshCount );
+	}
+#endif
 }
 
 
@@ -1968,16 +1987,13 @@ qboolean R_GpuSkinShaderOk( const shader_t *sh )
 
 /*
 ===============
-R_GpuSkinBatchOk
+R_EntityStagesOk
 
-The shader test plus what the entity and fog add on top of it.
+The shader test plus what the entity and fog add on top of it, for any entity drawn by the stage uniforms.
 ===============
 */
-qboolean R_GpuSkinBatchOk( const shader_t *sh, int renderfx, int fogNum )
+static qboolean R_EntityStagesOk( const shader_t *sh, int renderfx, int fogNum )
 {
-	if ( !r_gpuSkin || !r_gpuSkin->integer || !GXM_SkinReady() ) {
-		return qfalse;
-	}
 	if ( renderfx & ( RF_DISINTEGRATE1 | RF_DISINTEGRATE2 | RF_VOLUMETRIC | RF_DISTORTION ) ) {
 		return qfalse;	// per-vertex colour or deform effects, or the screen copy
 	}
@@ -1997,12 +2013,101 @@ qboolean R_GpuSkinBatchOk( const shader_t *sh, int renderfx, int fogNum )
 			return qfalse;	// the two terms would need different viewer vectors
 		}
 	}
+	return qtrue;
+}
+
+qboolean R_GpuSkinBatchOk( const shader_t *sh, int renderfx, int fogNum )
+{
+	if ( !r_gpuSkin || !r_gpuSkin->integer || !GXM_SkinReady() || !R_EntityStagesOk( sh, renderfx, fogNum ) ) {
+		return qfalse;
+	}
 	// a fog volume's own pass reads CPU positions; the global fog rides in the programs
 	if ( fogNum && sh->fogPass && tr.world && r_drawfog->value
 		&& ( fogNum != tr.world->globalFog || r_drawfog->value != 2 ) ) {
 		return qfalse;
 	}
 	return qtrue;
+}
+
+// md3 batches: the fog volume pass has its own program, and the tess debug views keep the CPU path
+static qboolean R_NativeMeshBatchOk( const shader_t *sh, int renderfx, int fogNum )
+{
+	if ( !r_nativeModels || !r_nativeModels->integer || !GXM_MeshReady()
+		|| r_showtris->integer || r_shownormals->integer ) {
+		return qfalse;
+	}
+	return R_EntityStagesOk( sh, renderfx, fogNum );
+}
+
+/*
+===============
+RB_NativeMeshQueue
+
+Queues an md3 surface's resident frames on the current batch; false leaves it to LerpMeshVertexes.
+===============
+*/
+static qboolean RB_NativeMeshQueue( md3Surface_t *surface )
+{
+	if ( nativeMeshBatch == NMB_UNKNOWN ) {
+		nativeMeshBatch = R_NativeMeshBatchOk( tess.shader, backEnd.currentEntity->e.renderfx, tess.fogNum ) ? NMB_YES : NMB_NO;
+	}
+	if ( nativeMeshBatch != NMB_YES ) {
+		return qfalse;
+	}
+
+	const trRefEntity_t *ent = backEnd.currentEntity;
+	const model_t *mod = R_GetModelByHandle( ent->e.hModel );
+	const gxmMeshSurface_t *gs = NULL;
+	for ( int lod = 0; lod < MD3_MAX_LODS && !gs; lod++ ) {
+		const md3Header_t *md3 = mod->md3[lod];
+		if ( !mod->gpuMesh[lod] || !md3 || (const byte *)surface < (const byte *)md3
+			|| (const byte *)surface >= (const byte *)md3 + md3->ofsEnd ) {
+			continue;
+		}
+		gs = GXM_MeshModelSurface( mod->gpuMesh[lod], surface );
+	}
+	if ( !gs ) {
+		return qfalse;
+	}
+
+	const float backlerp = ( ent->e.oldframe == ent->e.frame ) ? 0.0f : ent->e.backlerp;
+	const void *frame = GXM_MeshFrame( gs, ent->e.frame );
+	const void *oldFrame = ( backlerp != 0.0f ) ? GXM_MeshFrame( gs, ent->e.oldframe ) : frame;
+	if ( !frame || !oldFrame ) {
+		return qfalse;
+	}
+
+	if ( nativeMeshCount >= MAX_NATIVE_MESH_DRAWS || ( nativeMeshCount && backlerp != nativeMeshBacklerp ) ) {
+		RB_EndSurface();
+		RB_BeginSurface( tess.shader, tess.fogNum );
+		nativeMeshBatch = NMB_YES;
+	}
+	gxmMeshDraw_t *d = &nativeMeshDraws[nativeMeshCount++];
+	d->frame = frame;
+	d->oldFrame = oldFrame;
+	d->st = gs->st;
+	d->indexes = gs->indexes;
+	d->numIndexes = gs->numIndexes;
+	nativeMeshBacklerp = backlerp;
+	return qtrue;
+}
+
+qboolean RB_NativeMeshAdd( md3Surface_t *surface )
+{
+	if ( RB_NativeMeshQueue( surface ) ) {
+		nativeMeshStatGpu++;
+		return qtrue;
+	}
+	nativeMeshStatCpu++;
+	return qfalse;
+}
+
+void R_NativeMeshStats( char *out, int outSize, int frames )
+{
+	const int n = ( frames > 0 ) ? frames : 1;
+	snprintf( out, outSize, "MD3: native=%d cpu=%d surfaces per frame, resident=%uKB\n",
+		nativeMeshStatGpu / n, nativeMeshStatCpu / n, GXM_MeshResidentBytes() / 1024 );
+	nativeMeshStatGpu = nativeMeshStatCpu = 0;
 }
 
 /*
@@ -2033,15 +2138,14 @@ qboolean RB_GpuSkinAdd( const gxmSkinSurface_t *gs, const mdxaBone_t *bones )
 
 /*
 ===============
-RB_GpuSkinStage
+RB_EntityStageInputs
 
-Draws the queued surfaces with the state, texture and fog the stage just set for tess.
+The stage uniforms of the current entity: colour, light, viewer and texcoord transform in model space.
 ===============
 */
-static void RB_GpuSkinStage( shaderStage_t *pStage, alphaGen_t forceAlphaGen, colorGen_t forceRGBGen )
+static void RB_EntityStageInputs( shaderStage_t *pStage, alphaGen_t forceAlphaGen, colorGen_t forceRGBGen, gxmSkinStage_t &st )
 {
 	const trRefEntity_t *ent = backEnd.currentEntity;
-	gxmSkinStage_t st;
 	memset( &st, 0, sizeof( st ) );
 
 	// the uniform part of the colour is what the CPU generators give a single vertex
@@ -2105,9 +2209,26 @@ static void RB_GpuSkinStage( shaderStage_t *pStage, alphaGen_t forceAlphaGen, co
 		st.texMat[0][2] = m[0][2];	// st is zero, so only the translation survives
 		st.texMat[1][2] = m[1][2];
 	}
+}
 
+/*
+===============
+RB_NativeEntityStage
+
+Draws the queued skinned and md3 surfaces with the state, texture and fog the stage just set for tess.
+===============
+*/
+static void RB_NativeEntityStage( shaderStage_t *pStage, alphaGen_t forceAlphaGen, colorGen_t forceRGBGen )
+{
+	gxmSkinStage_t st;
+	RB_EntityStageInputs( pStage, forceAlphaGen, forceRGBGen, st );
 	GXM_SetStateBits( glState.glStateBits );
-	GXM_DrawSkinned( &st, gpuSkinDraws, gpuSkinCount );
+	if ( gpuSkinCount ) {
+		GXM_DrawSkinned( &st, gpuSkinDraws, gpuSkinCount );
+	}
+	if ( nativeMeshCount ) {
+		GXM_DrawMesh( &st, nativeMeshBacklerp, nativeMeshDraws, nativeMeshCount );
+	}
 }
 
 /*
@@ -2454,9 +2575,9 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 			//
 			R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
 #ifdef USE_GXM_NATIVE
-			if ( gpuSkinCount )
+			if ( gpuSkinCount || nativeMeshCount )
 			{
-				RB_GpuSkinStage( pStage, forceAlphaGen, forceRGBGen );
+				RB_NativeEntityStage( pStage, forceAlphaGen, forceRGBGen );
 			}
 #endif
 
@@ -2646,7 +2767,7 @@ void RB_EndSurface( void ) {
 	input = &tess;
 
 #ifdef USE_GXM_NATIVE
-	if (input->numIndexes == 0 && !gpuSkinCount) {
+	if (input->numIndexes == 0 && !gpuSkinCount && !nativeMeshCount) {
 #else
 	if (input->numIndexes == 0) {
 #endif
@@ -2733,6 +2854,7 @@ void RB_EndSurface( void ) {
 	tess.numIndexes = 0;
 #ifdef USE_GXM_NATIVE
 	gpuSkinCount = 0;
+	nativeMeshCount = 0;
 #endif
 
 	GLimp_LogComment( "----------\n" );

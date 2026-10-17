@@ -136,6 +136,7 @@ cvar_t	*r_gxmStats;
 cvar_t	*r_gxmSync;
 cvar_t	*r_gpuSkin;
 cvar_t	*r_nativeWorld;
+cvar_t	*r_nativeModels;
 cvar_t	*r_mergeLightmaps;
 #endif
 cvar_t	*r_texturebits;
@@ -1778,6 +1779,7 @@ void R_Register( void )
 	r_gxmSync            = ri.Cvar_Get( "r_gxmSync",            "0", CVAR_ARCHIVE, "" );	// 1 = drain the gpu every frame
 	r_gpuSkin            = ri.Cvar_Get( "r_gpuSkin",            "1", CVAR_ARCHIVE | CVAR_LATCH, "" );	// ghoul2 skinned in the vertex program, buffers built at model load
 	r_nativeWorld        = ri.Cvar_Get( "r_nativeWorld",        "0", CVAR_ARCHIVE | CVAR_LATCH, "" );	// world drawn from resident buffers with every stage on the GPU, built at map load
+	r_nativeModels       = ri.Cvar_Get( "r_nativeModels",       "0", CVAR_ARCHIVE | CVAR_LATCH, "" );	// md3 surfaces drawn from resident frames with every stage on the GPU, built at model load
 	r_mergeLightmaps     = ri.Cvar_Get( "r_mergeLightmaps",     "1", CVAR_ARCHIVE_ND | CVAR_LATCH, "" );	// pack lightmaps into atlas pages so world surfaces batch
 #endif
 	r_ambientScale						= ri.Cvar_Get( "r_ambientScale",					"0.6",						CVAR_CHEAT, "" );

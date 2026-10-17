@@ -32,6 +32,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "rd-gxm/gxm_backend.h"
 #include "rd-gxm/gxm_skin.h"
 #include "rd-gxm/gxm_world.h"
+#include "rd-gxm/gxm_mesh.h"
 #endif
 
 #ifdef VITA
@@ -52,6 +53,7 @@ extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
 extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
 extern cvar_t *r_gpuSkin;		// skin eligible ghoul2 surfaces in the vertex program
 extern cvar_t *r_nativeWorld;	// draw the world from resident buffers with every stage on the GPU
+extern cvar_t *r_nativeModels;	// draw md3 surfaces from resident frames with every stage on the GPU
 extern cvar_t *r_mergeLightmaps;	// pack lightmaps into atlas pages so world surfaces batch
 #endif
 void R_StartRenderThread( void );
@@ -129,6 +131,7 @@ Ghoul2 Insert End
 	qboolean	bspInstance;
 #ifdef USE_GXM_NATIVE
 	gxmSkinModel_t	*gpuSkin;		// GPU-resident surfaces of an mdxm, owned by the model cache entry
+	gxmMeshModel_t	*gpuMesh[MD3_MAX_LODS];	// GPU-resident frames of each md3 LOD, owned by the model cache entry
 #endif
 } model_t;
 
@@ -1836,6 +1839,11 @@ qboolean	RB_CalcTexMatrix( const textureBundle_t *bundle, float m[2][3] );
 // resident world: the tcMods split at one turbulence, and a stage's colours for two vertex colours
 qboolean	RB_CalcTexMatrixSplit( const textureBundle_t *bundle, float m[2][3], float post[2][2], float turb[2] );
 void		RB_NativeStageColors( shaderStage_t *pStage, const byte f0[4], const byte f1[4], byte c0[4], byte c1[4] );
+// RB_CalcFogTexCoords' per-view vectors for the current orientation, shared by the resident fog passes
+void		RB_CalcFogPassInputs( int fogNum, gxmWorldFog_t *wf );
+// md3 surfaces drawn from resident frames: tr_model.cpp builds, tr_surface.cpp queues, tr_shade.cpp draws
+qboolean	RB_NativeMeshAdd( md3Surface_t *surface );
+void		R_NativeMeshStats( char *out, int outSize, int frames );	// md3 surfaces per frame on each path since the last call
 #endif
 qboolean	RB_GxmVolumeFogPass( int fogNum, const shader_t *shader );	// the global-fog uniform covers this batch
 qboolean	RB_GxmVolumeFog( int fogNum, const shader_t *shader );	// arm the global-fog uniform for a non-tess batch

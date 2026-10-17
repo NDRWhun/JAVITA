@@ -2308,6 +2308,9 @@ const void	*RB_SwapBuffers( const void *data ) {
 			char line[256];
 			GXM_ReportStats( line, sizeof( line ), r_gxmStats->integer );
 			ri.Printf( PRINT_ALL, "%s", line );
+			R_NativeMeshStats( line, sizeof( line ), r_gxmStats->integer );
+			ri.Printf( PRINT_ALL, "%s", line );
+			GXM_LogStatsLine( line );
 		}
 	}
 #endif

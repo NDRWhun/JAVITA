@@ -544,33 +544,8 @@ static void NW_DrawDlights( shader_t *sh )
 // the fog volume pass with RB_CalcFogTexCoords' per-view vectors
 static void NW_DrawFogPass( const shader_t *sh, const gxmWorldSeg_t *segs, int numSegs )
 {
-	const fog_t *fog = tr.world->fogs + nw_fog;
 	gxmWorldFog_t wf;
-	vec3_t localVec;
-
-	VectorSubtract( backEnd.ori.origin, backEnd.viewParms.ori.origin, localVec );
-	wf.distance[0] = -backEnd.ori.modelMatrix[2] * fog->tcScale;
-	wf.distance[1] = -backEnd.ori.modelMatrix[6] * fog->tcScale;
-	wf.distance[2] = -backEnd.ori.modelMatrix[10] * fog->tcScale;
-	wf.distance[3] = DotProduct( localVec, backEnd.viewParms.ori.axis[0] ) * fog->tcScale + 1.0f / 512;
-
-	if ( fog->hasSurface ) {
-		for ( int i = 0; i < 3; i++ ) {
-			wf.depth[i] = fog->surface[0] * backEnd.ori.axis[i][0] + fog->surface[1] * backEnd.ori.axis[i][1]
-				+ fog->surface[2] * backEnd.ori.axis[i][2];
-		}
-		wf.depth[3] = -fog->surface[3] + DotProduct( backEnd.ori.origin, fog->surface );
-		wf.eyeT = DotProduct( backEnd.ori.viewOrigin, wf.depth ) + wf.depth[3];
-	} else {
-		wf.depth[0] = wf.depth[1] = wf.depth[2] = 0.0f;
-		wf.depth[3] = 1.0f;
-		wf.eyeT = 1.0f;
-	}
-	wf.eyeOutside = ( wf.eyeT < 0.0f );
-	const byte *c = (const byte *)&fog->colorInt;
-	for ( int i = 0; i < 4; i++ ) {
-		wf.color[i] = c[i] * ( 1.0f / 255.0f );
-	}
+	RB_CalcFogPassInputs( nw_fog, &wf );
 
 	GL_SelectTexture( 0 );
 	GL_Bind( tr.fogImage );

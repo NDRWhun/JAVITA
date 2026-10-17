@@ -299,6 +299,7 @@ qboolean RE_RegisterModels_LevelLoadEnd(qboolean bDeleteEverythingNotUsedThisLev
 				if (CachedModel.pModelDiskImage) {
 #ifdef USE_GXM_NATIVE
 					R_GpuSkinFreeModel( CachedModel.pModelDiskImage );
+					GXM_MeshFreeModel( CachedModel.pModelDiskImage );
 #endif
 					R_Free(CachedModel.pModelDiskImage);
 					//CachedModel.pModelDiskImage = NULL;	// REM for reference, erase() call below negates the need for it.
@@ -363,6 +364,7 @@ static void RE_RegisterModels_DeleteAll(void)
 		if (CachedModel.pModelDiskImage) {
 #ifdef USE_GXM_NATIVE
 			R_GpuSkinFreeModel( CachedModel.pModelDiskImage );
+			GXM_MeshFreeModel( CachedModel.pModelDiskImage );
 #endif
 			R_Free(CachedModel.pModelDiskImage);
 		}
@@ -779,6 +781,49 @@ qhandle_t RE_RegisterModel( const char *name )
 }
 
 
+#ifdef USE_GXM_NATIVE
+/*
+=================
+R_NativeMeshBuild
+
+Hands every surface of a loaded md3 LOD to the shared builder, which keeps one GPU copy per file image.
+=================
+*/
+static void R_NativeMeshBuild( model_t *mod, int lod )
+{
+	md3Header_t *md3 = mod->md3[lod];
+
+	mod->gpuMesh[lod] = NULL;
+	if ( !md3 || !r_nativeModels || !r_nativeModels->integer || !GXM_MeshReady() || md3->numSurfaces <= 0 ) {
+		return;
+	}
+	mod->gpuMesh[lod] = GXM_MeshFindModel( md3 );
+	if ( mod->gpuMesh[lod] ) {
+		return;
+	}
+
+	gxmMeshSource_t *src = (gxmMeshSource_t *)malloc( md3->numSurfaces * sizeof( gxmMeshSource_t ) );
+	if ( !src ) {
+		return;
+	}
+	const md3Surface_t *surf = (const md3Surface_t *)( (const byte *)md3 + md3->ofsSurfaces );
+	for ( int i = 0; i < md3->numSurfaces; i++ ) {
+		gxmMeshSource_t *s = &src[i];
+		s->surface = surf;
+		s->xyzNormals = (const short *)( (const byte *)surf + surf->ofsXyzNormals );
+		s->st = (const float *)( (const byte *)surf + surf->ofsSt );
+		s->triangles = (const int *)( (const byte *)surf + surf->ofsTriangles );
+		s->numVerts = surf->numVerts;
+		s->numTriangles = surf->numTriangles;
+		s->numFrames = surf->numFrames;
+		surf = (const md3Surface_t *)( (const byte *)surf + surf->ofsEnd );
+	}
+
+	mod->gpuMesh[lod] = GXM_MeshBuildModel( md3, src, md3->numSurfaces );
+	free( src );
+}
+#endif
+
 /*
 =================
 R_LoadMD3
@@ -858,6 +903,9 @@ static qboolean R_LoadMD3 (model_t *mod, int lod, void *buffer, const char *mod_
 
 	if (bAlreadyFound)
 	{
+#ifdef USE_GXM_NATIVE
+		R_NativeMeshBuild( mod, lod );
+#endif
 		return qtrue;	// All done. Stop, go no further, do not pass Go...
 	}
 
@@ -968,6 +1016,9 @@ static qboolean R_LoadMD3 (model_t *mod, int lod, void *buffer, const char *mod_
 		surf = (md3Surface_t *)( (byte *)surf + surf->ofsEnd );
 	}
 
+#ifdef USE_GXM_NATIVE
+	R_NativeMeshBuild( mod, lod );
+#endif
 	return qtrue;
 }
 

@@ -1,0 +1,141 @@
+/*
+===========================================================================
+Copyright (C) 1999 - 2005, Id Software, Inc.
+Copyright (C) 2000 - 2013, Raven Software, Inc.
+Copyright (C) 2001 - 2013, Activision, Inc.
+Copyright (C) 2013 - 2015, OpenJK contributors
+
+This file is part of the OpenJK source code.
+
+OpenJK is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, see <http://www.gnu.org/licenses/>.
+===========================================================================
+*/
+
+// md3 vertex program over resident frames; outputs match generic_v NUV=1 VCOLOR=1 so it shares its fragment programs.
+//   LERP    0/1    position and normal blended from the current and the old frame stream
+//   FOGPASS 0/1    the fog volume pass of RB_CalcFogTexCoords instead of a shader stage
+//   LIGHT   0/1    rgb = entity diffuse light from the normal, times uColor.rgb
+//   SPEC    0/1    alpha = lightingSpecular instead of uColor.a
+//   ENV     0/1    texcoords from the environment vector instead of the vertex st
+//   FOG     0=off 1=GL_EXP2 2=GL_LINEAR
+
+uniform float4x4 uMVP;
+uniform float4   uLerp;			// x, y: position weight of the current and old frame in model units; z, w: their normal weights
+#if FOGPASS
+uniform float4   uColor;		// the fog colour
+uniform float4   uFogDistance;	// s = dot( xyz1, this )
+uniform float4   uFogDepth;		// t = dot( xyz1, this ) before the clip against the fog plane
+uniform float4   uFogEye;		// eye t, 1 when the eye is outside the volume
+#else
+uniform float4   uColor;
+uniform float4   uTexMat0;		// s row of the stage's texcoord transform
+uniform float4   uTexMat1;		// t row
+  #if LIGHT || SPEC || ENV
+uniform float4   uLightDir;		// model space, normalized
+  #endif
+  #if LIGHT
+uniform float4   uAmbient;		// 0..1
+uniform float4   uDirected;		// 0..1 per unit of incidence
+  #endif
+  #if SPEC || ENV
+uniform float4   uViewer;		// w=1: view origin in model space, w=0: fixed direction
+  #endif
+  #if ENV
+uniform float4   uEnvParams;	// x = viewer weight in the reflection term
+  #endif
+#endif
+#if FOG
+uniform float4   uFogParams;	// start, end, 1/(end-start)
+#endif
+
+#define NORMALS ( !FOGPASS && ( LIGHT || SPEC || ENV ) )
+
+void main(
+	float3 aPosition  : POSITION,
+#if NORMALS
+	float4 aNormal    : NORMAL,
+#endif
+#if !FOGPASS
+	float2 aTexCoord0 : TEXCOORD0,
+#endif
+#if LERP
+	float3 aOldPosition : TEXCOORD1,
+  #if NORMALS
+	float4 aOldNormal : TEXCOORD2,
+  #endif
+#endif
+	out float2 vTexCoord0 : TEXCOORD0,
+#if FOG
+	out half   vFog       : TEXCOORD2,
+#endif
+	out half4  vColor     : COLOR0,
+	out float4 vPosition  : POSITION )
+{
+#if LERP
+	float3 p = aPosition * uLerp.x + aOldPosition * uLerp.y;
+#else
+	float3 p = aPosition * uLerp.x;
+#endif
+	float4 p4 = float4( p, 1.0f );
+	vPosition = mul( p4, uMVP );
+
+#if FOG
+	float f = saturate( ( vPosition.w - uFogParams.x ) * uFogParams.z );
+  #if FOG == 2
+	vFog = (half)f;
+  #else
+	vFog = (half)( 1.0f - exp2( -7.98f * f * f ) );
+  #endif
+#endif
+
+#if FOGPASS
+	float s = dot( p4, uFogDistance );
+	float t = dot( p4, uFogDepth );
+	float tOutside = ( t < 1.0f ) ? ( 1.0f / 32.0f ) : ( 1.0f / 32.0f + ( 30.0f / 32.0f ) * t / ( t - uFogEye.x ) );
+	float tInside = ( t < 0.0f ) ? ( 1.0f / 32.0f ) : ( 31.0f / 32.0f );
+	vTexCoord0 = float2( s, ( uFogEye.y > 0.5f ) ? tOutside : tInside );
+	vColor = (half4)uColor;
+#else
+  #if NORMALS
+    #if LERP
+	float3 n = normalize( aNormal.xyz * uLerp.z + aOldNormal.xyz * uLerp.w );
+    #else
+	float3 n = aNormal.xyz;
+    #endif
+  #endif
+  #if SPEC || ENV
+	float3 v = normalize( uViewer.xyz - p * uViewer.w );
+  #endif
+
+	// colour and texcoords as skin_v computes them
+	float4 c = uColor;
+  #if LIGHT
+	c.rgb *= saturate( uAmbient.rgb + uDirected.rgb * max( dot( n, uLightDir.xyz ), 0.0f ) );
+  #endif
+  #if SPEC
+	float3 r = n * ( 2.0f * dot( n, uLightDir.xyz ) ) - uLightDir.xyz;
+	float s = saturate( dot( r, v ) );
+	s *= s;
+	c.a = s * s;
+  #endif
+	vColor = (half4)c;
+
+  #if ENV
+	float4 e = float4( n * dot( n, v ) - v * uEnvParams.x, 1.0f );
+	vTexCoord0 = float2( dot( e, uTexMat0 ), dot( e, uTexMat1 ) );
+  #else
+	float3 st = float3( aTexCoord0, 1.0f );
+	vTexCoord0 = float2( dot( st, uTexMat0.xyz ), dot( st, uTexMat1.xyz ) );
+  #endif
+#endif
+}

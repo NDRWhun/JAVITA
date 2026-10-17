@@ -29,6 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "gxm_state.h"
 #include "gxm_skin.h"
 #include "gxm_world.h"
+#include "gxm_mesh.h"
 #include "shaders/gxm_shaders.h"
 
 #include <string.h>
@@ -178,12 +179,13 @@ static bool						gxm_skinOk;
 static gxmProgCache_t	gxm_skinNoTex[GXM_MAX_SKIN_NOTEX];
 static int				gxm_skinNoTexCount;
 
-// uniforms of the resident world programs, looked up once by name
+// uniforms of the resident world and md3 programs, looked up once by name
 enum {
 	WU_MVP, WU_COLORSCALE, WU_COLORBIAS,
 	WU_TEX0S, WU_TEX0T, WU_TEX0SP, WU_TEX0TP, WU_TEX1S, WU_TEX1T, WU_TEX1SP, WU_TEX1TP,
 	WU_VIEWER, WU_TURB, WU_TURBPOST, WU_LMSELECT, WU_STYLE0, WU_STYLE1, WU_STYLE2, WU_STYLE3,
 	WU_FOGPARAMS, WU_LIGHT, WU_LIGHTCOLOR, WU_COLOR, WU_FOGDISTANCE, WU_FOGDEPTH, WU_FOGEYE,
+	WU_TEXMAT0, WU_TEXMAT1, WU_LIGHTDIR, WU_AMBIENT, WU_DIRECTED, WU_ENVPARAMS, WU_LERP,
 	WU_COUNT
 };
 
@@ -191,7 +193,8 @@ static const char *const gxm_worldUniformNames[WU_COUNT] = {
 	"uMVP", "uColorScale", "uColorBias",
 	"uTex0S", "uTex0T", "uTex0SP", "uTex0TP", "uTex1S", "uTex1T", "uTex1SP", "uTex1TP",
 	"uViewer", "uTurb", "uTurbPost", "uLmSelect", "uStyle0", "uStyle1", "uStyle2", "uStyle3",
-	"uFogParams", "uLight", "uLightColor", "uColor", "uFogDistance", "uFogDepth", "uFogEye"
+	"uFogParams", "uLight", "uLightColor", "uColor", "uFogDistance", "uFogDepth", "uFogEye",
+	"uTexMat0", "uTexMat1", "uLightDir", "uAmbient", "uDirected", "uEnvParams", "uLerp"
 };
 
 typedef struct {
@@ -218,6 +221,19 @@ typedef struct {
 
 static gxmLinkedFrag_t	gxm_worldLinked[GXM_MAX_WORLD_LINKED];
 static int				gxm_worldLinkedCount;
+
+// an md3 program and the streams its texcoords and old frame are bound to, -1 when it reads none
+typedef struct {
+	gxmWorldProg_t	p;
+	int				stStream;
+	int				oldStream;
+} gxmMeshProg_t;
+
+static SceGxmShaderPatcherId	gxm_meshStageIds[2][2][2][2][3];
+static SceGxmShaderPatcherId	gxm_meshFogIds[2][3];
+static gxmMeshProg_t			gxm_meshStage[2][2][2][2][3];	// [frame blend][diffuse light][specular alpha][env texcoords][fog mode]
+static gxmMeshProg_t			gxm_meshFog[2][3];				// [frame blend][fog mode]
+static bool						gxm_meshOk;
 
 static float		gxm_proj[16], gxm_modelView[16], gxm_mvp[16];
 static bool			gxm_mvpDirty = true;
@@ -516,6 +532,15 @@ static const gxmWorldAttr_t gxm_worldAttrs[] = {
 
 #define GXM_WORLD_NUM_ATTRS	( (int)( sizeof(gxm_worldAttrs) / sizeof(gxm_worldAttrs[0]) ) )
 
+// the blob and every uniform a resident program may read
+static void LookupResidentUniforms( gxmWorldProg_t *out, const SceGxmProgram *blob )
+{
+	out->blob = blob;
+	for ( int u = 0; u < WU_COUNT; u++ ) {
+		out->params[u] = sceGxmProgramFindParameterByName( blob, gxm_worldUniformNames[u] );
+	}
+}
+
 /*
 ================
 BuildWorldProgram
@@ -557,10 +582,7 @@ static bool BuildWorldProgram( gxmWorldProg_t *out, const SceGxmProgram *blob, S
 	if ( sceGxmShaderPatcherCreateVertexProgram( GXM_ShaderPatcher(), id, attrs, n, &stream, 1, &out->prog ) < 0 ) {
 		return false;
 	}
-	out->blob = blob;
-	for ( int u = 0; u < WU_COUNT; u++ ) {
-		out->params[u] = sceGxmProgramFindParameterByName( blob, gxm_worldUniformNames[u] );
-	}
+	LookupResidentUniforms( out, blob );
 	return true;
 }
 
@@ -608,6 +630,123 @@ static bool InitWorldPrograms( void )
 int GXM_WorldReady( void )
 {
 	return ( gxm_backendOk && gxm_worldOk ) ? 1 : 0;
+}
+
+static const SceGxmProgram *MeshStageBlob( int lerp, int lit, int spec, int env, int fog )
+{
+#define MSF(b,l,s,e) { gxs_mesh_v_b##b##_l##l##_s##s##_e##e##_f0, gxs_mesh_v_b##b##_l##l##_s##s##_e##e##_f1, gxs_mesh_v_b##b##_l##l##_s##s##_e##e##_f2 }
+#define MSE(b,l,s) { MSF(b,l,s,0), MSF(b,l,s,1) }
+#define MSS(b,l) { MSE(b,l,0), MSE(b,l,1) }
+#define MSL(b) { MSS(b,0), MSS(b,1) }
+	static const unsigned char *t[2][2][2][2][3] = { MSL(0), MSL(1) };
+#undef MSL
+#undef MSS
+#undef MSE
+#undef MSF
+	return (const SceGxmProgram *)t[lerp][lit][spec][env][fog];
+}
+
+static const SceGxmProgram *MeshFogBlob( int lerp, int fog )
+{
+	static const unsigned char *t[2][3] = {
+		{ gxs_meshfog_v_b0_f0, gxs_meshfog_v_b0_f1, gxs_meshfog_v_b0_f2 },
+		{ gxs_meshfog_v_b1_f0, gxs_meshfog_v_b1_f1, gxs_meshfog_v_b1_f2 },
+	};
+	return (const SceGxmProgram *)t[lerp][fog];
+}
+
+// appends one attribute when the blob reads it; false when it does not
+static bool MeshAttr( const SceGxmProgram *blob, const char *name, int stream, int offset, int format, int count,
+					  SceGxmVertexAttribute *attrs, int *n )
+{
+	const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName( blob, name );
+	if ( !p ) {
+		return false;
+	}
+	SceGxmVertexAttribute *a = &attrs[(*n)++];
+	a->streamIndex = (unsigned short)stream;
+	a->offset = (unsigned short)offset;
+	a->format = (unsigned char)format;
+	a->componentCount = (unsigned char)count;
+	a->regIndex = sceGxmProgramParameterGetResourceIndex( p );
+	return true;
+}
+
+/*
+================
+BuildMeshProgram
+
+The current frame is stream 0; texcoords and the old frame take the next streams only when the blob reads them.
+================
+*/
+static bool BuildMeshProgram( gxmMeshProg_t *out, const SceGxmProgram *blob, SceGxmShaderPatcherId id )
+{
+	SceGxmVertexAttribute attrs[5];
+	SceGxmVertexStream streams[3];
+	int n = 0, numStreams = 1;
+	memset( attrs, 0, sizeof(attrs) );
+	memset( streams, 0, sizeof(streams) );
+	streams[0].stride = GXM_MESH_FRAME_STRIDE;
+
+	if ( !MeshAttr( blob, "aPosition", 0, GXM_MESH_OFS_XYZ, SCE_GXM_ATTRIBUTE_FORMAT_S16, 3, attrs, &n ) ) {
+		return false;
+	}
+	MeshAttr( blob, "aNormal", 0, GXM_MESH_OFS_NORMAL, SCE_GXM_ATTRIBUTE_FORMAT_S8N, 4, attrs, &n );
+
+	out->stStream = -1;
+	if ( MeshAttr( blob, "aTexCoord0", numStreams, 0, SCE_GXM_ATTRIBUTE_FORMAT_F32, 2, attrs, &n ) ) {
+		out->stStream = numStreams;
+		streams[numStreams++].stride = GXM_MESH_ST_STRIDE;
+	}
+	out->oldStream = -1;
+	if ( MeshAttr( blob, "aOldPosition", numStreams, GXM_MESH_OFS_XYZ, SCE_GXM_ATTRIBUTE_FORMAT_S16, 3, attrs, &n ) ) {
+		MeshAttr( blob, "aOldNormal", numStreams, GXM_MESH_OFS_NORMAL, SCE_GXM_ATTRIBUTE_FORMAT_S8N, 4, attrs, &n );
+		out->oldStream = numStreams;
+		streams[numStreams++].stride = GXM_MESH_FRAME_STRIDE;
+	}
+	for ( int s = 0; s < numStreams; s++ ) {
+		streams[s].indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
+	}
+
+	out->p.prog = NULL;
+	if ( sceGxmShaderPatcherCreateVertexProgram( GXM_ShaderPatcher(), id, attrs, n, streams, numStreams, &out->p.prog ) < 0 ) {
+		return false;
+	}
+	LookupResidentUniforms( &out->p, blob );
+	return true;
+}
+
+// registers and links the md3 set; a failure leaves md3 surfaces on the tess path
+static bool InitMeshPrograms( void )
+{
+	for ( int b = 0; b < 2; b++ ) {
+		for ( int l = 0; l < 2; l++ ) {
+			for ( int s = 0; s < 2; s++ ) {
+				for ( int e = 0; e < 2; e++ ) {
+					for ( int f = 0; f < 3; f++ ) {
+						const SceGxmProgram *blob = MeshStageBlob( b, l, s, e, f );
+						if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(), blob, &gxm_meshStageIds[b][l][s][e][f] ) < 0
+							|| !BuildMeshProgram( &gxm_meshStage[b][l][s][e][f], blob, gxm_meshStageIds[b][l][s][e][f] ) ) {
+							return false;
+						}
+					}
+				}
+			}
+		}
+		for ( int f = 0; f < 3; f++ ) {
+			const SceGxmProgram *blob = MeshFogBlob( b, f );
+			if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(), blob, &gxm_meshFogIds[b][f] ) < 0
+				|| !BuildMeshProgram( &gxm_meshFog[b][f], blob, gxm_meshFogIds[b][f] ) ) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+int GXM_MeshReady( void )
+{
+	return ( gxm_backendOk && gxm_meshOk ) ? 1 : 0;
 }
 
 int GXM_BackendInit( void )
@@ -676,6 +815,7 @@ int GXM_BackendInit( void )
 	memset( gxm_worldLinked, 0, sizeof(gxm_worldLinked) );
 	gxm_worldLinkedCount = 0;
 	gxm_worldOk = InitWorldPrograms();
+	gxm_meshOk = InitMeshPrograms();
 
 	GXM_InvalidateStateShadow();
 	GXM_SetStateResetCallback( GXM_InvalidateStateShadow );
@@ -1849,6 +1989,115 @@ void GXM_DrawWorldFog( const gxmWorldFog_t *wf, const gxmWorldSeg_t *segs, int n
 	WorldDrawSegments( gxm_worldFog, fog, values, NULL, NULL, segs, numSegs, ntex );
 }
 
+// one program over every draw: uniforms written once, then the frame, texcoord and old frame streams per surface
+static void MeshDrawAll( const gxmMeshProg_t *mp, const float *const *values, const gxmMeshDraw_t *draws, int numDraws, int ntex )
+{
+	if ( gxm_curVertProg != mp->p.prog ) {
+		sceGxmSetVertexProgram( GXM_Context(), mp->p.prog );
+		gxm_curVertProg = mp->p.prog;
+	}
+	WriteWorldUniforms( &mp->p, values );
+
+	for ( int i = 0; i < numDraws; i++ ) {
+		const gxmMeshDraw_t *d = &draws[i];
+		if ( !d->frame || !d->indexes || d->numIndexes <= 0 || ( mp->stStream >= 0 && !d->st )
+			|| ( mp->oldStream >= 0 && !d->oldFrame ) ) {
+			continue;
+		}
+		sceGxmSetVertexStream( GXM_Context(), 0, d->frame );
+		if ( mp->stStream >= 0 ) {
+			sceGxmSetVertexStream( GXM_Context(), mp->stStream, d->st );
+		}
+		if ( mp->oldStream >= 0 ) {
+			sceGxmSetVertexStream( GXM_Context(), mp->oldStream, d->oldFrame );
+		}
+		sceGxmDraw( GXM_Context(), SCE_GXM_PRIMITIVE_TRIANGLES,
+			SCE_GXM_INDEX_FORMAT_U16, d->indexes, (unsigned int)d->numIndexes );
+		gxm_statDraws++;
+		if ( ntex ) {
+			gxm_statTextured++;
+		}
+	}
+
+	// the generic programs' uniforms were last written for a different reservation
+	gxm_uniformsDirty = true;
+}
+
+// position weights of the current and old frame in model units, then their normal weights
+static void MeshLerpWeights( float backlerp, float out[4] )
+{
+	const float fileScale = 1.0f / 64.0f;
+	out[0] = ( 1.0f - backlerp ) * fileScale;
+	out[1] = backlerp * fileScale;
+	out[2] = 1.0f - backlerp;
+	out[3] = backlerp;
+}
+
+void GXM_DrawMesh( const gxmSkinStage_t *st, float backlerp, const gxmMeshDraw_t *draws, int numDraws )
+{
+	gxm_ovXyz = gxm_ovUv0 = gxm_ovUv1 = NULL;
+	gxm_ovRgba = NULL;
+
+	if ( !gxm_backendOk || !gxm_meshOk || !st || !draws || numDraws <= 0 ) {
+		return;
+	}
+	const int lerp = ( backlerp != 0.0f ) ? 1 : 0;
+	const int fog = gxm_fogOn;
+	const gxmMeshProg_t *mp = &gxm_meshStage[lerp][st->lit ? 1 : 0][st->spec ? 1 : 0][st->env ? 1 : 0][fog];
+	int ntex = 0;
+	if ( !WorldDrawBegin( 1, mp->p.blob, fog, &ntex ) ) {
+		return;
+	}
+
+	float weights[4];
+	MeshLerpWeights( backlerp, weights );
+	const float *values[WU_COUNT];
+	memset( values, 0, sizeof(values) );
+	values[WU_MVP]       = gxm_mvp;
+	values[WU_LERP]      = weights;
+	values[WU_COLOR]     = st->color;
+	values[WU_TEXMAT0]   = st->texMat[0];
+	values[WU_TEXMAT1]   = st->texMat[1];
+	values[WU_LIGHTDIR]  = st->lightDir;
+	values[WU_AMBIENT]   = st->ambient;
+	values[WU_DIRECTED]  = st->directed;
+	values[WU_VIEWER]    = st->viewer;
+	values[WU_ENVPARAMS] = st->envParams;
+	values[WU_FOGPARAMS] = gxm_fogParams;
+	MeshDrawAll( mp, values, draws, numDraws, ntex );
+}
+
+void GXM_DrawMeshFog( const gxmWorldFog_t *wf, float backlerp, const gxmMeshDraw_t *draws, int numDraws )
+{
+	gxm_ovXyz = gxm_ovUv0 = gxm_ovUv1 = NULL;
+	gxm_ovRgba = NULL;
+
+	if ( !gxm_backendOk || !gxm_meshOk || !wf || !draws || numDraws <= 0 ) {
+		return;
+	}
+	const int lerp = ( backlerp != 0.0f ) ? 1 : 0;
+	const int fog = gxm_fogOn;
+	const gxmMeshProg_t *mp = &gxm_meshFog[lerp][fog];
+	int ntex = 0;
+	if ( !WorldDrawBegin( 1, mp->p.blob, fog, &ntex ) ) {
+		return;
+	}
+
+	float weights[4];
+	MeshLerpWeights( backlerp, weights );
+	const float eye[4] = { wf->eyeT, wf->eyeOutside ? 1.0f : 0.0f, 0.0f, 0.0f };
+	const float *values[WU_COUNT];
+	memset( values, 0, sizeof(values) );
+	values[WU_MVP]         = gxm_mvp;
+	values[WU_LERP]        = weights;
+	values[WU_COLOR]       = wf->color;
+	values[WU_FOGDISTANCE] = wf->distance;
+	values[WU_FOGDEPTH]    = wf->depth;
+	values[WU_FOGEYE]      = eye;
+	values[WU_FOGPARAMS]   = gxm_fogParams;
+	MeshDrawAll( mp, values, draws, numDraws, ntex );
+}
+
 // --- immediate mode: glBegin/glVertex geometry accumulates here and leaves as one draw ---
 
 #define GXM_IMM_MAX_VERTS	16384
@@ -1997,13 +2246,14 @@ void GXM_ReportStats( char *out, int outSize, int frames )
 	extern unsigned int gxm_texBytes;
 	const int n = ( frames > 0 ) ? frames : 1;	// the draw counters are sums since the last report
 	snprintf( out, outSize,
-		"GXM: uploads=%d dxt=%d allocfail=%d initfail=%d slotfail=%d texfrees=%d texmem=%uMB | draws=%d imm=%d textured=%d notex=%d ringfail=%d ringpeak=%uKB/%uKB | progs=%d/%d progfail=%d fragusse=%uKB\n",
+		"GXM: uploads=%d dxt=%d allocfail=%d initfail=%d slotfail=%d texfrees=%d texmem=%uMB | draws=%d imm=%d textured=%d notex=%d ringfail=%d ringpeak=%uKB/%uKB | progs=%d/%d progfail=%d fragusse=%uKB vertusse=%uKB\n",
 		gxm_statUploads, gxm_statDxtUploads, gxm_texAllocFail, gxm_texInitFail,
 		gxm_statSlotFail, gxm_statTexFrees, gxm_texBytes / ( 1024 * 1024 ),
 		gxm_statDraws / n, gxm_statImmDraws / n, gxm_statTextured / n, gxm_statNoTex / n,
 		gxm_statRingFail, GXM_RingUsedLastFrame() / 1024, GXM_RingBytesPerFrame() / 1024,
 		gxm_progCount, GXM_MAX_PROGRAMS, gxm_statProgFail,
-		(unsigned)( sceGxmShaderPatcherGetFragmentUsseMemAllocated( GXM_ShaderPatcher() ) / 1024 ) );
+		(unsigned)( sceGxmShaderPatcherGetFragmentUsseMemAllocated( GXM_ShaderPatcher() ) / 1024 ),
+		(unsigned)( sceGxmShaderPatcherGetVertexUsseMemAllocated( GXM_ShaderPatcher() ) / 1024 ) );
 
 	gxm_statDraws = gxm_statImmDraws = gxm_statTextured = gxm_statNoTex = gxm_statRingFail = 0;
 	gxm_statProgFail = 0;

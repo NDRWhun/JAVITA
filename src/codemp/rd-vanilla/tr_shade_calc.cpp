@@ -1216,6 +1216,41 @@ qboolean RB_CalcTexMatrixSplit( const textureBundle_t *bundle, float m[2][3], fl
 	turb[1] = now - floor( now );
 	return qtrue;
 }
+
+/*
+** RB_CalcFogPassInputs
+**
+** RB_CalcFogTexCoords' distance and depth vectors and eye clip for the current orientation, with the fog colour
+*/
+void RB_CalcFogPassInputs( int fogNum, gxmWorldFog_t *wf )
+{
+	const fog_t *fog = tr.world->fogs + fogNum;
+	vec3_t localVec;
+
+	VectorSubtract( backEnd.ori.origin, backEnd.viewParms.ori.origin, localVec );
+	wf->distance[0] = -backEnd.ori.modelMatrix[2] * fog->tcScale;
+	wf->distance[1] = -backEnd.ori.modelMatrix[6] * fog->tcScale;
+	wf->distance[2] = -backEnd.ori.modelMatrix[10] * fog->tcScale;
+	wf->distance[3] = DotProduct( localVec, backEnd.viewParms.ori.axis[0] ) * fog->tcScale + 1.0f / 512;
+
+	if ( fog->hasSurface ) {
+		for ( int i = 0; i < 3; i++ ) {
+			wf->depth[i] = fog->surface[0] * backEnd.ori.axis[i][0] + fog->surface[1] * backEnd.ori.axis[i][1]
+				+ fog->surface[2] * backEnd.ori.axis[i][2];
+		}
+		wf->depth[3] = -fog->surface[3] + DotProduct( backEnd.ori.origin, fog->surface );
+		wf->eyeT = DotProduct( backEnd.ori.viewOrigin, wf->depth ) + wf->depth[3];
+	} else {
+		wf->depth[0] = wf->depth[1] = wf->depth[2] = 0.0f;
+		wf->depth[3] = 1.0f;
+		wf->eyeT = 1.0f;
+	}
+	wf->eyeOutside = ( wf->eyeT < 0.0f );
+	const byte *c = (const byte *)&fog->colorInt;
+	for ( int i = 0; i < 4; i++ ) {
+		wf->color[i] = c[i] * ( 1.0f / 255.0f );
+	}
+}
 #endif
 
 

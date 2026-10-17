@@ -86,6 +86,21 @@ for _nuv in (1, 2):
 for _fog in (0, 1, 2):
     SHADERS["fogpass_v_f%d" % _fog] = ("fogpass_v.cg", "sce_vp_psp2", ["FOG=%d" % _fog])
 
+# md3 set: frame blend x diffuse light x specular alpha x env texcoords x fog curve, plus the fog volume pass
+for _lerp in (0, 1):
+    for _lit in (0, 1):
+        for _spec in (0, 1):
+            for _env in (0, 1):
+                for _fog in (0, 1, 2):
+                    SHADERS["mesh_v_b%d_l%d_s%d_e%d_f%d" % (_lerp, _lit, _spec, _env, _fog)] = (
+                        "mesh_v.cg", "sce_vp_psp2",
+                        ["LERP=%d" % _lerp, "FOGPASS=0", "LIGHT=%d" % _lit, "SPEC=%d" % _spec,
+                         "ENV=%d" % _env, "FOG=%d" % _fog])
+    for _fog in (0, 1, 2):
+        SHADERS["meshfog_v_b%d_f%d" % (_lerp, _fog)] = (
+            "mesh_v.cg", "sce_vp_psp2",
+            ["LERP=%d" % _lerp, "FOGPASS=1", "LIGHT=0", "SPEC=0", "ENV=0", "FOG=%d" % _fog])
+
 for _ntex in (0, 1, 2):
     for _env in ((0,) if _ntex < 2 else (0, 1, 2)):
         for _atest in range(5):

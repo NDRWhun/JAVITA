@@ -1852,6 +1852,9 @@ const void	*RB_SwapBuffers( const void *data ) {
 			R_StaticBatch_Stats( line, sizeof( line ) );
 			ri.Printf( PRINT_ALL, "%s", line );
 			GXM_LogStatsLine( line );
+			R_NativeMeshStats( line, sizeof( line ), r_gxmStats->integer );
+			ri.Printf( PRINT_ALL, "%s", line );
+			GXM_LogStatsLine( line );
 		}
 	}
 #endif

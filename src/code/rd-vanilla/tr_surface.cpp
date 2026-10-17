@@ -1363,6 +1363,13 @@ void RB_SurfaceMesh(md3Surface_t *surface) {
 	int				Bob, Doug;
 	int				numVerts;
 
+#ifdef USE_GXM_NATIVE
+	// resident frames blended and lit in the vertex program; anything it cannot do stays below
+	if ( RB_NativeMeshAdd( surface ) ) {
+		return;
+	}
+#endif
+
 	if (  backEnd.currentEntity->e.oldframe == backEnd.currentEntity->e.frame ) {
 		backlerp = 0;
 	} else  {
