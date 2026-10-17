@@ -42,7 +42,7 @@ extern cvar_t	*r_gxmCullFlip;
 #endif
 
 #define WVBO_MAXGROUPS		64
-#define WVBO_GROUPVERTS		65000					// u16 indices address one group
+#define WVBO_GROUPVERTS		64000					// gxm needs u16 indices below 64000
 #define WVBO_STRIDE			32						// xyz(12) st(8) lm(8) rgba(4)
 #define WVBO_OFS_ST			12
 #define WVBO_OFS_LM			20

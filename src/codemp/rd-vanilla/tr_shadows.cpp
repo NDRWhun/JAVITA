@@ -518,11 +518,11 @@ void RB_ShadowFinish( void ) {
 	qglPushMatrix();
     qglLoadIdentity ();
 #ifdef USE_GXM_NATIVE
-	{
-		// the darkening quad is eye space; gxm has no matrix stack, so it is set and put back
-		static const float ident[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
-		GXM_SetModelView( ident );
-	}
+	// the darkening quad is eye space; gxm has no matrix stack, so it is set and put back
+	static const float ident[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+	float savedModelView[16];
+	GXM_GetModelView( savedModelView );
+	GXM_SetModelView( ident );
 #endif
 
 //	qglColor3f( 0.6f, 0.6f, 0.6f );
@@ -542,7 +542,7 @@ void RB_ShadowFinish( void ) {
 	qglVertex3f( -100, -100, -10 );
 	qglEnd ();
 #ifdef USE_GXM_NATIVE
-	GXM_SetModelView( backEnd.ori.modelMatrix );	// back to the caller's modelview
+	GXM_SetModelView( savedModelView );
 #endif
 
 	qglColor4f(1,1,1,1);

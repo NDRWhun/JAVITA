@@ -36,7 +36,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 extern cvar_t	*r_staticBatch;
 
 #define SB_MAXGROUPS	16
-#define SB_GROUPVERTS	65000					// u16 indices address one group
+#define SB_GROUPVERTS	64000					// gxm needs u16 indices below 64000
 #define SB_STRIDE		32						// xyz(12) st(8) st2(8) rgba(4)
 #define SB_OFS_ST		12
 #define SB_OFS_ST2		20

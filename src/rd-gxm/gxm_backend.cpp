@@ -478,6 +478,11 @@ void GXM_SetModelView( const float *m )
 	gxm_mvpDirty = true;
 }
 
+void GXM_GetModelView( float *out )
+{
+	memcpy( out, gxm_modelView, sizeof(gxm_modelView) );
+}
+
 void GXM_SetStateBits( unsigned int stateBits )	{ gxm_stateBits = stateBits; }
 
 // --- stencil / colour mask, driven from tr_shadows through the qgl shim ---

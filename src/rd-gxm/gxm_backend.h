@@ -58,6 +58,7 @@ void GXM_TexFilter( unsigned int texnum, int linear, int clampToEdge );
 // --- state the engine sets through the qgl shim ---
 void GXM_SetProjection( const float *m );	// column-major, as glLoadMatrixf takes it
 void GXM_SetModelView( const float *m );
+void GXM_GetModelView( float *out );		// copies the live modelview, 16 floats
 void GXM_SetStateBits( unsigned int stateBits );
 void GXM_SetStencilTest( int enable );
 void GXM_SetStencilFunc( unsigned int func, int ref, unsigned int mask );

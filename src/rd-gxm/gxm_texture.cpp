@@ -274,7 +274,7 @@ void GXM_RingShutdown( void )
 	}
 }
 
-// libgxm Overview 9/Fig.21: vertex/index data may be overwritten only once the vertex pipeline notification for the scene that used it has landed
+// a slice is reused only after the fragment notification of the scene that read it, so vertex and fragment data are both safe
 static SceGxmNotification	ring_notify[GXM_RING_FRAMES];
 
 static void RingNotifyInit( void )
@@ -318,7 +318,7 @@ void GXM_RingBeginFrame( void )
 	}
 	ring_frame  = ( ring_frame + 1 ) % GXM_RING_FRAMES;
 
-	// the gpu may still be fetching from this slice; wait for its scene's vertex work
+	// the gpu may still be reading this slice; wait for its scene's fragment work
 	if ( ring_notifyReady && ring_notify[ring_frame].value ) {
 		sceGxmNotificationWait( &ring_notify[ring_frame] );
 	}

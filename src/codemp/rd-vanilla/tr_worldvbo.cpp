@@ -48,8 +48,8 @@ static_assert( sizeof(wvboVert_t) == 32 && offsetof(wvboVert_t, st0) == 12
 #define WVBO_OFS_RGBA	((const GLvoid *)28)
 
 #ifdef USE_GXM_NATIVE
-// one u16 index space covers the whole bake; eligible surfaces past it stay on tess
-#define WVBO_MAX_VERTS	65536
+// one u16 index space covers the whole bake (gxm needs u16 indices below 64000); surfaces past it stay on tess
+#define WVBO_MAX_VERTS	64000
 #endif
 
 typedef struct {

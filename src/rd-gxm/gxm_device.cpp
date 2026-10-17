@@ -672,8 +672,8 @@ void GXM_EndFrame( void )
 	}
 	gxm_sceneOpen = false;
 
-	// the ring slice's notification is stamped when this scene's vertex work completes
-	sceGxmEndScene( gxm_context, GXM_RingSceneNotification(), NULL );
+	// the ring slice's notification is stamped when this scene's fragment work completes
+	sceGxmEndScene( gxm_context, NULL, GXM_RingSceneNotification() );
 
 	// hand the back buffer over after the scene ends, so the console IME composites into this flip
 	{
