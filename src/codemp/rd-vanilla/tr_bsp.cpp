@@ -185,6 +185,46 @@ R_LoadLightmaps
 ===============
 */
 #define	LIGHTMAP_SIZE	128
+
+#ifdef USE_GXM_NATIVE
+// expands one 24-bit on-disk lightmap to 32 bit at dst, dstStride texels per row
+static void R_UnpackLightmap( const byte *src, byte *dst, int dstStride, float &maxIntensity, double &sumIntensity )
+{
+	for ( int y = 0; y < LIGHTMAP_SIZE; y++ )
+	{
+		byte *out = dst + y * dstStride * 4;
+
+		for ( int x = 0; x < LIGHTMAP_SIZE; x++, src += 3, out += 4 )
+		{
+			if ( r_lightmap->integer == 2 )
+			{	// color code by intensity as development tool
+				float intensity = 0.33f * src[0] + 0.685f * src[1] + 0.063f * src[2];
+				float rgb[3] = {0.0f, 0.0f, 0.0f};
+
+				if ( intensity > 255 )
+					intensity = 1.0f;
+				else
+					intensity /= 255.0f;
+
+				if ( intensity > maxIntensity )
+					maxIntensity = intensity;
+
+				HSVtoRGB( intensity, 1.00, 0.50, rgb );
+
+				out[0] = rgb[0] * 255;
+				out[1] = rgb[1] * 255;
+				out[2] = rgb[2] * 255;
+
+				sumIntensity += intensity;
+			} else {
+				R_ColorShiftLightingBytes( (byte *)src, out );
+			}
+			out[3] = 255;
+		}
+	}
+}
+#endif
+
 static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldData ) {
 	byte		*buf, *buf_p;
 	int			len;
@@ -197,6 +237,9 @@ static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldDat
 	{
 		tr.numLightmaps = 0;
 	}
+#ifdef USE_GXM_NATIVE
+	worldData.lightmapsMerged = qfalse;
+#endif
 
     len = l->filelen;
 	if ( !len ) {
@@ -209,6 +252,14 @@ static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldDat
 
 	// create all the lightmaps
 	tr.numLightmaps = len / (LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3);
+#ifdef USE_GXM_NATIVE
+	// the main world packs into atlas pages; a sub-BSP keeps one texture per lightmap
+	const int numLumpLightmaps = tr.numLightmaps;
+	if ( r_mergeLightmaps->integer && &worldData == &s_worldData ) {
+		worldData.lightmapsMerged = qtrue;
+		tr.numLightmaps = ( numLumpLightmaps + GXM_LMATLAS_SLOTS - 1 ) / GXM_LMATLAS_SLOTS;
+	}
+#endif
 	if ( tr.numLightmaps == 1 ) {
 		//FIXME: HACK: maps with only one lightmap turn up fullbright for some reason.
 		//this avoids this, but isn't the correct solution.
@@ -222,6 +273,40 @@ static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldDat
 
 	char sMapName[MAX_QPATH];
 	COM_StripExtension(psMapName, sMapName, sizeof(sMapName));
+
+#ifdef USE_GXM_NATIVE
+	if ( worldData.lightmapsMerged )
+	{
+		const int numPages = ( numLumpLightmaps + GXM_LMATLAS_SLOTS - 1 ) / GXM_LMATLAS_SLOTS;
+		byte *pageData = (byte *)malloc( GXM_LMATLAS_SIZE * GXM_LMATLAS_SIZE * 4 );
+		if ( pageData )
+		{
+			for ( int page = 0; page < numPages && page < MAX_LIGHTMAPS; page++ )
+			{
+				// opaque fill of the unused slots
+				for ( int t = 0; t < GXM_LMATLAS_SIZE * GXM_LMATLAS_SIZE; t++ ) {
+					((unsigned int *)pageData)[t] = 0xFF000000;
+				}
+				for ( int slot = 0; slot < GXM_LMATLAS_SLOTS; slot++ )
+				{
+					const int lm = page * GXM_LMATLAS_SLOTS + slot;
+					if ( lm >= numLumpLightmaps ) {
+						break;
+					}
+					R_UnpackLightmap( buf + lm * LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3,
+						pageData + GXM_LmAtlasTexelOffset( slot ) * 4, GXM_LMATLAS_SIZE, maxIntensity, sumIntensity );
+				}
+				tr.lightmaps[page] = R_CreateImage( va("*%s/lightmap%d", sMapName, page), pageData,
+					GXM_LMATLAS_SIZE, GXM_LMATLAS_SIZE, GL_RGBA, qfalse, qfalse, (qboolean)r_ext_compressed_lightmaps->integer, GL_CLAMP );
+			}
+			free( pageData );
+		}
+		if ( r_lightmap->integer == 2 )	{
+			ri.Printf( PRINT_ALL, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
+		}
+		return;
+	}
+#endif
 
 	for ( i = 0 ; i < tr.numLightmaps ; i++ ) {
 		// expand the 24 bit on-disk to 32 bit
@@ -372,11 +457,20 @@ static void ParseFace( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, int *
 	srfSurfaceFace_t	*cv;
 	int					numPoints, numIndexes;
 	int					lightmapNum[MAXLIGHTMAPS];
+	int					lmSlot[MAXLIGHTMAPS];
 	int					sfaceSize, ofsIndexes;
 
 	for(i = 0; i < MAXLIGHTMAPS; i++)
 	{
 		lightmapNum[i] = LittleLong( ds->lightmapNum[i] );
+		lmSlot[i] = -1;
+#ifdef USE_GXM_NATIVE
+		if ( lightmapNum[i] >= 0 && worldData.lightmapsMerged )
+		{	// the page the lightmap was packed into
+			lmSlot[i] = lightmapNum[i];
+			lightmapNum[i] /= GXM_LMATLAS_SLOTS;
+		}
+#endif
 	}
 
 	// get fog volume
@@ -411,6 +505,10 @@ static void ParseFace( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, int *
 	cv->numPoints = numPoints;
 	cv->numIndices = numIndexes;
 	cv->ofsIndices = ofsIndexes;
+#ifdef VITA
+	cv->vboGroup = -1;
+	cv->vboIndexes = NULL;
+#endif
 
 	verts += LittleLong( ds->firstVert );
 	for ( i = 0 ; i < numPoints ; i++ ) {
@@ -426,6 +524,12 @@ static void ParseFace( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, int *
 		}
 		for(k=0;k<MAXLIGHTMAPS;k++)
 		{
+#ifdef USE_GXM_NATIVE
+			if ( lmSlot[k] >= 0 )
+			{
+				GXM_LmAtlasRemap( lmSlot[k], &cv->points[i][VERTEX_LM+(k*2)] );
+			}
+#endif
 			R_ColorShiftLightingBytes( verts[i].color[k], (byte *)&cv->points[i][VERTEX_COLOR+k] );
 		}
 	}
@@ -458,6 +562,7 @@ static void ParseMesh ( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, worl
 	int						width, height, numPoints;
 	drawVert_t				points[MAX_PATCH_SIZE*MAX_PATCH_SIZE];
 	int						lightmapNum[MAXLIGHTMAPS];
+	int						lmSlot[MAXLIGHTMAPS];
 	vec3_t					bounds[2];
 	vec3_t					tmpVec;
 	static surfaceType_t	skipData = SF_SKIP;
@@ -465,6 +570,14 @@ static void ParseMesh ( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, worl
 	for(i=0;i<MAXLIGHTMAPS;i++)
 	{
 		lightmapNum[i] = LittleLong( ds->lightmapNum[i] );
+		lmSlot[i] = -1;
+#ifdef USE_GXM_NATIVE
+		if ( lightmapNum[i] >= 0 && worldData.lightmapsMerged )
+		{	// the page the lightmap was packed into
+			lmSlot[i] = lightmapNum[i];
+			lightmapNum[i] /= GXM_LMATLAS_SLOTS;
+		}
+#endif
 	}
 
 	// get fog volume
@@ -506,6 +619,12 @@ static void ParseMesh ( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, worl
 		}
 		for(k=0;k<MAXLIGHTMAPS;k++)
 		{
+#ifdef USE_GXM_NATIVE
+			if ( lmSlot[k] >= 0 )
+			{
+				GXM_LmAtlasRemap( lmSlot[k], points[i].lightmap[k] );
+			}
+#endif
 			R_ColorShiftLightingBytes( verts[i].color[k], points[i].color[k] );
 		}
 	}
@@ -567,6 +686,10 @@ static void ParseTriSurf( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, in
 	tri->numIndexes = numIndexes;
 	tri->verts = (drawVert_t *)(tri + 1);
 	tri->indexes = (int *)(tri->verts + tri->numVerts );
+#ifdef VITA
+	tri->vboGroup = -1;
+	tri->vboIndexes = NULL;
+#endif
 
 	surf->data = (surfaceType_t *)tri;
 

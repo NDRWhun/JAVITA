@@ -166,7 +166,7 @@ Tune by editing `ux0:data/JAVITA/base/openjk_sp.cfg` on the card, or from the in
 Presentation is vsync-locked to the Vita's 60 Hz panel. `com_maxfps` still applies, but its
 default of `125` sits above that ceiling.
 
-This is the single-player table. Multiplayer has `r_renderThread`, `r_gpuSkin`, `r_worldVBO` (applies at the next map load), `r_texCacheCompressed`, `r_dropTexturesOnLoad`, `r_distanceCull`, `r_forceFog`, the `s_*` rows and `vita_rearTouch`.
+This is the single-player table. Multiplayer has `r_renderThread`, `r_gpuSkin`, `r_nativeWorld`, `r_mergeLightmaps`, `r_worldVBO` (applies at the next map load), `r_texCacheCompressed`, `r_dropTexturesOnLoad`, `r_distanceCull`, `r_forceFog`, the `s_*` rows and `vita_rearTouch`.
 
 | Cvar | Default | What it does |
 |------|---------|--------------|
@@ -177,6 +177,7 @@ This is the single-player table. Multiplayer has `r_renderThread`, `r_gpuSkin`, 
 | `r_worldVBO` | `1` | Draw static world surfaces from GPU buffers; `0` = per-frame vertex upload *(latched)* |
 | `r_staticBatch` | `1` | Batch a map's static props so copies of one model share a draw; `0` = one draw each *(latched)* |
 | `r_gpuSkin` | `1` | Skin characters on the GPU from buffers built at model load; `0` = CPU skinning *(latched)* |
+| `r_nativeWorld` | `0` | Draw the world from GPU buffers built at map load, every shader stage, light and fog pass on the GPU; overrides `r_worldVBO` *(latched)* |
 | `r_g2WorldMerge` | `1` | Skin characters in world space so same-material draws merge across them; `0` = one batch run per character |
 | `r_mergeLightmaps` | `1` | Pack lightmaps into atlas pages so world surfaces batch; `0` = one texture each *(latched)* |
 | `r_subdivisions` | `4` | Curve tessellation — higher = coarser curves, fewer verts *(latched)* |

@@ -318,6 +318,11 @@ srfGridMesh_t *R_CreateSurfaceGridMesh(int width, int height,
 	grid->width = width;
 	grid->height = height;
 	grid->surfaceType = SF_GRID;
+#ifdef VITA
+	grid->vboGroup = -1;
+	grid->vboNumIndexes = 0;
+	grid->vboIndexes = NULL;
+#endif
 	ClearBounds( grid->meshBounds[0], grid->meshBounds[1] );
 	for ( i = 0 ; i < width ; i++ ) {
 		for ( j = 0 ; j < height ; j++ ) {

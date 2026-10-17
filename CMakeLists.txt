@@ -145,6 +145,7 @@ set(GXM_SOURCES
   ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_state.cpp
   ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_backend.cpp
   ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_skin.cpp
+  ${CMAKE_SOURCE_DIR}/src/rd-gxm/gxm_world.cpp
 )
 
 # warn when a .cg source no longer matches the committed gxm_shaders.h

@@ -1,0 +1,83 @@
+/*
+===========================================================================
+Copyright (C) 1999 - 2005, Id Software, Inc.
+Copyright (C) 2000 - 2013, Raven Software, Inc.
+Copyright (C) 2001 - 2013, Activision, Inc.
+Copyright (C) 2013 - 2015, OpenJK contributors
+
+This file is part of the OpenJK source code.
+
+OpenJK is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, see <http://www.gnu.org/licenses/>.
+===========================================================================
+*/
+
+// one dynamic light projected onto resident planar world surfaces; outputs match generic_v VCOLOR=1 of the same NUV and FOG.
+//   NUV     1 = light texcoords in set 0, 2 = surface st in set 0 and light texcoords in set 1
+//   FOG     0=off 1=GL_EXP2 2=GL_LINEAR
+
+uniform float4x4 uMVP;
+uniform float4   uLight;		// origin in model space, radius
+uniform float4   uLightColor;	// 0..1
+#if FOG
+uniform float4   uFogParams;	// start, end, 1/(end-start)
+#endif
+
+void main(
+	float3 aPosition  : POSITION,
+#if NUV >= 2
+	float2 aTexCoord0 : TEXCOORD0,
+#endif
+	float4 aNormal    : NORMAL,
+	out float2 vTexCoord0 : TEXCOORD0,
+#if NUV >= 2
+	out float2 vTexCoord1 : TEXCOORD1,
+#endif
+#if FOG
+	out half   vFog       : TEXCOORD2,
+#endif
+	out half4  vColor     : COLOR0,
+	out float4 vPosition  : POSITION )
+{
+	vPosition = mul( float4( aPosition, 1.0f ), uMVP );
+
+#if FOG
+	float f = saturate( ( vPosition.w - uFogParams.x ) * uFogParams.z );
+  #if FOG == 2
+	vFog = (half)f;
+  #else
+	vFog = (half)( 1.0f - exp2( -7.98f * f * f ) );
+  #endif
+#endif
+
+	// height of the light above the plane: facing, range and falloff
+	float3 n = normalize( aNormal.xyz );
+	float3 d = aPosition - uLight.xyz;
+	float h = -dot( n, d );
+	float r2 = uLight.w * uLight.w;
+	float falloff = ( h > 0.0f && h < uLight.w ) ? ( 1.0f - h * h / r2 ) : 0.0f;
+	float k = 0.5f * rsqrt( max( r2 - h * h, 0.0001f ) );
+
+	// an orthonormal basis of the plane
+	float3 a = ( abs( n.z ) < 0.9f ) ? float3( 0.0f, 0.0f, 1.0f ) : float3( 1.0f, 0.0f, 0.0f );
+	float3 e1 = normalize( cross( a, n ) );
+	float3 e2 = cross( n, e1 );
+	float2 tc = float2( dot( d, e1 ), dot( d, e2 ) ) * k + 0.5f;
+
+	vColor = (half4)float4( saturate( uLightColor.rgb * falloff ), 1.0f );
+#if NUV >= 2
+	vTexCoord0 = aTexCoord0;
+	vTexCoord1 = tc;
+#else
+	vTexCoord0 = tc;
+#endif
+}

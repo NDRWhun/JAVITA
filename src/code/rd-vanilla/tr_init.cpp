@@ -121,6 +121,7 @@ cvar_t *r_gxmCullFlip;
 cvar_t *r_gxmStats;
 cvar_t *r_gxmSync;
 cvar_t	*r_gpuSkin;
+cvar_t	*r_nativeWorld;
 cvar_t	*r_dropTexturesOnLoad;
 #endif
 cvar_t	*r_texturebits;
@@ -1791,6 +1792,7 @@ void R_Register( void )
 	r_staticBatch = ri.Cvar_Get( "r_staticBatch", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_g2WorldMerge = ri.Cvar_Get( "r_g2WorldMerge", "1", CVAR_ARCHIVE_ND );
 	r_gpuSkin = ri.Cvar_Get( "r_gpuSkin", "1", CVAR_ARCHIVE | CVAR_LATCH );	// ghoul2 skinned in the vertex program, buffers built at model load
+	r_nativeWorld = ri.Cvar_Get( "r_nativeWorld", "0", CVAR_ARCHIVE | CVAR_LATCH );	// world drawn from resident buffers with every stage on the GPU, built at map load
 	r_dropTexturesOnLoad = ri.Cvar_Get( "r_dropTexturesOnLoad", "1", CVAR_ARCHIVE );
 #endif
 	ri.Cvar_CheckRange( r_primitives, MIN_PRIMITIVES, MAX_PRIMITIVES, qtrue );

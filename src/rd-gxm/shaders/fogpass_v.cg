@@ -1,0 +1,63 @@
+/*
+===========================================================================
+Copyright (C) 1999 - 2005, Id Software, Inc.
+Copyright (C) 2000 - 2013, Raven Software, Inc.
+Copyright (C) 2001 - 2013, Activision, Inc.
+Copyright (C) 2013 - 2015, OpenJK contributors
+
+This file is part of the OpenJK source code.
+
+OpenJK is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, see <http://www.gnu.org/licenses/>.
+===========================================================================
+*/
+
+// fog volume pass over resident world surfaces, RB_CalcFogTexCoords per vertex; outputs match generic_v NUV=1 VCOLOR=1 of the same FOG.
+//   FOG     0=off 1=GL_EXP2 2=GL_LINEAR
+
+uniform float4x4 uMVP;
+uniform float4   uColor;		// the fog colour
+uniform float4   uFogDistance;	// s = dot( xyz1, this )
+uniform float4   uFogDepth;		// t = dot( xyz1, this ) before the clip against the fog plane
+uniform float4   uFogEye;		// eye t, 1 when the eye is outside the volume
+#if FOG
+uniform float4   uFogParams;	// start, end, 1/(end-start)
+#endif
+
+void main(
+	float3 aPosition  : POSITION,
+	out float2 vTexCoord0 : TEXCOORD0,
+#if FOG
+	out half   vFog       : TEXCOORD2,
+#endif
+	out half4  vColor     : COLOR0,
+	out float4 vPosition  : POSITION )
+{
+	float4 p = float4( aPosition, 1.0f );
+	vPosition = mul( p, uMVP );
+
+#if FOG
+	float f = saturate( ( vPosition.w - uFogParams.x ) * uFogParams.z );
+  #if FOG == 2
+	vFog = (half)f;
+  #else
+	vFog = (half)( 1.0f - exp2( -7.98f * f * f ) );
+  #endif
+#endif
+
+	float s = dot( p, uFogDistance );
+	float t = dot( p, uFogDepth );
+	float tOutside = ( t < 1.0f ) ? ( 1.0f / 32.0f ) : ( 1.0f / 32.0f + ( 30.0f / 32.0f ) * t / ( t - uFogEye.x ) );
+	float tInside = ( t < 0.0f ) ? ( 1.0f / 32.0f ) : ( 31.0f / 32.0f );
+	vTexCoord0 = float2( s, ( uFogEye.y > 0.5f ) ? tOutside : tInside );
+	vColor = (half4)uColor;
+}

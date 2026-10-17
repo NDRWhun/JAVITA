@@ -1166,6 +1166,56 @@ qboolean RB_CalcTexMatrix( const textureBundle_t *bundle, float m[2][3] )
 	}
 	return qtrue;
 }
+
+/*
+** RB_CalcTexMatrixSplit
+**
+** The tcMods with at most one turbulence: m maps st with it left out, post is the linear part of the tcMods after it, turb its amplitude and phase in turns
+*/
+qboolean RB_CalcTexMatrixSplit( const textureBundle_t *bundle, float m[2][3], float post[2][2], float turb[2] )
+{
+	int numMods = 0, turbAt = -1;
+	for ( ; numMods < bundle->numTexMods && bundle->texMods[numMods].type != TMOD_NONE; numMods++ ) {
+		if ( bundle->texMods[numMods].type == TMOD_TURBULENT ) {
+			if ( turbAt >= 0 ) {
+				return qfalse;
+			}
+			turbAt = numMods;
+		}
+	}
+
+	post[0][0] = 1.0f; post[0][1] = 0.0f;
+	post[1][0] = 0.0f; post[1][1] = 1.0f;
+	turb[0] = turb[1] = 0.0f;
+	if ( turbAt < 0 ) {
+		return RB_CalcTexMatrix( bundle, m );
+	}
+
+	textureBundle_t part = *bundle;
+	float after[2][3];
+	part.numTexMods = turbAt;
+	if ( !RB_CalcTexMatrix( &part, m ) ) {
+		return qfalse;
+	}
+	part.texMods = bundle->texMods + turbAt + 1;
+	part.numTexMods = numMods - turbAt - 1;
+	if ( !RB_CalcTexMatrix( &part, after ) ) {
+		return qfalse;
+	}
+
+	texModInfo_t tmi;
+	tmi.matrix[0][0] = after[0][0]; tmi.matrix[1][0] = after[0][1]; tmi.translate[0] = after[0][2];
+	tmi.matrix[0][1] = after[1][0]; tmi.matrix[1][1] = after[1][1]; tmi.translate[1] = after[1][2];
+	TexMatrixApply( m, &tmi );
+	post[0][0] = after[0][0]; post[0][1] = after[0][1];
+	post[1][0] = after[1][0]; post[1][1] = after[1][1];
+
+	const waveForm_t *wf = &bundle->texMods[turbAt].wave;
+	const float now = wf->phase + tess.shaderTime * wf->frequency;
+	turb[0] = wf->amplitude;
+	turb[1] = now - floor( now );
+	return qtrue;
+}
 #endif
 
 

@@ -1,0 +1,128 @@
+/*
+===========================================================================
+Copyright (C) 1999 - 2005, Id Software, Inc.
+Copyright (C) 2000 - 2013, Raven Software, Inc.
+Copyright (C) 2001 - 2013, Activision, Inc.
+Copyright (C) 2013 - 2015, OpenJK contributors
+
+This file is part of the OpenJK source code.
+
+OpenJK is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, see <http://www.gnu.org/licenses/>.
+===========================================================================
+*/
+
+// resident world stage vertex program; outputs match generic_v VCOLOR=1 of the same NUV and FOG, so it shares its fragment programs.
+//   NUV     1/2    texcoord sets written
+//   TC0     0      set 0 from the linear rows
+//           1      set 0 from the environment vector
+//           2      set 0 from the linear rows plus the turbulence term
+//   STYLED  0/1    four lightmap sets and four style colours per vertex
+//   FOG     0=off 1=GL_EXP2 2=GL_LINEAR
+
+uniform float4x4 uMVP;
+uniform float4   uColorScale;	// colour = vertex colour * scale + bias
+uniform float4   uColorBias;
+uniform float4   uTex0S;		// s of set 0 over ( st, lightmap st ), or over ( e, 1 ) when TC0 is 1
+uniform float4   uTex0T;		// t of set 0
+uniform float4   uTex0SP;		// s of set 0 over ( xyz, 1 )
+uniform float4   uTex0TP;		// t of set 0 over ( xyz, 1 )
+#if NUV >= 2
+uniform float4   uTex1S;
+uniform float4   uTex1T;
+uniform float4   uTex1SP;
+uniform float4   uTex1TP;
+#endif
+#if TC0 == 1
+uniform float4   uViewer;		// view origin in model space
+#endif
+#if TC0 == 2
+uniform float4   uTurb;			// amplitude, phase in turns
+uniform float4   uTurbPost;		// linear part of the texmods after the turbulence: s += x*u + y*v, t += z*u + w*v
+#endif
+#if STYLED
+uniform float4   uLmSelect;		// weight of each lightmap set
+uniform float4   uStyle0;		// per-style colour multipliers
+uniform float4   uStyle1;
+uniform float4   uStyle2;
+uniform float4   uStyle3;
+#endif
+#if FOG
+uniform float4   uFogParams;	// start, end, 1/(end-start)
+#endif
+
+void main(
+	float3 aPosition  : POSITION,
+	float2 aTexCoord0 : TEXCOORD0,
+	float2 aTexCoord1 : TEXCOORD1,
+#if TC0 == 1
+	float4 aNormal    : NORMAL,
+#endif
+	float4 aColor     : COLOR0,
+#if STYLED
+	float2 aTexCoord2 : TEXCOORD2,
+	float2 aTexCoord3 : TEXCOORD3,
+	float2 aTexCoord4 : TEXCOORD4,
+	float4 aColor1    : COLOR1,
+	float4 aColor2    : TEXCOORD5,
+	float4 aColor3    : TEXCOORD6,
+#endif
+	out float2 vTexCoord0 : TEXCOORD0,
+#if NUV >= 2
+	out float2 vTexCoord1 : TEXCOORD1,
+#endif
+#if FOG
+	out half   vFog       : TEXCOORD2,
+#endif
+	out half4  vColor     : COLOR0,
+	out float4 vPosition  : POSITION )
+{
+	float4 p = float4( aPosition, 1.0f );
+	vPosition = mul( p, uMVP );
+
+#if FOG
+	float f = saturate( ( vPosition.w - uFogParams.x ) * uFogParams.z );
+  #if FOG == 2
+	vFog = (half)f;
+  #else
+	vFog = (half)( 1.0f - exp2( -7.98f * f * f ) );
+  #endif
+#endif
+
+#if STYLED
+	float2 lm = aTexCoord1 * uLmSelect.x + aTexCoord2 * uLmSelect.y + aTexCoord3 * uLmSelect.z + aTexCoord4 * uLmSelect.w;
+	float4 vc = saturate( aColor * uStyle0 + aColor1 * uStyle1 + aColor2 * uStyle2 + aColor3 * uStyle3 );
+#else
+	float2 lm = aTexCoord1;
+	float4 vc = aColor;
+#endif
+	vColor = (half4)( vc * uColorScale + uColorBias );
+
+	float4 src = float4( aTexCoord0, lm );
+#if TC0 == 1
+	float3 n = normalize( aNormal.xyz );
+	float3 v = normalize( uViewer.xyz - aPosition );
+	float4 e = float4( n * dot( n, v ) - v * 0.5f, 1.0f );
+	vTexCoord0 = float2( dot( e, uTex0S ), dot( e, uTex0T ) );
+#else
+	float2 tc = float2( dot( src, uTex0S ) + dot( p, uTex0SP ), dot( src, uTex0T ) + dot( p, uTex0TP ) );
+  #if TC0 == 2
+	float2 w = sin( ( float2( aPosition.x + aPosition.z, aPosition.y ) * ( 1.0f / 1024.0f ) + uTurb.yy ) * 6.2831853f ) * uTurb.x;
+	tc += float2( dot( w, uTurbPost.xy ), dot( w, uTurbPost.zw ) );
+  #endif
+	vTexCoord0 = tc;
+#endif
+
+#if NUV >= 2
+	vTexCoord1 = float2( dot( src, uTex1S ) + dot( p, uTex1SP ), dot( src, uTex1T ) + dot( p, uTex1TP ) );
+#endif
+}

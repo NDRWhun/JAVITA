@@ -69,6 +69,23 @@ for _w in (1, 2, 4):
                         ["WEIGHTS=%d" % _w, "LIGHT=%d" % _lit, "SPEC=%d" % _spec,
                          "ENV=%d" % _env, "FOG=%d" % _fog])
 
+# resident world set: texcoord sets x first-set source x style layout x fog curve
+for _nuv in (1, 2):
+    for _tc0 in (0, 1, 2):
+        for _styled in (0, 1):
+            for _fog in (0, 1, 2):
+                SHADERS["stage_v_u%d_t%d_s%d_f%d" % (_nuv, _tc0, _styled, _fog)] = (
+                    "stage_v.cg", "sce_vp_psp2",
+                    ["NUV=%d" % _nuv, "TC0=%d" % _tc0, "STYLED=%d" % _styled, "FOG=%d" % _fog])
+
+# world dynamic light and fog volume passes
+for _nuv in (1, 2):
+    for _fog in (0, 1, 2):
+        SHADERS["dlight_v_u%d_f%d" % (_nuv, _fog)] = (
+            "dlight_v.cg", "sce_vp_psp2", ["NUV=%d" % _nuv, "FOG=%d" % _fog])
+for _fog in (0, 1, 2):
+    SHADERS["fogpass_v_f%d" % _fog] = ("fogpass_v.cg", "sce_vp_psp2", ["FOG=%d" % _fog])
+
 for _ntex in (0, 1, 2):
     for _env in ((0,) if _ntex < 2 else (0, 1, 2)):
         for _atest in range(5):

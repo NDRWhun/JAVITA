@@ -2109,6 +2109,32 @@ static void RB_GpuSkinStage( shaderStage_t *pStage, alphaGen_t forceAlphaGen, co
 	GXM_SetStateBits( glState.glStateBits );
 	GXM_DrawSkinned( &st, gpuSkinDraws, gpuSkinCount );
 }
+
+/*
+===============
+RB_NativeStageColors
+
+The colours the CPU generators give two vertices whose vertex colours are f0 and f1; tess is left as it was.
+===============
+*/
+void RB_NativeStageColors( shaderStage_t *pStage, const byte f0[4], const byte f1[4], byte c0[4], byte c1[4] )
+{
+	const int savedVerts = tess.numVertexes;
+	byte savedVertex[2][4], savedColor[2][4];
+	memcpy( savedVertex, tess.vertexColors, sizeof( savedVertex ) );
+	memcpy( savedColor, tess.svars.colors, sizeof( savedColor ) );
+
+	tess.numVertexes = 2;
+	memcpy( tess.vertexColors[0], f0, 4 );
+	memcpy( tess.vertexColors[1], f1, 4 );
+	ComputeColors( pStage, (alphaGen_t)0, (colorGen_t)0 );
+	memcpy( c0, tess.svars.colors[0], 4 );
+	memcpy( c1, tess.svars.colors[1], 4 );
+
+	memcpy( tess.vertexColors, savedVertex, sizeof( savedVertex ) );
+	memcpy( tess.svars.colors, savedColor, sizeof( savedColor ) );
+	tess.numVertexes = savedVerts;
+}
 #endif
 
 /*

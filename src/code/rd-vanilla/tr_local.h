@@ -33,6 +33,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifdef USE_GXM_NATIVE
 #include "rd-gxm/gxm_backend.h"
 #include "rd-gxm/gxm_skin.h"
+#include "rd-gxm/gxm_world.h"
 #endif
 
 #ifdef VITA
@@ -50,6 +51,7 @@ extern cvar_t *r_gxmSync;		// 1 = drain the gpu every frame (debug)
 extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
 extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
 extern cvar_t *r_gpuSkin;		// skin eligible ghoul2 surfaces in the vertex program
+extern cvar_t *r_nativeWorld;	// draw the world from resident buffers with every stage on the GPU
 extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not first frame
 void R_StartRenderThread( void );
 void R_StopRenderThread( void );
@@ -671,6 +673,12 @@ typedef struct srfGridMesh_s {
 	vec3_t			lodOrigin;
 	float			lodRadius;
 
+#ifdef VITA
+	int				vboGroup;		// resident world group, -1 if not resident
+	int				vboNumIndexes;
+	glIndex_t		*vboIndexes;	// full-resolution triangles rebased to the group, NULL if not resident
+#endif
+
 	// vertexes
 	int				width, height;
 	float			*widthLodError;
@@ -734,6 +742,10 @@ typedef struct {
 
 	int				numVerts;
 	drawVert_t		*verts;
+#ifdef VITA
+	int				vboGroup;		// resident world group, -1 if not resident
+	glIndex_t		*vboIndexes;	// rebased to the group, NULL if not resident
+#endif
 } srfTriangles_t;
 
 
@@ -1770,12 +1782,16 @@ qboolean	R_GpuSkinBatchOk( const shader_t *shader, int renderfx, int fogNum );
 void		R_GpuSkinFreeModel( const void *diskImage );
 qboolean	RB_GpuSkinAdd( const gxmSkinSurface_t *gs, const mdxaBone_t *bones );
 qboolean	RB_CalcTexMatrix( const textureBundle_t *bundle, float m[2][3] );
+// resident world: the tcMods split at one turbulence, and a stage's colours for two vertex colours
+qboolean	RB_CalcTexMatrixSplit( const textureBundle_t *bundle, float m[2][3], float post[2][2], float turb[2] );
+void		RB_NativeStageColors( shaderStage_t *pStage, const byte f0[4], const byte f1[4], byte c0[4], byte c1[4] );
 #endif
 // static world VBO (tr_worldvbo.cpp)
 void		R_BuildWorldVBO( world_t &worldData );
 void		R_WorldVBO_Clear( void );
 void		R_WorldVBO_ContextReset( void );
 qboolean	R_WorldVBO_Surface( const srfSurfaceFace_t *face, const shader_t *shader, int fogNum, int dlighted );
+qboolean	R_WorldSurface( surfaceType_t *surface, shader_t *shader, int fogNum, int dlighted );	// false = tess draws it
 qboolean	RB_GxmVolumeFog( int fogNum, const shader_t *shader );	// arm the global-fog uniform for a non-tess batch
 void		RB_GxmVolumeFogOff( void );
 void		R_WorldVBO_Flush( shader_t *shader );

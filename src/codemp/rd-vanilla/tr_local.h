@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #ifdef USE_GXM_NATIVE
 #include "rd-gxm/gxm_backend.h"
 #include "rd-gxm/gxm_skin.h"
+#include "rd-gxm/gxm_world.h"
 #endif
 
 #ifdef VITA
@@ -50,6 +51,8 @@ extern cvar_t *r_gxmSync;		// 1 = drain the gpu every frame (debug)
 extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
 extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
 extern cvar_t *r_gpuSkin;		// skin eligible ghoul2 surfaces in the vertex program
+extern cvar_t *r_nativeWorld;	// draw the world from resident buffers with every stage on the GPU
+extern cvar_t *r_mergeLightmaps;	// pack lightmaps into atlas pages so world surfaces batch
 #endif
 void R_StartRenderThread( void );
 void R_StopRenderThread( void );
@@ -741,6 +744,12 @@ typedef struct srfGridMesh_s {
 	int				lodFixed;
 	int				lodStitched;
 
+#ifdef VITA
+	int				vboGroup;		// resident world group, -1 if not resident
+	int				vboNumIndexes;
+	glIndex_t		*vboIndexes;	// full-resolution triangles rebased to the group, NULL if not resident
+#endif
+
 	// vertexes
 	int				width, height;
 	float			*widthLodError;
@@ -759,6 +768,10 @@ typedef struct srfSurfaceFace_s {
 	int			numPoints;
 	int			numIndices;
 	int			ofsIndices;
+#ifdef VITA
+	int			vboGroup;			// resident world group, -1 if not resident
+	glIndex_t	*vboIndexes;		// rebased to the group, NULL if not resident
+#endif
 	float		points[1][VERTEXSIZE];	// variable sized
 										// there is a variable length list of indices here also
 } srfSurfaceFace_t;
@@ -782,6 +795,10 @@ typedef struct srfTriangles_s {
 	int				numVerts;
 	drawVert_t		*verts;
 //	vec3_t			*tangents;
+#ifdef VITA
+	int				vboGroup;		// resident world group, -1 if not resident
+	glIndex_t		*vboIndexes;	// rebased to the group, NULL if not resident
+#endif
 } srfTriangles_t;
 
 
@@ -878,6 +895,9 @@ typedef struct world_s {
 	int			numfogs;
 	fog_t		*fogs;
 	int			globalFog;
+#ifdef USE_GXM_NATIVE
+	qboolean	lightmapsMerged;	// lightmaps were packed into atlas pages
+#endif
 
 
 	vec3_t		lightGridOrigin;
@@ -1813,6 +1833,9 @@ qboolean	R_GpuSkinBatchOk( const shader_t *shader, int renderfx, int fogNum );
 void		R_GpuSkinFreeModel( const void *diskImage );
 qboolean	RB_GpuSkinAdd( const gxmSkinSurface_t *gs, const mdxaBone_t *bones );
 qboolean	RB_CalcTexMatrix( const textureBundle_t *bundle, float m[2][3] );
+// resident world: the tcMods split at one turbulence, and a stage's colours for two vertex colours
+qboolean	RB_CalcTexMatrixSplit( const textureBundle_t *bundle, float m[2][3], float post[2][2], float turb[2] );
+void		RB_NativeStageColors( shaderStage_t *pStage, const byte f0[4], const byte f1[4], byte c0[4], byte c1[4] );
 #endif
 qboolean	RB_GxmVolumeFogPass( int fogNum, const shader_t *shader );	// the global-fog uniform covers this batch
 qboolean	RB_GxmVolumeFog( int fogNum, const shader_t *shader );	// arm the global-fog uniform for a non-tess batch

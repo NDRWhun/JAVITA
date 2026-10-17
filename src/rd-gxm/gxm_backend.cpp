@@ -28,6 +28,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "gxm_texture.h"
 #include "gxm_state.h"
 #include "gxm_skin.h"
+#include "gxm_world.h"
 #include "shaders/gxm_shaders.h"
 
 #include <string.h>
@@ -176,6 +177,47 @@ static bool						gxm_skinOk;
 #define GXM_MAX_SKIN_NOTEX	32
 static gxmProgCache_t	gxm_skinNoTex[GXM_MAX_SKIN_NOTEX];
 static int				gxm_skinNoTexCount;
+
+// uniforms of the resident world programs, looked up once by name
+enum {
+	WU_MVP, WU_COLORSCALE, WU_COLORBIAS,
+	WU_TEX0S, WU_TEX0T, WU_TEX0SP, WU_TEX0TP, WU_TEX1S, WU_TEX1T, WU_TEX1SP, WU_TEX1TP,
+	WU_VIEWER, WU_TURB, WU_TURBPOST, WU_LMSELECT, WU_STYLE0, WU_STYLE1, WU_STYLE2, WU_STYLE3,
+	WU_FOGPARAMS, WU_LIGHT, WU_LIGHTCOLOR, WU_COLOR, WU_FOGDISTANCE, WU_FOGDEPTH, WU_FOGEYE,
+	WU_COUNT
+};
+
+static const char *const gxm_worldUniformNames[WU_COUNT] = {
+	"uMVP", "uColorScale", "uColorBias",
+	"uTex0S", "uTex0T", "uTex0SP", "uTex0TP", "uTex1S", "uTex1T", "uTex1SP", "uTex1TP",
+	"uViewer", "uTurb", "uTurbPost", "uLmSelect", "uStyle0", "uStyle1", "uStyle2", "uStyle3",
+	"uFogParams", "uLight", "uLightColor", "uColor", "uFogDistance", "uFogDepth", "uFogEye"
+};
+
+typedef struct {
+	SceGxmVertexProgram				*prog;
+	const SceGxmProgram				*blob;
+	const SceGxmProgramParameter	*params[WU_COUNT];
+} gxmWorldProg_t;
+
+static SceGxmShaderPatcherId	gxm_worldStageIds[2][3][2][3];
+static SceGxmShaderPatcherId	gxm_worldLightIds[2][3];
+static SceGxmShaderPatcherId	gxm_worldFogIds[3];
+static gxmWorldProg_t			gxm_worldStage[2][3][2][3];	// [sets - 1][set 0 source][styled][fog mode]
+static gxmWorldProg_t			gxm_worldLight[2][2][3];	// [sets - 1][styled layout][fog mode]
+static gxmWorldProg_t			gxm_worldFog[2][3];			// [styled layout][fog mode]
+static bool						gxm_worldOk;
+
+// fragment instances linked to a world program, for a world draw with an unbacked texture unit
+#define GXM_MAX_WORLD_LINKED	32
+typedef struct {
+	unsigned int			key;
+	const SceGxmProgram		*link;
+	SceGxmFragmentProgram	*prog;
+} gxmLinkedFrag_t;
+
+static gxmLinkedFrag_t	gxm_worldLinked[GXM_MAX_WORLD_LINKED];
+static int				gxm_worldLinkedCount;
 
 static float		gxm_proj[16], gxm_modelView[16], gxm_mvp[16];
 static bool			gxm_mvpDirty = true;
@@ -422,6 +464,152 @@ int GXM_SkinReady( void )
 	return ( gxm_backendOk && gxm_skinOk ) ? 1 : 0;
 }
 
+static const SceGxmProgram *WorldStageBlob( int sets, int tc0, int styled, int fog )
+{
+#define WSF(u,t,s) { gxs_stage_v_u##u##_t##t##_s##s##_f0, gxs_stage_v_u##u##_t##t##_s##s##_f1, gxs_stage_v_u##u##_t##t##_s##s##_f2 }
+#define WST(u,t) { WSF(u,t,0), WSF(u,t,1) }
+#define WSU(u) { WST(u,0), WST(u,1), WST(u,2) }
+	static const unsigned char *t[2][3][2][3] = { WSU(1), WSU(2) };
+#undef WSU
+#undef WST
+#undef WSF
+	return (const SceGxmProgram *)t[sets][tc0][styled][fog];
+}
+
+static const SceGxmProgram *WorldLightBlob( int sets, int fog )
+{
+	static const unsigned char *t[2][3] = {
+		{ gxs_dlight_v_u1_f0, gxs_dlight_v_u1_f1, gxs_dlight_v_u1_f2 },
+		{ gxs_dlight_v_u2_f0, gxs_dlight_v_u2_f1, gxs_dlight_v_u2_f2 },
+	};
+	return (const SceGxmProgram *)t[sets][fog];
+}
+
+static const SceGxmProgram *WorldFogBlob( int fog )
+{
+	static const unsigned char *t[3] = { gxs_fogpass_v_f0, gxs_fogpass_v_f1, gxs_fogpass_v_f2 };
+	return (const SceGxmProgram *)t[fog];
+}
+
+// every attribute a world program may read, at its place in the plain or styled layout
+typedef struct {
+	const char		*name;
+	unsigned short	offset;
+	unsigned char	format;
+	unsigned char	count;
+	bool			styledOnly;
+} gxmWorldAttr_t;
+
+static const gxmWorldAttr_t gxm_worldAttrs[] = {
+	{ "aPosition",  GXM_WORLD_OFS_XYZ,          SCE_GXM_ATTRIBUTE_FORMAT_F32, 3, false },
+	{ "aTexCoord0", GXM_WORLD_OFS_ST,           SCE_GXM_ATTRIBUTE_FORMAT_F32, 2, false },
+	{ "aTexCoord1", GXM_WORLD_OFS_LM,           SCE_GXM_ATTRIBUTE_FORMAT_F32, 2, false },
+	{ "aNormal",    GXM_WORLD_OFS_NORMAL,       SCE_GXM_ATTRIBUTE_FORMAT_S8N, 4, false },
+	{ "aColor",     GXM_WORLD_OFS_COLOR,        SCE_GXM_ATTRIBUTE_FORMAT_U8N, 4, false },
+	{ "aTexCoord2", GXM_WORLD_OFS_LM1,          SCE_GXM_ATTRIBUTE_FORMAT_F32, 2, true },
+	{ "aTexCoord3", GXM_WORLD_OFS_LM1 + 8,      SCE_GXM_ATTRIBUTE_FORMAT_F32, 2, true },
+	{ "aTexCoord4", GXM_WORLD_OFS_LM1 + 16,     SCE_GXM_ATTRIBUTE_FORMAT_F32, 2, true },
+	{ "aColor1",    GXM_WORLD_OFS_COLOR1,       SCE_GXM_ATTRIBUTE_FORMAT_U8N, 4, true },
+	{ "aColor2",    GXM_WORLD_OFS_COLOR1 + 4,   SCE_GXM_ATTRIBUTE_FORMAT_U8N, 4, true },
+	{ "aColor3",    GXM_WORLD_OFS_COLOR1 + 8,   SCE_GXM_ATTRIBUTE_FORMAT_U8N, 4, true },
+};
+
+#define GXM_WORLD_NUM_ATTRS	( (int)( sizeof(gxm_worldAttrs) / sizeof(gxm_worldAttrs[0]) ) )
+
+/*
+================
+BuildWorldProgram
+
+One vertex program per layout; a blob that reads a styled attribute only links against the styled stride.
+================
+*/
+static bool BuildWorldProgram( gxmWorldProg_t *out, const SceGxmProgram *blob, SceGxmShaderPatcherId id, int styled )
+{
+	SceGxmVertexAttribute attrs[GXM_WORLD_NUM_ATTRS];
+	int n = 0;
+	memset( attrs, 0, sizeof(attrs) );
+
+	for ( int a = 0; a < GXM_WORLD_NUM_ATTRS; a++ ) {
+		const gxmWorldAttr_t *wa = &gxm_worldAttrs[a];
+		const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName( blob, wa->name );
+		if ( !p ) {
+			if ( a == 0 ) {
+				return false;
+			}
+			continue;
+		}
+		if ( wa->styledOnly && !styled ) {
+			return false;
+		}
+		attrs[n].offset = wa->offset;
+		attrs[n].format = wa->format;
+		attrs[n].componentCount = wa->count;
+		attrs[n].regIndex = sceGxmProgramParameterGetResourceIndex( p );
+		n++;
+	}
+
+	SceGxmVertexStream stream;
+	memset( &stream, 0, sizeof(stream) );
+	stream.stride      = styled ? GXM_WORLD_STYLED_STRIDE : GXM_WORLD_STRIDE;
+	stream.indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
+
+	out->prog = NULL;
+	if ( sceGxmShaderPatcherCreateVertexProgram( GXM_ShaderPatcher(), id, attrs, n, &stream, 1, &out->prog ) < 0 ) {
+		return false;
+	}
+	out->blob = blob;
+	for ( int u = 0; u < WU_COUNT; u++ ) {
+		out->params[u] = sceGxmProgramFindParameterByName( blob, gxm_worldUniformNames[u] );
+	}
+	return true;
+}
+
+// registers and links the resident world set; a failure leaves the world on the tess path
+static bool InitWorldPrograms( void )
+{
+	for ( int u = 0; u < 2; u++ ) {
+		for ( int t = 0; t < 3; t++ ) {
+			for ( int s = 0; s < 2; s++ ) {
+				for ( int f = 0; f < 3; f++ ) {
+					const SceGxmProgram *b = WorldStageBlob( u, t, s, f );
+					if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(), b, &gxm_worldStageIds[u][t][s][f] ) < 0
+						|| !BuildWorldProgram( &gxm_worldStage[u][t][s][f], b, gxm_worldStageIds[u][t][s][f], s ) ) {
+						return false;
+					}
+				}
+			}
+		}
+	}
+	for ( int f = 0; f < 3; f++ ) {
+		for ( int u = 0; u < 2; u++ ) {
+			const SceGxmProgram *b = WorldLightBlob( u, f );
+			if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(), b, &gxm_worldLightIds[u][f] ) < 0 ) {
+				return false;
+			}
+			for ( int s = 0; s < 2; s++ ) {
+				if ( !BuildWorldProgram( &gxm_worldLight[u][s][f], b, gxm_worldLightIds[u][f], s ) ) {
+					return false;
+				}
+			}
+		}
+		const SceGxmProgram *b = WorldFogBlob( f );
+		if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(), b, &gxm_worldFogIds[f] ) < 0 ) {
+			return false;
+		}
+		for ( int s = 0; s < 2; s++ ) {
+			if ( !BuildWorldProgram( &gxm_worldFog[s][f], b, gxm_worldFogIds[f], s ) ) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+int GXM_WorldReady( void )
+{
+	return ( gxm_backendOk && gxm_worldOk ) ? 1 : 0;
+}
+
 int GXM_BackendInit( void )
 {
 	memset( gxm_textures, 0, sizeof(gxm_textures) );
@@ -484,6 +672,10 @@ int GXM_BackendInit( void )
 	memset( gxm_skinNoTex, 0, sizeof(gxm_skinNoTex) );
 	gxm_skinNoTexCount = 0;
 	gxm_skinOk = InitSkinPrograms();
+
+	memset( gxm_worldLinked, 0, sizeof(gxm_worldLinked) );
+	gxm_worldLinkedCount = 0;
+	gxm_worldOk = InitWorldPrograms();
 
 	GXM_InvalidateStateShadow();
 	GXM_SetStateResetCallback( GXM_InvalidateStateShadow );
@@ -1377,6 +1569,284 @@ void GXM_DrawSkinned( const gxmSkinStage_t *st, const gxmSkinDraw_t *draws, int 
 
 	// the generic programs' uniforms were last written for a different reservation
 	gxm_uniformsDirty = true;
+}
+
+// a fragment instance linked to a world program's outputs, for a draw that lost a texture unit
+static SceGxmFragmentProgram *ResolveWorldLinked( int ntex, int env, int fog, const gxmProgramKey_t *key,
+												  const SceGxmProgram *link )
+{
+	const unsigned int hash = ( GXM_ProgramKeyHash( key ) << 7 )
+		| ( (unsigned)ntex << 5 ) | ( (unsigned)env << 3 ) | (unsigned)fog;
+
+	for ( int i = 0; i < gxm_worldLinkedCount; i++ ) {
+		if ( gxm_worldLinked[i].key == hash && gxm_worldLinked[i].link == link ) {
+			return gxm_worldLinked[i].prog;
+		}
+	}
+	if ( gxm_worldLinkedCount >= GXM_MAX_WORLD_LINKED ) {
+		gxm_statProgFail++;
+		return NULL;
+	}
+
+	SceGxmFragmentProgram *prog = NULL;
+	if ( sceGxmShaderPatcherCreateFragmentProgram( GXM_ShaderPatcher(),
+			gxm_fragIds[ntex][env][key->alphaTest][fog ? 1 : 0],
+			SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4, SCE_GXM_MULTISAMPLE_NONE,
+			key->blended ? &key->blend : NULL, link, &prog ) < 0 ) {
+		gxm_statProgFail++;
+		return NULL;
+	}
+
+	gxm_worldLinked[gxm_worldLinkedCount].key  = hash;
+	gxm_worldLinked[gxm_worldLinkedCount].link = link;
+	gxm_worldLinked[gxm_worldLinkedCount].prog = prog;
+	gxm_worldLinkedCount++;
+	return prog;
+}
+
+void GXM_WorldPrepare( unsigned int stateBits, int ntex, int env, int fogMask )
+{
+	if ( !gxm_backendOk || ntex < 1 || ntex > 2 ) {
+		return;
+	}
+	gxmProgramKey_t key;
+	gxmDepthState_t depth;
+	GXM_TranslateState( stateBits, &key, &depth );
+	const int e = ( ntex >= 2 && env >= 0 && env <= GXM_TEXENV_REPLACE ) ? env : 0;
+	for ( int fog = 0; fog < 3; fog++ ) {
+		if ( fogMask & ( 1 << fog ) ) {
+			ResolveFragment( ntex, e, 1, fog, &key );
+		}
+	}
+}
+
+/*
+================
+WorldDrawBegin
+
+Fragment program, depth, stencil, textures and fog colour for a world draw that wants this many texture units.
+================
+*/
+static bool WorldDrawBegin( int wanted, const SceGxmProgram *link, int fog, int *ntexOut )
+{
+	gxmProgramKey_t key;
+	gxmDepthState_t depth;
+	GXM_TranslateState( gxm_stateBits, &key, &depth );
+
+	// a shadow volume writes stencil only, which on gxm means its own masked variant
+	if ( gxm_colorMaskNone ) {
+		key.colorMaskNone      = true;
+		key.blended            = true;
+		key.blend.colorMask    = SCE_GXM_COLOR_MASK_NONE;
+		key.blend.colorFunc    = SCE_GXM_BLEND_FUNC_NONE;
+		key.blend.alphaFunc    = SCE_GXM_BLEND_FUNC_NONE;
+	}
+
+	int ntex = wanted;
+	for ( int t = 0; t < wanted; t++ ) {
+		if ( gxm_boundTex[t] < 0 || !gxm_textures[ gxm_boundTex[t] ].valid ) {
+			ntex = t;	// an unbacked unit would sample garbage; drop it and any above
+			break;
+		}
+	}
+	const int env = ( ntex >= 2 ) ? gxm_texEnv : 0;
+
+	SceGxmFragmentProgram *frag = ( ntex == wanted ) ? ResolveFragment( ntex, env, 1, fog, &key )
+													 : ResolveWorldLinked( ntex, env, fog, &key, link );
+	if ( !frag ) {
+		return false;
+	}
+
+	if ( gxm_mvpDirty ) {
+		MulMat( gxm_mvp, gxm_proj, gxm_modelView );
+		gxm_mvpDirty = false;
+		gxm_uniformsDirty = true;
+	}
+
+	bool fragProgChanged = false;
+	if ( gxm_curFragProg != frag ) {
+		sceGxmSetFragmentProgram( GXM_Context(), frag );
+		gxm_curFragProg = frag;
+		fragProgChanged = true;
+	}
+	if ( !gxm_depthKnown || gxm_curDepth.depthFunc != depth.depthFunc
+		|| gxm_curDepth.depthWrite != depth.depthWrite
+		|| gxm_curDepth.wireframe != depth.wireframe ) {
+		GXM_ApplyDepthState( &depth );
+		gxm_curDepth  = depth;
+		gxm_depthKnown = true;
+	}
+	if ( gxm_stencilDirty ) {
+		GXM_ApplyStencilState( &gxm_stencil );
+		gxm_stencilDirty = false;
+	}
+
+	for ( int t = 0; t < ntex; t++ ) {
+		const int tn = gxm_boundTex[t];
+		if ( gxm_curTex[t] != &gxm_textures[tn].tex ) {
+			sceGxmSetFragmentTexture( GXM_Context(), t, &gxm_textures[tn].tex );
+			gxm_curTex[t] = &gxm_textures[tn].tex;
+		}
+	}
+
+	if ( fog && ( fragProgChanged || gxm_fragUniformsDirty ) ) {
+		void *funi = NULL;
+		sceGxmReserveFragmentDefaultUniformBuffer( GXM_Context(), &funi );
+		const SceGxmProgramParameter *pfc = gxm_pFogColor[ntex][env][key.alphaTest][1];
+		if ( funi && pfc ) {
+			sceGxmSetUniformDataF( funi, pfc, 0, 4, gxm_fogColor );
+			gxm_fragUniformsDirty = false;
+		}
+	}
+
+	*ntexOut = ntex;
+	return true;
+}
+
+static void WriteWorldUniforms( const gxmWorldProg_t *p, const float *const *values )
+{
+	void *u = NULL;
+	sceGxmReserveVertexDefaultUniformBuffer( GXM_Context(), &u );
+	if ( !u ) {
+		return;
+	}
+	for ( int i = 0; i < WU_COUNT; i++ ) {
+		if ( p->params[i] && values[i] ) {
+			sceGxmSetUniformDataF( u, p->params[i], 0, ( i == WU_MVP ) ? 16 : 4, values[i] );
+		}
+	}
+}
+
+// the segments in order; a layout change switches program and rewrites the uniforms for it
+static void WorldDrawSegments( gxmWorldProg_t (*progs)[3], int fog, const float **values,
+							   const float *const *layoutScale, const float *const *layoutBias,
+							   const gxmWorldSeg_t *segs, int numSegs, int ntex )
+{
+	int layout = -1;
+	for ( int i = 0; i < numSegs; i++ ) {
+		const gxmWorldSeg_t *s = &segs[i];
+		if ( !s->verts || !s->indexes || s->numIndexes <= 0 ) {
+			continue;
+		}
+		const int styled = s->styled ? 1 : 0;
+		if ( styled != layout ) {
+			const gxmWorldProg_t *p = &progs[styled][fog];
+			if ( gxm_curVertProg != p->prog ) {
+				sceGxmSetVertexProgram( GXM_Context(), p->prog );
+				gxm_curVertProg = p->prog;
+			}
+			if ( layoutScale ) {
+				values[WU_COLORSCALE] = layoutScale[styled];
+				values[WU_COLORBIAS] = layoutBias[styled];
+			}
+			WriteWorldUniforms( p, values );
+			layout = styled;
+		}
+		sceGxmSetVertexStream( GXM_Context(), 0, s->verts );
+		sceGxmDraw( GXM_Context(), SCE_GXM_PRIMITIVE_TRIANGLES,
+			SCE_GXM_INDEX_FORMAT_U16, s->indexes, (unsigned int)s->numIndexes );
+		gxm_statDraws++;
+		if ( ntex ) {
+			gxm_statTextured++;
+		}
+	}
+
+	// the generic programs' uniforms were last written for a different reservation
+	gxm_uniformsDirty = true;
+}
+
+void GXM_DrawWorldStage( const gxmWorldStage_t *st, const gxmWorldSeg_t *segs, int numSegs )
+{
+	gxm_ovXyz = gxm_ovUv0 = gxm_ovUv1 = NULL;
+	gxm_ovRgba = NULL;
+
+	if ( !gxm_backendOk || !gxm_worldOk || !st || !segs || numSegs <= 0 ) {
+		return;
+	}
+	const int sets = ( st->nuv >= 2 ) ? 1 : 0;
+	const int tc0 = ( st->tc0 >= GXM_WORLD_TC_LINEAR && st->tc0 <= GXM_WORLD_TC_TURB ) ? st->tc0 : GXM_WORLD_TC_LINEAR;
+	const int fog = gxm_fogOn;
+	int ntex = 0;
+	if ( !WorldDrawBegin( sets + 1, gxm_worldStage[sets][tc0][0][fog].blob, fog, &ntex ) ) {
+		return;
+	}
+
+	const float *values[WU_COUNT];
+	memset( values, 0, sizeof(values) );
+	values[WU_MVP]       = gxm_mvp;
+	values[WU_TEX0S]     = st->tex[0][0];
+	values[WU_TEX0T]     = st->tex[0][1];
+	values[WU_TEX0SP]    = st->tex[0][2];
+	values[WU_TEX0TP]    = st->tex[0][3];
+	values[WU_TEX1S]     = st->tex[1][0];
+	values[WU_TEX1T]     = st->tex[1][1];
+	values[WU_TEX1SP]    = st->tex[1][2];
+	values[WU_TEX1TP]    = st->tex[1][3];
+	values[WU_VIEWER]    = st->viewer;
+	values[WU_TURB]      = st->turb;
+	values[WU_TURBPOST]  = st->turbPost;
+	values[WU_LMSELECT]  = st->lmSelect;
+	values[WU_STYLE0]    = st->style[0];
+	values[WU_STYLE1]    = st->style[1];
+	values[WU_STYLE2]    = st->style[2];
+	values[WU_STYLE3]    = st->style[3];
+	values[WU_FOGPARAMS] = gxm_fogParams;
+
+	const float *scale[2] = { st->colorScale, st->colorScaleStyled };
+	const float *bias[2] = { st->colorBias, st->colorBiasStyled };
+	WorldDrawSegments( gxm_worldStage[sets][tc0], fog, values, scale, bias, segs, numSegs, ntex );
+}
+
+void GXM_DrawWorldLight( const gxmWorldLight_t *light, const gxmWorldSeg_t *segs, int numSegs )
+{
+	gxm_ovXyz = gxm_ovUv0 = gxm_ovUv1 = NULL;
+	gxm_ovRgba = NULL;
+
+	if ( !gxm_backendOk || !gxm_worldOk || !light || !segs || numSegs <= 0 ) {
+		return;
+	}
+	const int sets = light->diffuse ? 1 : 0;
+	const int fog = gxm_fogOn;
+	int ntex = 0;
+	if ( !WorldDrawBegin( sets + 1, gxm_worldLight[sets][0][fog].blob, fog, &ntex ) ) {
+		return;
+	}
+
+	const float origin[4] = { light->origin[0], light->origin[1], light->origin[2], light->radius };
+	const float color[4] = { light->color[0], light->color[1], light->color[2], 1.0f };
+	const float *values[WU_COUNT];
+	memset( values, 0, sizeof(values) );
+	values[WU_MVP]        = gxm_mvp;
+	values[WU_LIGHT]      = origin;
+	values[WU_LIGHTCOLOR] = color;
+	values[WU_FOGPARAMS]  = gxm_fogParams;
+	WorldDrawSegments( gxm_worldLight[sets], fog, values, NULL, NULL, segs, numSegs, ntex );
+}
+
+void GXM_DrawWorldFog( const gxmWorldFog_t *wf, const gxmWorldSeg_t *segs, int numSegs )
+{
+	gxm_ovXyz = gxm_ovUv0 = gxm_ovUv1 = NULL;
+	gxm_ovRgba = NULL;
+
+	if ( !gxm_backendOk || !gxm_worldOk || !wf || !segs || numSegs <= 0 ) {
+		return;
+	}
+	const int fog = gxm_fogOn;
+	int ntex = 0;
+	if ( !WorldDrawBegin( 1, gxm_worldFog[0][fog].blob, fog, &ntex ) ) {
+		return;
+	}
+
+	const float eye[4] = { wf->eyeT, wf->eyeOutside ? 1.0f : 0.0f, 0.0f, 0.0f };
+	const float *values[WU_COUNT];
+	memset( values, 0, sizeof(values) );
+	values[WU_MVP]         = gxm_mvp;
+	values[WU_COLOR]       = wf->color;
+	values[WU_FOGDISTANCE] = wf->distance;
+	values[WU_FOGDEPTH]    = wf->depth;
+	values[WU_FOGEYE]      = eye;
+	values[WU_FOGPARAMS]   = gxm_fogParams;
+	WorldDrawSegments( gxm_worldFog, fog, values, NULL, NULL, segs, numSegs, ntex );
 }
 
 // --- immediate mode: glBegin/glVertex geometry accumulates here and leaves as one draw ---

@@ -194,11 +194,9 @@ R_LoadLightmaps
 
 ===============
 */
-#define	LIGHTMAP_SIZE	128
-#define	LMATLAS_SIZE	512									// merged page dimension
-#define	LMATLAS_COLS	(LMATLAS_SIZE/LIGHTMAP_SIZE)
-#define	LMATLAS_SLOTS	(LMATLAS_COLS*LMATLAS_COLS)			// must stay a power of two
-#define	LMATLAS_INSET	(0.5f/LIGHTMAP_SIZE)					// half a texel, the inset q3map2 already bakes in
+#define	LIGHTMAP_SIZE	GXM_LMATLAS_LIGHTMAP
+#define	LMATLAS_SIZE	GXM_LMATLAS_SIZE						// merged page dimension
+#define	LMATLAS_SLOTS	GXM_LMATLAS_SLOTS						// must stay a power of two
 
 static int	lm_numSlots;					// lightmaps packed so far across every loaded world
 
@@ -237,16 +235,6 @@ static void R_UnpackLightmap( const byte *src, byte *dst, int dstStride, float &
 			out[3] = 255;
 		}
 	}
-}
-
-// Rescale a lightmap st into the page slot the lightmap was packed at.
-static void R_RemapLightmapUV( int slot, float *st )
-{
-	int	n = slot & (LMATLAS_SLOTS - 1);
-
-	// an un-merged lightmap got this clamp from GL_CLAMP
-	st[0] = ( (n % LMATLAS_COLS) + Com_Clamp( LMATLAS_INSET, 1.0f - LMATLAS_INSET, st[0] ) ) * (1.0f / LMATLAS_COLS);
-	st[1] = ( (n / LMATLAS_COLS) + Com_Clamp( LMATLAS_INSET, 1.0f - LMATLAS_INSET, st[1] ) ) * (1.0f / LMATLAS_COLS);
 }
 
 static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldData )
@@ -318,8 +306,7 @@ static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldDat
 					continue;
 				}
 				R_UnpackLightmap( buf + i * LIGHTMAP_SIZE*LIGHTMAP_SIZE*3,
-					pageData + ( (slot / LMATLAS_COLS) * LIGHTMAP_SIZE * LMATLAS_SIZE
-								+ (slot % LMATLAS_COLS) * LIGHTMAP_SIZE ) * 4,
+					pageData + GXM_LmAtlasTexelOffset( slot ) * 4,
 					LMATLAS_SIZE, maxIntensity, sumIntensity );
 			}
 
@@ -527,7 +514,7 @@ static void ParseFace( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, int *
 		{
 			if (lmSlot[k] >= 0)
 			{
-				R_RemapLightmapUV( lmSlot[k], &cv->points[i][VERTEX_LM+(k*2)] );
+				GXM_LmAtlasRemap( lmSlot[k], &cv->points[i][VERTEX_LM+(k*2)] );
 			}
 			R_ColorShiftLightingBytes( verts[i].color[k], (byte *)&cv->points[i][VERTEX_COLOR+k] );
 		}
@@ -622,7 +609,7 @@ static void ParseMesh ( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, worl
 		{
 			if (lmSlot[k] >= 0)
 			{
-				R_RemapLightmapUV( lmSlot[k], points[i].lightmap[k] );
+				GXM_LmAtlasRemap( lmSlot[k], points[i].lightmap[k] );
 			}
 			R_ColorShiftLightingBytes( verts[i].color[k], points[i].color[k] );
 		}
@@ -685,6 +672,10 @@ static void ParseTriSurf( dsurface_t *ds, mapVert_t *verts, msurface_t *surf, in
 	tri->numIndexes = numIndexes;
 	tri->verts = (drawVert_t *)(tri + 1);
 	tri->indexes = (int *)(tri->verts + tri->numVerts );
+#ifdef VITA
+	tri->vboGroup = -1;
+	tri->vboIndexes = NULL;
+#endif
 
 	surf->data = (surfaceType_t *)tri;
 
