@@ -134,6 +134,7 @@ cvar_t	*r_forceFogColor;
 cvar_t	*r_gxmCullFlip;
 cvar_t	*r_gxmStats;
 cvar_t	*r_gxmSync;
+cvar_t	*r_gpuSkin;
 #endif
 cvar_t	*r_texturebits;
 cvar_t	*r_texturebitslm;
@@ -1773,6 +1774,7 @@ void R_Register( void )
 	r_gxmCullFlip        = ri.Cvar_Get( "r_gxmCullFlip",        "1", CVAR_ARCHIVE, "" );	// invert the GL->GXM winding mapping
 	r_gxmStats           = ri.Cvar_Get( "r_gxmStats",           "0", CVAR_ARCHIVE, "" );	// frames per backend stat line, 0 = off
 	r_gxmSync            = ri.Cvar_Get( "r_gxmSync",            "0", CVAR_ARCHIVE, "" );	// 1 = drain the gpu every frame
+	r_gpuSkin            = ri.Cvar_Get( "r_gpuSkin",            "1", CVAR_ARCHIVE | CVAR_LATCH, "" );	// ghoul2 skinned in the vertex program, buffers built at model load
 #endif
 	r_ambientScale						= ri.Cvar_Get( "r_ambientScale",					"0.6",						CVAR_CHEAT, "" );
 	r_directedScale						= ri.Cvar_Get( "r_directedScale",					"1",						CVAR_CHEAT, "" );

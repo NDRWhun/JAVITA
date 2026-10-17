@@ -30,6 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "qgl.h"
 #ifdef USE_GXM_NATIVE
 #include "rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_skin.h"
 #endif
 
 #ifdef VITA
@@ -48,6 +49,7 @@ extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not f
 extern cvar_t *r_gxmSync;		// 1 = drain the gpu every frame (debug)
 extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
 extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
+extern cvar_t *r_gpuSkin;		// skin eligible ghoul2 surfaces in the vertex program
 #endif
 void R_StartRenderThread( void );
 void R_StopRenderThread( void );
@@ -122,6 +124,9 @@ Ghoul2 Insert End
 */
 	int			 numLods;
 	qboolean	bspInstance;
+#ifdef USE_GXM_NATIVE
+	gxmSkinModel_t	*gpuSkin;		// GPU-resident surfaces of an mdxm, owned by the model cache entry
+#endif
 } model_t;
 
 typedef struct dlight_s {
@@ -1730,6 +1735,9 @@ public:
 	const mdxaBone_t *boneMats;		// frontend bone snapshot (render-thread mode); NULL single-threaded
 	const float		*preSkinned;	// frontend pre-skinned xyz+normal (6 floats/vert); NULL -> backend skins
 #endif
+#ifdef USE_GXM_NATIVE
+	const gxmSkinSurface_t *gpuSurf;	// resident copy to skin in the vertex program; NULL keeps the CPU skinner
+#endif
 #ifdef _G2_GORE
 	float			*alternateTex;		// alternate texture coordinates.
 	void			*goreChain;
@@ -1767,6 +1775,9 @@ CRenderableSurface():
 		boneMats = 0;
 		preSkinned = 0;
 #endif
+#ifdef USE_GXM_NATIVE
+		gpuSurf = 0;
+#endif
 	}
 
 #ifdef _G2_GORE
@@ -1781,6 +1792,9 @@ CRenderableSurface():
 		boneMats=0;
 		preSkinned=0;
 #endif
+#ifdef USE_GXM_NATIVE
+		gpuSurf=0;
+#endif
 	}
 #endif
 };
@@ -1792,6 +1806,14 @@ void RB_SurfaceGhoul( CRenderableSurface *surface );
 void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_ResetGhoulSkinArena( void );
 void R_FreeGhoulSkinArena( void );
+#ifdef USE_GXM_NATIVE
+// ghoul2 skinned in the vertex program: tr_ghoul2.cpp builds and selects, tr_shade.cpp draws
+qboolean	R_GpuSkinShaderOk( const shader_t *shader );
+qboolean	R_GpuSkinBatchOk( const shader_t *shader, int renderfx, int fogNum );
+void		R_GpuSkinFreeModel( const void *diskImage );
+qboolean	RB_GpuSkinAdd( const gxmSkinSurface_t *gs, const mdxaBone_t *bones );
+qboolean	RB_CalcTexMatrix( const textureBundle_t *bundle, float m[2][3] );
+#endif
 qboolean	RB_GxmVolumeFogPass( int fogNum, const shader_t *shader );	// the global-fog uniform covers this batch
 qboolean	RB_GxmVolumeFog( int fogNum, const shader_t *shader );	// arm the global-fog uniform for a non-tess batch
 void		RB_GxmVolumeFogOff( void );

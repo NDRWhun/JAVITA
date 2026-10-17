@@ -297,6 +297,9 @@ qboolean RE_RegisterModels_LevelLoadEnd(qboolean bDeleteEverythingNotUsedThisLev
 	#endif
 
 				if (CachedModel.pModelDiskImage) {
+#ifdef USE_GXM_NATIVE
+					R_GpuSkinFreeModel( CachedModel.pModelDiskImage );
+#endif
 					R_Free(CachedModel.pModelDiskImage);
 					//CachedModel.pModelDiskImage = NULL;	// REM for reference, erase() call below negates the need for it.
 					bAtLeastoneModelFreed = qtrue;
@@ -358,6 +361,9 @@ static void RE_RegisterModels_DeleteAll(void)
 		CachedEndianedModelBinary_t &CachedModel = (*itModel).second;
 
 		if (CachedModel.pModelDiskImage) {
+#ifdef USE_GXM_NATIVE
+			R_GpuSkinFreeModel( CachedModel.pModelDiskImage );
+#endif
 			R_Free(CachedModel.pModelDiskImage);
 		}
 

@@ -59,6 +59,7 @@ const SceGxmNotification *GXM_RingSceneNotification( void );
 void   *GXM_RingAlloc( unsigned int size, unsigned int alignment );
 unsigned int GXM_RingUsedLastFrame( void );
 unsigned int GXM_RingBytesPerFrame( void );
+unsigned int GXM_RingFrameSerial( void );	// changes whenever the ring moves to a new frame
 
 #ifdef __cplusplus
 }

@@ -242,6 +242,7 @@ static unsigned int	 ring_offset;		// within the current frame's slice
 static unsigned int	 ring_frame;
 static unsigned int	 ring_lastUsed;
 static bool			 ring_overflowed;
+static unsigned int	 ring_serial;		// counts frames, so pointers handed out earlier can be told stale
 
 static bool	ring_notifyReady;
 
@@ -323,10 +324,16 @@ void GXM_RingBeginFrame( void )
 		sceGxmNotificationWait( &ring_notify[ring_frame] );
 	}
 	ring_offset = 0;
+	ring_serial++;
 
 	if ( ring_overflowed ) {
 		ring_overflowed = false;
 	}
+}
+
+unsigned int GXM_RingFrameSerial( void )
+{
+	return ring_serial;
 }
 
 unsigned int GXM_RingBytesPerFrame( void )

@@ -47,6 +47,13 @@ bool		styleUpdated[MAX_LIGHT_STYLES];
 
 extern bool g_bRenderGlowingObjects;
 
+#ifdef USE_GXM_NATIVE
+// ghoul2 surfaces of the current batch that the vertex program skins, drawn after each stage's tess draw
+#define MAX_GPUSKIN_DRAWS	128
+static gxmSkinDraw_t	gpuSkinDraws[MAX_GPUSKIN_DRAWS];
+static int				gpuSkinCount;
+#endif
+
 /*
 ================
 R_ArrayElementDiscrete
@@ -484,6 +491,9 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 	tess.fading = false;
 #ifdef VITA
 	tess.g2WorldBaked = qfalse;
+#endif
+#ifdef USE_GXM_NATIVE
+	gpuSkinCount = 0;
 #endif
 
 	tess.registration++;
@@ -1891,6 +1901,216 @@ void ForceAlpha(unsigned char *dstColors, int TR_ForceEntAlpha)
 	}
 }
 
+#ifdef USE_GXM_NATIVE
+/*
+===============
+R_GpuSkinShaderOk
+
+Every stage must come from uniforms plus the skinned position and normal.
+===============
+*/
+qboolean R_GpuSkinShaderOk( const shader_t *sh )
+{
+	if ( !sh || sh == tr.shadowShader || sh == tr.projectionShadowShader || sh == tr.distortionShader
+		|| sh->numDeforms || sh->sky || sh->entityMergable || !sh->numUnfoggedPasses ) {
+		return qfalse;
+	}
+	for ( int i = 0; i < sh->numUnfoggedPasses; i++ ) {
+		const shaderStage_t *pStage = &sh->stages[i];
+		if ( !pStage->active ) {
+			break;
+		}
+		if ( ( pStage->ss && pStage->ss->surfaceSpriteType ) || pStage->bundle[1].image ) {
+			return qfalse;
+		}
+		const textureBundle_t *bundle = &pStage->bundle[0];
+		if ( bundle->tcGen != TCGEN_TEXTURE && bundle->tcGen != TCGEN_ENVIRONMENT_MAPPED
+			&& bundle->tcGen != TCGEN_IDENTITY ) {
+			return qfalse;
+		}
+		for ( int tm = 0; tm < bundle->numTexMods; tm++ ) {
+			const texMod_t type = bundle->texMods[tm].type;
+			if ( type == TMOD_NONE ) {
+				break;
+			}
+			if ( type == TMOD_TURBULENT ) {
+				return qfalse;	// a per-vertex sine of the skinned position
+			}
+		}
+		switch ( pStage->rgbGen ) {
+		case CGEN_IDENTITY:
+		case CGEN_IDENTITY_LIGHTING:
+		case CGEN_CONST:
+		case CGEN_ENTITY:
+		case CGEN_ONE_MINUS_ENTITY:
+		case CGEN_WAVEFORM:
+		case CGEN_LIGHTING_DIFFUSE:
+		case CGEN_LIGHTING_DIFFUSE_ENTITY:
+			break;
+		default:
+			return qfalse;
+		}
+		switch ( pStage->alphaGen ) {
+		case AGEN_IDENTITY:
+		case AGEN_SKIP:
+		case AGEN_CONST:
+		case AGEN_WAVEFORM:
+		case AGEN_ENTITY:
+		case AGEN_ONE_MINUS_ENTITY:
+		case AGEN_LIGHTING_SPECULAR:
+			break;
+		default:
+			return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+/*
+===============
+R_GpuSkinBatchOk
+
+The shader test plus what the entity and fog add on top of it.
+===============
+*/
+qboolean R_GpuSkinBatchOk( const shader_t *sh, int renderfx, int fogNum )
+{
+	if ( !r_gpuSkin || !r_gpuSkin->integer || !GXM_SkinReady() ) {
+		return qfalse;
+	}
+	if ( renderfx & ( RF_DISINTEGRATE1 | RF_DISINTEGRATE2 | RF_VOLUMETRIC | RF_DISTORTION ) ) {
+		return qfalse;	// per-vertex colour or deform effects, or the screen copy
+	}
+	if ( !R_GpuSkinShaderOk( sh ) ) {
+		return qfalse;
+	}
+	for ( int i = 0; i < sh->numUnfoggedPasses; i++ ) {
+		const shaderStage_t *pStage = &sh->stages[i];
+		if ( !pStage->active ) {
+			break;
+		}
+		if ( fogNum && pStage->adjustColorsForFog != ACFF_NONE ) {
+			return qfalse;	// fades by per-vertex fog density
+		}
+		if ( ( renderfx & RF_FIRST_PERSON ) && pStage->bundle[0].tcGen == TCGEN_ENVIRONMENT_MAPPED
+			&& pStage->alphaGen == AGEN_LIGHTING_SPECULAR ) {
+			return qfalse;	// the two terms would need different viewer vectors
+		}
+	}
+	// a fog volume's own pass reads CPU positions; the global fog rides in the programs
+	if ( fogNum && sh->fogPass && tr.world && r_drawfog->value
+		&& ( fogNum != tr.world->globalFog || r_drawfog->value != 2 ) ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+/*
+===============
+RB_GpuSkinAdd
+
+Queues a resident surface on the current batch; false leaves it to the CPU skinner.
+===============
+*/
+qboolean RB_GpuSkinAdd( const gxmSkinSurface_t *gs, const mdxaBone_t *bones )
+{
+	const void *palette = GXM_SkinPalette( bones, gs->paletteBones );
+	if ( !palette ) {
+		return qfalse;
+	}
+	if ( gpuSkinCount >= MAX_GPUSKIN_DRAWS ) {
+		RB_EndSurface();
+		RB_BeginSurface( tess.shader, tess.fogNum );
+	}
+	gxmSkinDraw_t *d = &gpuSkinDraws[gpuSkinCount++];
+	d->vertices = gs->vertices;
+	d->indexes = gs->indexes;
+	d->numIndexes = gs->numIndexes;
+	d->weights = gs->weights;
+	d->palette = palette;
+	return qtrue;
+}
+
+/*
+===============
+RB_GpuSkinStage
+
+Draws the queued surfaces with the state, texture and fog the stage just set for tess.
+===============
+*/
+static void RB_GpuSkinStage( shaderStage_t *pStage, alphaGen_t forceAlphaGen, colorGen_t forceRGBGen )
+{
+	const trRefEntity_t *ent = backEnd.currentEntity;
+	gxmSkinStage_t st;
+	memset( &st, 0, sizeof( st ) );
+
+	// the uniform part of the colour is what the CPU generators give a single vertex
+	const int savedVerts = tess.numVertexes;
+	byte savedColor[4], c[4];
+	memcpy( savedColor, tess.svars.colors[0], 4 );
+	tess.numVertexes = 1;
+	ComputeColors( pStage, forceAlphaGen, forceRGBGen );
+	if ( ent->e.renderfx & RF_FORCE_ENT_ALPHA ) {
+		tess.svars.colors[0][3] = ent->e.shaderRGBA[3];
+	}
+	memcpy( c, tess.svars.colors[0], 4 );
+	memcpy( tess.svars.colors[0], savedColor, 4 );
+	tess.numVertexes = savedVerts;
+
+	const colorGen_t rgbGen = forceRGBGen ? forceRGBGen : pStage->rgbGen;
+	const alphaGen_t alphaGen = forceAlphaGen ? forceAlphaGen : pStage->alphaGen;
+	st.lit = ( rgbGen == CGEN_LIGHTING_DIFFUSE || rgbGen == CGEN_LIGHTING_DIFFUSE_ENTITY );
+	st.spec = ( alphaGen == AGEN_LIGHTING_SPECULAR && !( ent->e.renderfx & RF_FORCE_ENT_ALPHA ) );
+	for ( int i = 0; i < 3; i++ ) {
+		if ( !st.lit ) {
+			st.color[i] = c[i] / 255.0f;
+		} else if ( rgbGen == CGEN_LIGHTING_DIFFUSE_ENTITY ) {
+			st.color[i] = ent->e.shaderRGBA[i] / 255.0f;
+		} else {
+			st.color[i] = 1.0f;
+		}
+		st.lightDir[i] = ent->lightDir[i];
+		st.ambient[i] = ent->ambientLight[i] / 255.0f;
+		st.directed[i] = ent->directedLight[i] / 255.0f;
+		st.viewer[i] = backEnd.ori.viewOrigin[i];
+	}
+	st.color[3] = c[3] / 255.0f;
+	st.viewer[3] = 1.0f;
+
+	// tcMods compose onto st, or onto the environment vector, whose st is its xy
+	const textureBundle_t *bundle = &pStage->bundle[0];
+	float m[2][3];
+	RB_CalcTexMatrix( bundle, m );
+	if ( bundle->tcGen == TCGEN_TEXTURE ) {
+		for ( int r = 0; r < 2; r++ ) {
+			st.texMat[r][0] = m[r][0];
+			st.texMat[r][1] = m[r][1];
+			st.texMat[r][2] = m[r][2];
+		}
+	} else if ( bundle->tcGen == TCGEN_ENVIRONMENT_MAPPED && r_environmentMapping->integer ) {
+		st.env = 1;
+		for ( int r = 0; r < 2; r++ ) {
+			st.texMat[r][0] = m[r][0];
+			st.texMat[r][1] = m[r][1];
+			st.texMat[r][3] = m[r][2];
+		}
+		if ( ent->e.renderfx & RF_FIRST_PERSON ) {
+			VectorCopy( ent->lightDir, st.viewer );	// view models reflect the world light, not the eye
+			st.viewer[3] = 0.0f;
+			st.envParams[0] = 1.0f;
+		} else {
+			st.envParams[0] = 0.5f;
+		}
+	} else {
+		st.texMat[0][2] = m[0][2];	// st is zero, so only the translation survives
+		st.texMat[1][2] = m[1][2];
+	}
+
+	GXM_SetStateBits( glState.glStateBits );
+	GXM_DrawSkinned( &st, gpuSkinDraws, gpuSkinCount );
+}
+#endif
+
 /*
 ** RB_IterateStagesGeneric
 */
@@ -2207,6 +2427,12 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 			// draw
 			//
 			R_DrawElements( input->numIndexes, input->indexes, input->numVertexes );
+#ifdef USE_GXM_NATIVE
+			if ( gpuSkinCount )
+			{
+				RB_GpuSkinStage( pStage, forceAlphaGen, forceRGBGen );
+			}
+#endif
 
 			if (lStencilled)
 			{ //re-enable the color buffer, disable stencil test
@@ -2393,7 +2619,11 @@ void RB_EndSurface( void ) {
 
 	input = &tess;
 
+#ifdef USE_GXM_NATIVE
+	if (input->numIndexes == 0 && !gpuSkinCount) {
+#else
 	if (input->numIndexes == 0) {
+#endif
 		return;
 	}
 
@@ -2475,6 +2705,9 @@ void RB_EndSurface( void ) {
 
 	// clear shader so we can tell we don't have any unclosed surfaces
 	tess.numIndexes = 0;
+#ifdef USE_GXM_NATIVE
+	gpuSkinCount = 0;
+#endif
 
 	GLimp_LogComment( "----------\n" );
 }

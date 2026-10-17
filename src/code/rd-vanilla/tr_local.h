@@ -32,6 +32,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "qgl.h"
 #ifdef USE_GXM_NATIVE
 #include "rd-gxm/gxm_backend.h"
+#include "rd-gxm/gxm_skin.h"
 #endif
 
 #ifdef VITA
@@ -48,6 +49,7 @@ extern cvar_t *r_worldVBO;		// bake eligible static world surfaces into gpu buff
 extern cvar_t *r_gxmSync;		// 1 = drain the gpu every frame (debug)
 extern cvar_t *r_gxmStats;		// frames per backend stat line, 0 = off
 extern cvar_t *r_gxmCullFlip;	// invert the GL->GXM winding mapping
+extern cvar_t *r_gpuSkin;		// skin eligible ghoul2 surfaces in the vertex program
 extern cvar_t *r_dropTexturesOnLoad;	// free old-map textures at shutdown, not first frame
 void R_StartRenderThread( void );
 void R_StopRenderThread( void );
@@ -880,6 +882,9 @@ Ghoul2 Insert End
 */
 	unsigned char	numLods;
 	bool			bspInstance;			// model is a bsp instance
+#ifdef USE_GXM_NATIVE
+	gxmSkinModel_t	*gpuSkin;				// GPU-resident surfaces of an mdxm, owned by the model cache entry
+#endif
 } model_t;
 
 
@@ -1686,6 +1691,9 @@ public:
 	const mdxaBone_t *boneMats;		// frontend bone snapshot (render-thread mode); backend skins from this,
 									// never the live CBoneCache. NULL -> surface drops under r_renderThread.
 	const g2WorldRec_t *worldRec;	// world-space merge: baked transform + light (NULL = per-entity path)
+#ifdef USE_GXM_NATIVE
+	const gxmSkinSurface_t *gpuSurf;	// resident copy to skin in the vertex program; NULL keeps the CPU skinner
+#endif
 #ifdef _G2_GORE
 	float			*alternateTex;		// alternate texture coordinates.
 	void			*goreChain;
@@ -1716,6 +1724,10 @@ CRenderableSurface():
 	surfaceData(0),
 	boneMats(0),
 	worldRec(0)
+#ifdef USE_GXM_NATIVE
+	,
+	gpuSurf(0)
+#endif
 #ifdef _G2_GORE
 	,
 	alternateTex(0),
@@ -1729,6 +1741,9 @@ CRenderableSurface():
 		surfaceData=0;
 		boneMats=0;
 		worldRec=0;
+#ifdef USE_GXM_NATIVE
+		gpuSurf=0;
+#endif
 #ifdef _G2_GORE
 		ident = SF_MDX;
 		alternateTex=0;
@@ -1748,6 +1763,14 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs );
 // per-frame recycle of the frontend's bone snapshot arena (render-thread mode)
 void R_ResetGhoulSkinArena( void );
 void R_FreeGhoulSkinArena( void );
+#ifdef USE_GXM_NATIVE
+// ghoul2 skinned in the vertex program: tr_ghoul2.cpp builds and selects, tr_shade.cpp draws
+qboolean	R_GpuSkinShaderOk( const shader_t *shader );
+qboolean	R_GpuSkinBatchOk( const shader_t *shader, int renderfx, int fogNum );
+void		R_GpuSkinFreeModel( const void *diskImage );
+qboolean	RB_GpuSkinAdd( const gxmSkinSurface_t *gs, const mdxaBone_t *bones );
+qboolean	RB_CalcTexMatrix( const textureBundle_t *bundle, float m[2][3] );
+#endif
 // static world VBO (tr_worldvbo.cpp)
 void		R_BuildWorldVBO( world_t &worldData );
 void		R_WorldVBO_Clear( void );

@@ -390,6 +390,9 @@ qboolean RE_RegisterModels_LevelLoadEnd(qboolean bDeleteEverythingNotUsedThisLev
 	#endif
 
 				if (CachedModel.pModelDiskImage) {
+#ifdef USE_GXM_NATIVE
+					R_GpuSkinFreeModel( CachedModel.pModelDiskImage );
+#endif
 					Z_Free(CachedModel.pModelDiskImage);
 					//CachedModel.pModelDiskImage = NULL;	// REM for reference, erase() call below negates the need for it.
 					bAtLeastoneModelFreed = qtrue;
@@ -444,6 +447,9 @@ static void RE_RegisterModels_DumpNonPure(void)
 				ri.Printf( PRINT_DEVELOPER, "Dumping none pure model \"%s\"", psModelName);
 
 				if (CachedModel.pModelDiskImage) {
+#ifdef USE_GXM_NATIVE
+					R_GpuSkinFreeModel( CachedModel.pModelDiskImage );
+#endif
 					Z_Free(CachedModel.pModelDiskImage);
 					//CachedModel.pModelDiskImage = NULL;	// REM for reference, erase() call below negates the need for it.
 				}
@@ -501,6 +507,9 @@ static void RE_RegisterModels_DeleteAll(void)
 		CachedEndianedModelBinary_t &CachedModel = (*itModel).second;
 
 		if (CachedModel.pModelDiskImage) {
+#ifdef USE_GXM_NATIVE
+			R_GpuSkinFreeModel( CachedModel.pModelDiskImage );
+#endif
 			Z_Free(CachedModel.pModelDiskImage);
 		}
 

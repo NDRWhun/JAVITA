@@ -2536,6 +2536,18 @@ void RenderSurfaces(CRenderSurface &RS) //also ended up just ripping right from 
 			newSurf->surfaceData = surface;
 			newSurf->boneCache = RS.boneCache;
 			R_AddDrawSurf( (surfaceType_t *)newSurf, (shader_t *)shader, RS.fogNum, qfalse );
+#ifdef USE_GXM_NATIVE
+			// the vertex program skins from the frontend's bone snapshot, which only the render thread mode takes
+			if ( r_renderThread && r_renderThread->integer && RS.currentModel->gpuSkin && RS.boneCache
+				&& R_GpuSkinBatchOk( shader, RS.renderfx, RS.fogNum ) )
+			{
+				const gxmSkinSurface_t *gs = GXM_SkinModelSurface( RS.currentModel->gpuSkin, RS.lod, RS.surfaceNum );
+				if ( gs && gs->paletteBones <= (int)RS.boneCache->mBones.size() )	// the palette is copied from a snapshot this long
+				{
+					newSurf->gpuSurf = gs;
+				}
+			}
+#endif
 
 #ifdef _G2_GORE
 			if (RS.gore_set && drawGore)
@@ -2619,6 +2631,12 @@ void RenderSurfaces(CRenderSurface &RS) //also ended up just ripping right from 
 					}
 				}
 			}
+#ifdef USE_GXM_NATIVE
+			if ( newSurf->goreChain )
+			{
+				newSurf->gpuSurf = NULL;	// the gore marks copy this surface's CPU-skinned vertices
+			}
+#endif
 #endif
 		}
 	}
@@ -3777,6 +3795,11 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		{
 			CRenderableSurface *rs = g->surfs[s];
 			rs->boneMats = g->snap;
+#ifdef USE_GXM_NATIVE
+			if ( rs->gpuSurf ) {
+				continue;	// the vertex program skins it from the snapshot, so no pre-skin slice
+			}
+#endif
 			const size_t vneed = (size_t)rs->surfaceData->numVerts * 6 * sizeof(float);
 			if ( !s_g2SkinArena[buf] || s_g2SkinUsed[buf] + vneed > G2_SKIN_ARENA_SIZE ) {
 				static qboolean s_skinArenaWarn = qfalse;
@@ -3948,6 +3971,28 @@ void RB_SurfaceGhoul( CRenderableSurface *surf )
 		if ( !( s_dropWarn++ & 255 ) ) {
 			ri.Printf( PRINT_ALL, "^3[MT] RB_SurfaceGhoul: dropped surface without bone snapshot #%d\n", s_dropWarn );
 		}
+#ifdef _G2_GORE
+		// the glow pass renders this surface again, so only that pass frees it
+		extern bool g_bRenderGlowingObjects;
+		extern bool g_bDynamicGlowSupported;
+		if ( !tess.shader->hasGlow || g_bRenderGlowingObjects || !g_bDynamicGlowSupported || !r_DynamicGlow->integer )
+#endif
+		{
+			delete surf;
+		}
+		return;
+	}
+#endif
+
+#ifdef USE_GXM_NATIVE
+	// resident copy skinned in the vertex program from the snapshot; anything it cannot do stays below
+	if ( surf->gpuSurf && surf->boneMats
+#ifdef _G2_GORE
+		&& !surf->goreChain
+#endif
+		&& R_GpuSkinBatchOk( tess.shader, backEnd.currentEntity->e.renderfx, tess.fogNum )
+		&& RB_GpuSkinAdd( surf->gpuSurf, surf->boneMats ) )
+	{
 #ifdef _G2_GORE
 		// the glow pass renders this surface again, so only that pass frees it
 		extern bool g_bRenderGlowingObjects;
@@ -4219,6 +4264,63 @@ void RB_SurfaceGhoul( CRenderableSurface *surf )
 	G2Time_RB_SurfaceGhoul += G2PerformanceTimer_RB_SurfaceGhoul.End();
 #endif
 }
+
+#ifdef USE_GXM_NATIVE
+/*
+=================
+R_GpuSkinBuildModel
+
+Hands every LOD surface of a loaded mesh to the shared builder, which keeps one GPU copy per file image.
+=================
+*/
+static void R_GpuSkinBuildModel( model_t *mod )
+{
+	mdxmHeader_t *mdxm = mod->mdxm;
+
+	mod->gpuSkin = NULL;
+	if ( !mdxm || !r_gpuSkin || !r_gpuSkin->integer || !GXM_SkinReady()
+		|| mdxm->numLODs <= 0 || mdxm->numSurfaces <= 0 ) {
+		return;
+	}
+	mod->gpuSkin = GXM_SkinFindModel( mdxm );
+	if ( mod->gpuSkin ) {
+		return;
+	}
+
+	const int numLods = mdxm->numLODs;
+	const int numSurfaces = mdxm->numSurfaces;
+	gxmSkinSource_t *src = (gxmSkinSource_t *)malloc( numLods * numSurfaces * sizeof( gxmSkinSource_t ) );
+	if ( !src ) {
+		return;
+	}
+
+	byte *lodData = (byte *)mdxm + mdxm->ofsLODs;
+	for ( int l = 0; l < numLods; l++ ) {
+		const mdxmLODSurfOffset_t *indexes = (const mdxmLODSurfOffset_t *)( lodData + sizeof( mdxmLOD_t ) );
+		for ( int i = 0; i < numSurfaces; i++ ) {
+			const mdxmSurface_t *surf = (const mdxmSurface_t *)( lodData + sizeof( mdxmLOD_t ) + indexes->offsets[i] );
+			const mdxmVertex_t *v = (const mdxmVertex_t *)( (const byte *)surf + surf->ofsVerts );
+			gxmSkinSource_t *s = &src[l * numSurfaces + i];
+			s->verts = v;
+			s->texCoords = (const float *)&v[surf->numVerts];
+			s->triangles = (const int *)( (const byte *)surf + surf->ofsTriangles );
+			s->boneRefs = (const int *)( (const byte *)surf + surf->ofsBoneReferences );
+			s->numVerts = surf->numVerts;
+			s->numTriangles = surf->numTriangles;
+			s->numBoneRefs = surf->numBoneReferences;
+		}
+		lodData += ( (mdxmLOD_t *)lodData )->ofsEnd;
+	}
+
+	mod->gpuSkin = GXM_SkinBuildModel( mdxm, src, numLods, numSurfaces );
+	free( src );
+}
+
+void R_GpuSkinFreeModel( const void *diskImage )
+{
+	GXM_SkinFreeModel( diskImage );
+}
+#endif
 
 /*
 =================
@@ -4664,6 +4766,9 @@ qboolean R_LoadMDXM( model_t *mod, void *buffer, const char *mod_name, qboolean 
 
 	if (bAlreadyFound)
 	{
+#ifdef USE_GXM_NATIVE
+		R_GpuSkinBuildModel( mod );
+#endif
 		return qtrue;	// All done. Stop, go no further, do not LittleLong(), do not pass Go...
 	}
 
@@ -4821,6 +4926,9 @@ qboolean R_LoadMDXM( model_t *mod, void *buffer, const char *mod_name, qboolean 
 		// find the next LOD
 		lod = (mdxmLOD_t *)( (byte *)lod + lod->ofsEnd );
 	}
+#ifdef USE_GXM_NATIVE
+	R_GpuSkinBuildModel( mod );	// after the bone references are remapped
+#endif
 	return qtrue;
 }
 

@@ -73,7 +73,7 @@ static void GXM_Log( const char *fmt, ... )
 #define GXM_FRAGMENT_USSE_SIZE	( 64 * 1024 )
 #define GXM_PARAM_BUFFER_SIZE	( 16 * 1024 * 1024 )
 #define GXM_PATCHER_BUFFER_SIZE	( 1024 * 1024 )
-#define GXM_PATCHER_VERT_USSE	( 64 * 1024 )
+#define GXM_PATCHER_VERT_USSE	( 128 * 1024 )	// generic, clear and the 72 skinning programs
 #define GXM_PATCHER_FRAG_USSE	( 64 * 1024 )
 
 typedef struct {

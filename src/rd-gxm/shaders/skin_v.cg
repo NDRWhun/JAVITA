@@ -1,0 +1,129 @@
+/*
+===========================================================================
+Copyright (C) 1999 - 2005, Id Software, Inc.
+Copyright (C) 2000 - 2013, Raven Software, Inc.
+Copyright (C) 2001 - 2013, Activision, Inc.
+Copyright (C) 2013 - 2015, OpenJK contributors
+
+This file is part of the OpenJK source code.
+
+OpenJK is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, see <http://www.gnu.org/licenses/>.
+===========================================================================
+*/
+
+// ghoul2 skinning vertex program; outputs match generic_v NUV=1 VCOLOR=1 so it shares its fragment programs.
+//   WEIGHTS 1/2/4  bone influences read per vertex
+//   LIGHT   0/1    rgb = entity diffuse light from the bone-0 normal, times uColor.rgb
+//   SPEC    0/1    alpha = lightingSpecular instead of uColor.a
+//   ENV     0/1    texcoords from the environment vector instead of the vertex st
+//   FOG     0=off 1=GL_EXP2 2=GL_LINEAR
+
+// the vertex stores bone * 3 in a byte, so bone 85 is the highest a palette row can address
+#define NBONES 86
+
+uniform float4x4 uMVP;
+uniform float4   uColor;
+uniform float4   uTexMat0;		// s row of the stage's texcoord transform
+uniform float4   uTexMat1;		// t row
+#if LIGHT || SPEC || ENV
+uniform float4   uLightDir;		// model space, normalized
+#endif
+#if LIGHT
+uniform float4   uAmbient;		// 0..1
+uniform float4   uDirected;		// 0..1 per unit of incidence
+#endif
+#if SPEC || ENV
+uniform float4   uViewer;		// w=1: view origin in model space, w=0: fixed direction
+#endif
+#if ENV
+uniform float4   uEnvParams;	// x = viewer weight in the reflection term
+#endif
+#if FOG
+uniform float4   uFogParams;	// start, end, 1/(end-start)
+#endif
+uniform float4   uBones[NBONES * 3] : BUFFER[0];	// 3x4 row-major bone matrices in global bone order
+
+void main(
+	float3 aPosition : POSITION,
+#if LIGHT || SPEC || ENV
+	float4 aNormal : NORMAL,
+#endif
+	float2 aTexCoord0 : TEXCOORD0,
+	unsigned char4 aBones : BLENDINDICES,
+#if WEIGHTS > 1
+	float4 aWeights : BLENDWEIGHT,
+#endif
+	out float2 vTexCoord0 : TEXCOORD0,
+#if FOG
+	out half   vFog       : TEXCOORD2,
+#endif
+	out half4  vColor     : COLOR0,
+	out float4 vPosition  : POSITION )
+{
+	float4 p4 = float4( aPosition, 1.0f );
+	int b0 = (int)aBones.x;	// first palette row of the bone
+	float3 p = float3( dot( uBones[b0], p4 ), dot( uBones[b0 + 1], p4 ), dot( uBones[b0 + 2], p4 ) );
+
+#if WEIGHTS == 2
+	int b1 = (int)aBones.y;
+	float3 q1 = float3( dot( uBones[b1], p4 ), dot( uBones[b1 + 1], p4 ), dot( uBones[b1 + 2], p4 ) );
+	p = q1 + ( p - q1 ) * aWeights.x;
+#elif WEIGHTS == 4
+	int b1 = (int)aBones.y;
+	int b2 = (int)aBones.z;
+	int b3 = (int)aBones.w;
+	p *= aWeights.x;
+	p += float3( dot( uBones[b1], p4 ), dot( uBones[b1 + 1], p4 ), dot( uBones[b1 + 2], p4 ) ) * aWeights.y;
+	p += float3( dot( uBones[b2], p4 ), dot( uBones[b2 + 1], p4 ), dot( uBones[b2 + 2], p4 ) ) * aWeights.z;
+	p += float3( dot( uBones[b3], p4 ), dot( uBones[b3 + 1], p4 ), dot( uBones[b3 + 2], p4 ) ) * aWeights.w;
+#endif
+
+	vPosition = mul( float4( p, 1.0f ), uMVP );
+
+#if FOG
+	float f = saturate( ( vPosition.w - uFogParams.x ) * uFogParams.z );
+  #if FOG == 2
+	vFog = (half)f;
+  #else
+	vFog = (half)( 1.0f - exp2( -7.98f * f * f ) );
+  #endif
+#endif
+
+#if LIGHT || SPEC || ENV
+	// the CPU skinner rotates the normal by the first bone only
+	float3 n = float3( dot( uBones[b0].xyz, aNormal.xyz ), dot( uBones[b0 + 1].xyz, aNormal.xyz ), dot( uBones[b0 + 2].xyz, aNormal.xyz ) );
+#endif
+#if SPEC || ENV
+	float3 v = normalize( uViewer.xyz - p * uViewer.w );
+#endif
+
+	float4 c = uColor;
+#if LIGHT
+	c.rgb *= saturate( uAmbient.rgb + uDirected.rgb * max( dot( n, uLightDir.xyz ), 0.0f ) );
+#endif
+#if SPEC
+	float3 r = n * ( 2.0f * dot( n, uLightDir.xyz ) ) - uLightDir.xyz;
+	float s = saturate( dot( r, v ) );
+	s *= s;
+	c.a = s * s;
+#endif
+	vColor = (half4)c;
+
+#if ENV
+	float4 e = float4( n * dot( n, v ) - v * uEnvParams.x, 1.0f );
+	vTexCoord0 = float2( dot( e, uTexMat0 ), dot( e, uTexMat1 ) );
+#else
+	float3 st = float3( aTexCoord0, 1.0f );
+	vTexCoord0 = float2( dot( st, uTexMat0.xyz ), dot( st, uTexMat1.xyz ) );
+#endif
+}

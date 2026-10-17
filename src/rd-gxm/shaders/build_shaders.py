@@ -58,6 +58,17 @@ for _nuv in (0, 1, 2):
                 "generic_v.cg", "sce_vp_psp2",
                 ["NUV=%d" % _nuv, "VCOLOR=%d" % _vcol, "FOG=%d" % _fog])
 
+# ghoul2 skinning set: influences per vertex x diffuse light x specular alpha x env texcoords x fog curve
+for _w in (1, 2, 4):
+    for _lit in (0, 1):
+        for _spec in (0, 1):
+            for _env in (0, 1):
+                for _fog in (0, 1, 2):
+                    SHADERS["skin_v_w%d_l%d_s%d_e%d_f%d" % (_w, _lit, _spec, _env, _fog)] = (
+                        "skin_v.cg", "sce_vp_psp2",
+                        ["WEIGHTS=%d" % _w, "LIGHT=%d" % _lit, "SPEC=%d" % _spec,
+                         "ENV=%d" % _env, "FOG=%d" % _fog])
+
 for _ntex in (0, 1, 2):
     for _env in ((0,) if _ntex < 2 else (0, 1, 2)):
         for _atest in range(5):

@@ -27,6 +27,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "gxm_device.h"
 #include "gxm_texture.h"
 #include "gxm_state.h"
+#include "gxm_skin.h"
 #include "shaders/gxm_shaders.h"
 
 #include <string.h>
@@ -159,6 +160,23 @@ static const SceGxmProgram		*gxm_fragBlobs[3][3][5][2];
 static gxmProgCache_t	gxm_progCache[GXM_MAX_PROGRAMS];
 static int				gxm_progCount;
 
+// ghoul2 skinning set: [weights 1/2/4][diffuse light][specular alpha][env texcoords][fog mode]
+typedef struct {
+	const SceGxmProgramParameter	*mvp, *color, *texMat0, *texMat1, *lightDir;
+	const SceGxmProgramParameter	*ambient, *directed, *viewer, *envParams, *fogParams;
+} gxmSkinParams_t;
+
+static SceGxmShaderPatcherId	gxm_skinIds[3][2][2][2][3];
+static SceGxmVertexProgram		*gxm_skinProgs[3][2][2][2][3];
+static const SceGxmProgram		*gxm_skinBlobs[3][2][2][2][3];
+static gxmSkinParams_t			gxm_skinParams[3][2][2][2][3];
+static bool						gxm_skinOk;
+
+// fragment instances linked to a skin program, for the rare skinned draw whose texture is unbacked
+#define GXM_MAX_SKIN_NOTEX	32
+static gxmProgCache_t	gxm_skinNoTex[GXM_MAX_SKIN_NOTEX];
+static int				gxm_skinNoTexCount;
+
 static float		gxm_proj[16], gxm_modelView[16], gxm_mvp[16];
 static bool			gxm_mvpDirty = true;
 static unsigned int	gxm_stateBits;
@@ -284,6 +302,126 @@ static SceGxmVertexProgram *BuildVertexProgram( const SceGxmProgram *blob,
 	return out;
 }
 
+static const SceGxmProgram *SkinBlob( int w, int lit, int spec, int env, int fog )
+{
+#define SKF(w,l,s,e) { gxs_skin_v_w##w##_l##l##_s##s##_e##e##_f0, gxs_skin_v_w##w##_l##l##_s##s##_e##e##_f1, gxs_skin_v_w##w##_l##l##_s##s##_e##e##_f2 }
+#define SKE(w,l,s) { SKF(w,l,s,0), SKF(w,l,s,1) }
+#define SKS(w,l) { SKE(w,l,0), SKE(w,l,1) }
+#define SKL(w) { SKS(w,0), SKS(w,1) }
+	static const unsigned char *t[3][2][2][2][3] = { SKL(1), SKL(2), SKL(4) };
+#undef SKL
+#undef SKS
+#undef SKE
+#undef SKF
+	return (const SceGxmProgram *)t[w][lit][spec][env][fog];
+}
+
+/*
+================
+BuildSkinVertexProgram
+
+One layout per weight class, so 1-weight surfaces carry no weight attribute at all.
+================
+*/
+static SceGxmVertexProgram *BuildSkinVertexProgram( const SceGxmProgram *blob,
+													SceGxmShaderPatcherId id, int weights )
+{
+	SceGxmVertexAttribute attrs[5];
+	int n = 0;
+	memset( attrs, 0, sizeof(attrs) );
+
+	const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName( blob, "aPosition" );
+	if ( !p ) {
+		return NULL;
+	}
+	attrs[n].offset = GXM_SKIN_OFS_XYZ;
+	attrs[n].format = SCE_GXM_ATTRIBUTE_FORMAT_F32; attrs[n].componentCount = 3;
+	attrs[n].regIndex = sceGxmProgramParameterGetResourceIndex( p );
+	n++;
+
+	if ( ( p = sceGxmProgramFindParameterByName( blob, "aTexCoord0" ) ) != NULL ) {
+		attrs[n].offset = GXM_SKIN_OFS_ST;
+		attrs[n].format = SCE_GXM_ATTRIBUTE_FORMAT_F32; attrs[n].componentCount = 2;
+		attrs[n].regIndex = sceGxmProgramParameterGetResourceIndex( p );
+		n++;
+	}
+	if ( ( p = sceGxmProgramFindParameterByName( blob, "aNormal" ) ) != NULL ) {
+		attrs[n].offset = GXM_SKIN_OFS_NORMAL;
+		attrs[n].format = SCE_GXM_ATTRIBUTE_FORMAT_S8N; attrs[n].componentCount = 4;
+		attrs[n].regIndex = sceGxmProgramParameterGetResourceIndex( p );
+		n++;
+	}
+	if ( ( p = sceGxmProgramFindParameterByName( blob, "aBones" ) ) == NULL ) {
+		return NULL;
+	}
+	attrs[n].offset = GXM_SKIN_OFS_BONES;
+	attrs[n].format = SCE_GXM_ATTRIBUTE_FORMAT_U8; attrs[n].componentCount = 4;
+	attrs[n].regIndex = sceGxmProgramParameterGetResourceIndex( p );
+	n++;
+	if ( weights > 1 && ( p = sceGxmProgramFindParameterByName( blob, "aWeights" ) ) != NULL ) {
+		attrs[n].offset = GXM_SKIN_OFS_WEIGHTS;
+		attrs[n].format = SCE_GXM_ATTRIBUTE_FORMAT_U16N; attrs[n].componentCount = ( weights == 2 ) ? 2 : 4;
+		attrs[n].regIndex = sceGxmProgramParameterGetResourceIndex( p );
+		n++;
+	}
+
+	SceGxmVertexStream stream;
+	memset( &stream, 0, sizeof(stream) );
+	stream.stride      = GXM_SKIN_STRIDE( weights );
+	stream.indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
+
+	SceGxmVertexProgram *out = NULL;
+	if ( sceGxmShaderPatcherCreateVertexProgram( GXM_ShaderPatcher(), id,
+			attrs, n, &stream, 1, &out ) < 0 ) {
+		return NULL;
+	}
+	return out;
+}
+
+// registers and links the whole skinning set; a failure leaves ghoul2 on the CPU path
+static bool InitSkinPrograms( void )
+{
+	static const int weightOf[3] = { 1, 2, 4 };
+	for ( int w = 0; w < 3; w++ ) {
+		for ( int l = 0; l < 2; l++ ) {
+			for ( int s = 0; s < 2; s++ ) {
+				for ( int e = 0; e < 2; e++ ) {
+					for ( int f = 0; f < 3; f++ ) {
+						const SceGxmProgram *b = SkinBlob( w, l, s, e, f );
+						gxm_skinBlobs[w][l][s][e][f] = b;
+						if ( sceGxmShaderPatcherRegisterProgram( GXM_ShaderPatcher(),
+								b, &gxm_skinIds[w][l][s][e][f] ) < 0 ) {
+							return false;
+						}
+						gxm_skinProgs[w][l][s][e][f] = BuildSkinVertexProgram( b,
+							gxm_skinIds[w][l][s][e][f], weightOf[w] );
+						if ( !gxm_skinProgs[w][l][s][e][f] ) {
+							return false;
+						}
+						gxmSkinParams_t *p = &gxm_skinParams[w][l][s][e][f];
+						p->mvp       = sceGxmProgramFindParameterByName( b, "uMVP" );
+						p->color     = sceGxmProgramFindParameterByName( b, "uColor" );
+						p->texMat0   = sceGxmProgramFindParameterByName( b, "uTexMat0" );
+						p->texMat1   = sceGxmProgramFindParameterByName( b, "uTexMat1" );
+						p->lightDir  = sceGxmProgramFindParameterByName( b, "uLightDir" );
+						p->ambient   = sceGxmProgramFindParameterByName( b, "uAmbient" );
+						p->directed  = sceGxmProgramFindParameterByName( b, "uDirected" );
+						p->viewer    = sceGxmProgramFindParameterByName( b, "uViewer" );
+						p->envParams = sceGxmProgramFindParameterByName( b, "uEnvParams" );
+						p->fogParams = sceGxmProgramFindParameterByName( b, "uFogParams" );
+					}
+				}
+			}
+		}
+	}
+	return true;
+}
+
+int GXM_SkinReady( void )
+{
+	return ( gxm_backendOk && gxm_skinOk ) ? 1 : 0;
+}
+
 int GXM_BackendInit( void )
 {
 	memset( gxm_textures, 0, sizeof(gxm_textures) );
@@ -342,6 +480,10 @@ int GXM_BackendInit( void )
 			}
 		}
 	}
+
+	memset( gxm_skinNoTex, 0, sizeof(gxm_skinNoTex) );
+	gxm_skinNoTexCount = 0;
+	gxm_skinOk = InitSkinPrograms();
 
 	GXM_InvalidateStateShadow();
 	GXM_SetStateResetCallback( GXM_InvalidateStateShadow );
@@ -1054,6 +1196,187 @@ void GXM_DrawStaticBuffer( const void *vertexBuffer, const unsigned short *index
 	sceGxmSetVertexStream( GXM_Context(), 0, vertexBuffer );
 	sceGxmDraw( GXM_Context(), SCE_GXM_PRIMITIVE_TRIANGLES,
 		SCE_GXM_INDEX_FORMAT_U16, idx, numIndexes );
+}
+
+// a fragment instance linked to the skin outputs instead of generic_v's, for untextured skinned draws
+static SceGxmFragmentProgram *ResolveSkinFragment( int fog, const gxmProgramKey_t *key )
+{
+	const unsigned int hash = ( GXM_ProgramKeyHash( key ) << 2 ) | (unsigned)fog;
+
+	for ( int i = 0; i < gxm_skinNoTexCount; i++ ) {
+		if ( gxm_skinNoTex[i].key == hash ) {
+			return gxm_skinNoTex[i].prog;
+		}
+	}
+	if ( gxm_skinNoTexCount >= GXM_MAX_SKIN_NOTEX ) {
+		gxm_statProgFail++;
+		return NULL;
+	}
+
+	SceGxmFragmentProgram *prog = NULL;
+	if ( sceGxmShaderPatcherCreateFragmentProgram( GXM_ShaderPatcher(),
+			gxm_fragIds[0][0][key->alphaTest][fog ? 1 : 0],
+			SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4, SCE_GXM_MULTISAMPLE_NONE,
+			key->blended ? &key->blend : NULL,
+			gxm_skinBlobs[0][0][0][0][fog], &prog ) < 0 ) {	// every skin program of one fog mode has the same outputs
+		gxm_statProgFail++;
+		return NULL;
+	}
+
+	gxm_skinNoTex[gxm_skinNoTexCount].key  = hash;
+	gxm_skinNoTex[gxm_skinNoTexCount].prog = prog;
+	gxm_skinNoTexCount++;
+	return prog;
+}
+
+static void WriteSkinUniforms( const gxmSkinParams_t *p, const gxmSkinStage_t *st )
+{
+	void *u = NULL;
+	sceGxmReserveVertexDefaultUniformBuffer( GXM_Context(), &u );
+	if ( !u ) {
+		return;
+	}
+	if ( p->mvp )       sceGxmSetUniformDataF( u, p->mvp, 0, 16, gxm_mvp );
+	if ( p->color )     sceGxmSetUniformDataF( u, p->color, 0, 4, st->color );
+	if ( p->texMat0 )   sceGxmSetUniformDataF( u, p->texMat0, 0, 4, st->texMat[0] );
+	if ( p->texMat1 )   sceGxmSetUniformDataF( u, p->texMat1, 0, 4, st->texMat[1] );
+	if ( p->lightDir )  sceGxmSetUniformDataF( u, p->lightDir, 0, 4, st->lightDir );
+	if ( p->ambient )   sceGxmSetUniformDataF( u, p->ambient, 0, 4, st->ambient );
+	if ( p->directed )  sceGxmSetUniformDataF( u, p->directed, 0, 4, st->directed );
+	if ( p->viewer )    sceGxmSetUniformDataF( u, p->viewer, 0, 4, st->viewer );
+	if ( p->envParams ) sceGxmSetUniformDataF( u, p->envParams, 0, 4, st->envParams );
+	if ( p->fogParams ) sceGxmSetUniformDataF( u, p->fogParams, 0, 4, gxm_fogParams );
+}
+
+/*
+================
+GXM_DrawSkinned
+
+Resident vertices and indexes, the palette bound as vertex uniform buffer 0; nothing goes through the ring here.
+================
+*/
+void GXM_DrawSkinned( const gxmSkinStage_t *st, const gxmSkinDraw_t *draws, int numDraws )
+{
+	gxm_ovXyz = gxm_ovUv0 = gxm_ovUv1 = NULL;
+	gxm_ovRgba = NULL;
+
+	if ( !gxm_backendOk || !gxm_skinOk || !st || !draws || numDraws <= 0 ) {
+		return;
+	}
+
+	gxmProgramKey_t key;
+	gxmDepthState_t depth;
+	GXM_TranslateState( gxm_stateBits, &key, &depth );
+
+	// a shadow volume writes stencil only, which on gxm means its own masked variant
+	if ( gxm_colorMaskNone ) {
+		key.colorMaskNone      = true;
+		key.blended            = true;
+		key.blend.colorMask    = SCE_GXM_COLOR_MASK_NONE;
+		key.blend.colorFunc    = SCE_GXM_BLEND_FUNC_NONE;
+		key.blend.alphaFunc    = SCE_GXM_BLEND_FUNC_NONE;
+	}
+
+	// one texcoord set is skinned, so a second unit never applies
+	int ntex = ( gxm_texUnits >= 1 ) ? 1 : 0;
+	if ( ntex && ( gxm_boundTex[0] < 0 || !gxm_textures[ gxm_boundTex[0] ].valid ) ) {
+		ntex = 0;
+	}
+	const int fog  = gxm_fogOn;		// 0 off, 1 exp2, 2 linear
+	const int lit  = st->lit ? 1 : 0;
+	const int spec = st->spec ? 1 : 0;
+	const int env  = st->env ? 1 : 0;
+
+	SceGxmFragmentProgram *frag = ntex ? ResolveFragment( 1, 0, 1, fog, &key )
+									   : ResolveSkinFragment( fog, &key );
+	if ( !frag ) {
+		return;
+	}
+
+	if ( gxm_mvpDirty ) {
+		MulMat( gxm_mvp, gxm_proj, gxm_modelView );
+		gxm_mvpDirty = false;
+		gxm_uniformsDirty = true;
+	}
+
+	bool fragProgChanged = false;
+	if ( gxm_curFragProg != frag ) {
+		sceGxmSetFragmentProgram( GXM_Context(), frag );
+		gxm_curFragProg = frag;
+		fragProgChanged = true;
+	}
+	if ( !gxm_depthKnown || gxm_curDepth.depthFunc != depth.depthFunc
+		|| gxm_curDepth.depthWrite != depth.depthWrite
+		|| gxm_curDepth.wireframe != depth.wireframe ) {
+		GXM_ApplyDepthState( &depth );
+		gxm_curDepth  = depth;
+		gxm_depthKnown = true;
+	}
+	if ( gxm_stencilDirty ) {
+		GXM_ApplyStencilState( &gxm_stencil );
+		gxm_stencilDirty = false;
+	}
+
+	if ( ntex ) {
+		const int tn = gxm_boundTex[0];
+		if ( gxm_curTex[0] != &gxm_textures[tn].tex ) {
+			sceGxmSetFragmentTexture( GXM_Context(), 0, &gxm_textures[tn].tex );
+			gxm_curTex[0] = &gxm_textures[tn].tex;
+		}
+	}
+
+	if ( fog && ( fragProgChanged || gxm_fragUniformsDirty ) ) {
+		void *funi = NULL;
+		sceGxmReserveFragmentDefaultUniformBuffer( GXM_Context(), &funi );
+		const SceGxmProgramParameter *pfc = gxm_pFogColor[ntex][0][key.alphaTest][1];
+		if ( funi && pfc ) {
+			sceGxmSetUniformDataF( funi, pfc, 0, 4, gxm_fogColor );
+			gxm_fragUniformsDirty = false;
+		}
+	}
+
+	// opaque draws are grouped by weight class to save program switches; blended ones keep submission order
+	const int passes = key.blended ? 1 : 3;
+	SceGxmVertexProgram *written = NULL;
+	const void *palette = NULL;
+
+	for ( int pass = 0; pass < passes; pass++ ) {
+		for ( int i = 0; i < numDraws; i++ ) {
+			const gxmSkinDraw_t *d = &draws[i];
+			const int wi = ( d->weights >= 4 ) ? 2 : ( d->weights - 1 );
+			if ( wi < 0 || !d->vertices || !d->indexes || !d->palette || d->numIndexes <= 0 ) {
+				continue;
+			}
+			if ( passes > 1 && wi != pass ) {
+				continue;
+			}
+
+			SceGxmVertexProgram *vp = gxm_skinProgs[wi][lit][spec][env][fog];
+			if ( vp != written ) {
+				if ( gxm_curVertProg != vp ) {
+					sceGxmSetVertexProgram( GXM_Context(), vp );
+					gxm_curVertProg = vp;
+				}
+				WriteSkinUniforms( &gxm_skinParams[wi][lit][spec][env][fog], st );
+				written = vp;
+			}
+			if ( d->palette != palette ) {
+				sceGxmSetVertexUniformBuffer( GXM_Context(), 0, d->palette );
+				palette = d->palette;
+			}
+
+			sceGxmSetVertexStream( GXM_Context(), 0, d->vertices );
+			sceGxmDraw( GXM_Context(), SCE_GXM_PRIMITIVE_TRIANGLES,
+				SCE_GXM_INDEX_FORMAT_U16, d->indexes, (unsigned int)d->numIndexes );
+			gxm_statDraws++;
+			if ( ntex ) {
+				gxm_statTextured++;
+			}
+		}
+	}
+
+	// the generic programs' uniforms were last written for a different reservation
+	gxm_uniformsDirty = true;
 }
 
 // --- immediate mode: glBegin/glVertex geometry accumulates here and leaves as one draw ---

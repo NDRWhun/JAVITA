@@ -1067,6 +1067,107 @@ void RB_CalcRotateTexCoords( float degsPerSecond, float *st )
 	RB_CalcTransformTexCoords( &tmi, st );
 }
 
+#ifdef USE_GXM_NATIVE
+// m = tmi * m, tmi in RB_CalcTransformTexCoords' layout
+static void TexMatrixApply( float m[2][3], const texModInfo_t *tmi )
+{
+	float r[2][3];
+	for ( int i = 0; i < 2; i++ ) {
+		const float x = tmi->matrix[0][i], y = tmi->matrix[1][i];
+		r[i][0] = x * m[0][0] + y * m[1][0];
+		r[i][1] = x * m[0][1] + y * m[1][1];
+		r[i][2] = x * m[0][2] + y * m[1][2] + tmi->translate[i];
+	}
+	memcpy( m, r, sizeof( r ) );
+}
+
+static void TexMatrixScroll( texModInfo_t *tmi, const float scrollSpeed[2] )
+{
+	const float timeScale = tess.shaderTime;
+	const float s = scrollSpeed[0] * timeScale;
+	const float t = scrollSpeed[1] * timeScale;
+
+	tmi->translate[0] = s - floor( s );
+	tmi->translate[1] = t - floor( t );
+}
+
+/*
+** RB_CalcTexMatrix
+**
+** The bundle's tcMods folded into one affine map in ComputeTexCoords' order; false when one is per-vertex
+*/
+qboolean RB_CalcTexMatrix( const textureBundle_t *bundle, float m[2][3] )
+{
+	m[0][0] = 1.0f; m[0][1] = 0.0f; m[0][2] = 0.0f;
+	m[1][0] = 0.0f; m[1][1] = 1.0f; m[1][2] = 0.0f;
+
+	for ( int tm = 0; tm < bundle->numTexMods; tm++ ) {
+		const texModInfo_t *src = &bundle->texMods[tm];
+		texModInfo_t tmi;
+		tmi.matrix[0][0] = 1.0f; tmi.matrix[1][0] = 0.0f; tmi.translate[0] = 0.0f;
+		tmi.matrix[0][1] = 0.0f; tmi.matrix[1][1] = 1.0f; tmi.translate[1] = 0.0f;
+
+		switch ( src->type )
+		{
+		case TMOD_NONE:
+			return qtrue;
+
+		case TMOD_TURBULENT:
+			return qfalse;
+
+		case TMOD_ENTITY_TRANSLATE:
+			TexMatrixScroll( &tmi, backEnd.currentEntity->e.shaderTexCoord );
+			break;
+
+		case TMOD_SCROLL:
+			TexMatrixScroll( &tmi, src->translate );
+			break;
+
+		case TMOD_SCALE:
+			tmi.matrix[0][0] = src->translate[0];
+			tmi.matrix[1][1] = src->translate[1];
+			break;
+
+		case TMOD_STRETCH:
+			{
+				const float p = 1.0f / EvalWaveForm( &src->wave );
+				tmi.matrix[0][0] = p;
+				tmi.matrix[1][1] = p;
+				tmi.translate[0] = 0.5f - 0.5f * p;
+				tmi.translate[1] = 0.5f - 0.5f * p;
+			}
+			break;
+
+		case TMOD_TRANSFORM:
+			tmi = *src;
+			break;
+
+		case TMOD_ROTATE:
+			{
+				const float degs = -src->translate[0] * tess.shaderTime;
+				const int index = degs * ( FUNCTABLE_SIZE / 360.0f );
+				const float sinValue = tr.sinTable[ index & FUNCTABLE_MASK ];
+				const float cosValue = tr.sinTable[ ( index + FUNCTABLE_SIZE / 4 ) & FUNCTABLE_MASK ];
+
+				tmi.matrix[0][0] = cosValue;
+				tmi.matrix[1][0] = -sinValue;
+				tmi.translate[0] = 0.5 - 0.5 * cosValue + 0.5 * sinValue;
+				tmi.matrix[0][1] = sinValue;
+				tmi.matrix[1][1] = cosValue;
+				tmi.translate[1] = 0.5 - 0.5 * sinValue - 0.5 * cosValue;
+			}
+			break;
+
+		default:
+			return qfalse;
+		}
+
+		TexMatrixApply( m, &tmi );
+	}
+	return qtrue;
+}
+#endif
+
 
 
 
