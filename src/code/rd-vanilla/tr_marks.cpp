@@ -253,6 +253,16 @@ void R_AddMarkFragments(int numClipPoints, vec3_t clipPoints[2][MAX_VERTS_ON_POL
 	(*returnedFragments)++;
 }
 
+// true when one bounding plane has no vertex of the triangle in front of it, so R_AddMarkFragments would chop it away
+static qboolean R_MarkTriangleOutside( const float *a, const float *b, const float *c, int numPlanes, const vec3_t *normals, const float *dists ) {
+	for ( int i = 0 ; i < numPlanes ; i++ ) {
+		if ( DotProduct( a, normals[i] ) - dists[i] <= 0.5f && DotProduct( b, normals[i] ) - dists[i] <= 0.5f && DotProduct( c, normals[i] ) - dists[i] <= 0.5f ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
 /*
 =================
 R_MarkFragments
@@ -360,7 +370,7 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 					VectorSubtract(clipPoints[0][2], clipPoints[0][1], v2);
 					CrossProduct(v1, v2, normal);
 					VectorNormalizeFast(normal);
-					if (DotProduct(normal, projectionDir) < -0.1) {
+					if (DotProduct(normal, projectionDir) < -0.1 && !R_MarkTriangleOutside(clipPoints[0][0], clipPoints[0][1], clipPoints[0][2], numPlanes, normals, dists)) {
 						// add the fragments of this triangle
 						R_AddMarkFragments(numClipPoints, clipPoints,
 										   numPlanes, normals, dists,
@@ -384,7 +394,7 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 					VectorSubtract(clipPoints[0][2], clipPoints[0][1], v2);
 					CrossProduct(v1, v2, normal);
 					VectorNormalizeFast(normal);
-					if (DotProduct(normal, projectionDir) < -0.05) {
+					if (DotProduct(normal, projectionDir) < -0.05 && !R_MarkTriangleOutside(clipPoints[0][0], clipPoints[0][1], clipPoints[0][2], numPlanes, normals, dists)) {
 						// add the fragments of this triangle
 						R_AddMarkFragments(numClipPoints, clipPoints,
 										   numPlanes, normals, dists,
@@ -413,6 +423,9 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 					const float	* const v = surf->points[0] + VERTEXSIZE * indexes[k+j];
 					VectorMA( v, MARKER_OFFSET, surf->plane.normal, clipPoints[0][j] );
 				}
+				if ( R_MarkTriangleOutside( clipPoints[0][0], clipPoints[0][1], clipPoints[0][2], numPlanes, normals, dists ) ) {
+					continue;
+				}
 				// add the fragments of this face
 				R_AddMarkFragments( 3 , clipPoints,
 								   numPlanes, normals, dists,
@@ -434,6 +447,9 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 				int i1=surf->indexes[k];
 				int i2=surf->indexes[k+1];
 				int i3=surf->indexes[k+2];
+				if ( R_MarkTriangleOutside( surf->verts[i1].xyz, surf->verts[i2].xyz, surf->verts[i3].xyz, numPlanes, normals, dists ) ) {
+					continue;
+				}
 				VectorSubtract(surf->verts[i1].xyz,surf->verts[i2].xyz, v1);
 				VectorSubtract(surf->verts[i3].xyz,surf->verts[i2].xyz, v2);
 				CrossProduct(v1, v2, normal);
