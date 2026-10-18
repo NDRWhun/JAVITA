@@ -215,15 +215,18 @@ void CM_TestInLeaf( traceWork_t *tw, trace_t &trace, cLeaf_t *leaf, clipMap_t *l
 	int			brushnum;
 	cbrush_t	*b;
 	cPatch_t	*patch;
+	// the tracing thread's own stamps for this clip map
+	cmStamps_t	*stamps = &local->stamps[tw->threadSlot];
+	const int	checkcount = stamps->checkcount;
 
 	// test box position against all brushes in the leaf
 	for (k=0 ; k<leaf->numLeafBrushes ; k++) {
 		brushnum = local->leafbrushes[leaf->firstLeafBrush+k];
 		b = &local->brushes[brushnum];
-		if (b->checkcount == local->checkcount) {
+		if (stamps->brushes[brushnum] == checkcount) {
 			continue;	// already checked this brush in another leaf
 		}
-		b->checkcount = local->checkcount;
+		stamps->brushes[brushnum] = checkcount;
 
 		if ( !(b->contents & tw->contents)) {
 			continue;
@@ -246,10 +249,10 @@ void CM_TestInLeaf( traceWork_t *tw, trace_t &trace, cLeaf_t *leaf, clipMap_t *l
 			if ( !patch ) {
 				continue;
 			}
-			if ( patch->checkcount == local->checkcount ) {
+			if ( stamps->patches[patch->stampIndex] == checkcount ) {
 				continue;	// already checked this brush in another leaf
 			}
-			patch->checkcount = local->checkcount;
+			stamps->patches[patch->stampIndex] = checkcount;
 
 			if ( !(patch->contents & tw->contents)) {
 				continue;
@@ -399,12 +402,12 @@ void CM_PositionTest( traceWork_t *tw, trace_t &trace ) {
 	ll.lastLeaf = 0;
 	ll.overflowed = qfalse;
 
-	cmg.checkcount++;
+	cmg.stamps[tw->threadSlot].checkcount++;
 
 	CM_BoxLeafnums_r( &ll, 0 );
 
 
-	cmg.checkcount++;
+	cmg.stamps[tw->threadSlot].checkcount++;
 
 	// test the contents of the leafs
 	for (i=0 ; i < ll.count ; i++) {
@@ -433,7 +436,7 @@ CM_TraceThroughPatch
 void CM_TraceThroughPatch( traceWork_t *tw, trace_t &trace, cPatch_t *patch ) {
 	float		oldFrac;
 
-	c_patch_traces++;
+	cm_stats[tw->threadSlot].patchTraces++;
 
 	oldFrac = trace.fraction;
 
@@ -653,16 +656,19 @@ void CM_TraceThroughLeaf( traceWork_t *tw, trace_t &trace, clipMap_t *local, cLe
 	int			brushnum;
 	cbrush_t	*b;
 	cPatch_t	*patch;
+	// the tracing thread's own stamps for this clip map
+	cmStamps_t	*stamps = &local->stamps[tw->threadSlot];
+	const int	checkcount = stamps->checkcount;
 
 	// trace line against all brushes in the leaf
 	for ( k = 0 ; k < leaf->numLeafBrushes ; k++ ) {
 		brushnum = local->leafbrushes[leaf->firstLeafBrush+k];
 
 		b = &local->brushes[brushnum];
-		if ( b->checkcount == local->checkcount ) {
+		if ( stamps->brushes[brushnum] == checkcount ) {
 			continue;	// already checked this brush in another leaf
 		}
-		b->checkcount = local->checkcount;
+		stamps->brushes[brushnum] = checkcount;
 
 		if ( !(b->contents & tw->contents) ) {
 			continue;
@@ -686,10 +692,10 @@ void CM_TraceThroughLeaf( traceWork_t *tw, trace_t &trace, clipMap_t *local, cLe
 			if ( !patch ) {
 				continue;
 			}
-			if ( patch->checkcount == local->checkcount ) {
+			if ( stamps->patches[patch->stampIndex] == checkcount ) {
 				continue;	// already checked this patch in another leaf
 			}
-			patch->checkcount = local->checkcount;
+			stamps->patches[patch->stampIndex] = checkcount;
 
 			if ( !(patch->contents & tw->contents) ) {
 				continue;
@@ -1009,6 +1015,9 @@ void CM_TraceToLeaf( traceWork_t *tw, trace_t &trace, cLeaf_t *leaf, clipMap_t *
 	int			brushnum;
 	cbrush_t	*b;
 	cPatch_t	*patch;
+	// the tracing thread's own stamps for this clip map
+	cmStamps_t	*stamps = &local->stamps[tw->threadSlot];
+	const int	checkcount = stamps->checkcount;
 
 	// trace line against all brushes in the leaf
 	for ( k = 0 ; k < leaf->numLeafBrushes ; k++ )
@@ -1016,11 +1025,11 @@ void CM_TraceToLeaf( traceWork_t *tw, trace_t &trace, cLeaf_t *leaf, clipMap_t *
 		brushnum = local->leafbrushes[leaf->firstLeafBrush + k];
 
 		b = &local->brushes[brushnum];
-		if ( b->checkcount == local->checkcount )
+		if ( stamps->brushes[brushnum] == checkcount )
 		{
 			continue;	// already checked this brush in another leaf
 		}
-		b->checkcount = local->checkcount;
+		stamps->brushes[brushnum] = checkcount;
 
 		if ( !(b->contents & tw->contents) )
 		{
@@ -1045,10 +1054,10 @@ void CM_TraceToLeaf( traceWork_t *tw, trace_t &trace, cLeaf_t *leaf, clipMap_t *
 			if ( !patch ) {
 				continue;
 			}
-			if ( patch->checkcount == local->checkcount ) {
+			if ( stamps->patches[patch->stampIndex] == checkcount ) {
 				continue;	// already checked this patch in another leaf
 			}
-			patch->checkcount = local->checkcount;
+			stamps->patches[patch->stampIndex] = checkcount;
 
 			if ( !(patch->contents & tw->contents) ) {
 				continue;
@@ -1225,15 +1234,17 @@ void CM_Trace( trace_t *trace, const vec3_t start, const vec3_t end,
 
 	cmod = CM_ClipHandleToModel( model, &local );
 
-	local->checkcount++;		// for multi-check avoidance
+	const int threadSlot = Sys_ThreadSlot();
+	local->stamps[threadSlot].checkcount++;		// for multi-check avoidance
 
-	c_traces++;				// for statistics, may be zeroed
+	cm_stats[threadSlot].traces++;				// for statistics, may be zeroed
 
 	// fill in a default trace
 	Com_Memset( &tw, 0, sizeof(tw) );
 	memset(trace, 0, sizeof(*trace));
 	trace->fraction = 1;	// assume it goes the entire distance until shown otherwise
 	VectorCopy(origin, tw.modelOrigin);
+	tw.threadSlot = threadSlot;
 
 	if (!local->numNodes) {
 		return;	// map not loaded, shouldn't happen

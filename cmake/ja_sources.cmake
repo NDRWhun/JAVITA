@@ -138,6 +138,7 @@ set(JA_SOURCES
     src/shared/sys/con_tty.cpp
     src/shared/sys/snapvector.cpp
     src/shared/sys/sys_event.cpp
+    src/shared/sys/sys_jobs.cpp
     src/shared/sys/sys_main.cpp
     src/vita/sys_modules.cpp
     src/shared/sys/sys_unix.cpp

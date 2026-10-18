@@ -49,6 +49,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #ifdef VITA
 #include <stdlib.h>		// malloc for the skin arena
+#include "sys/sys_jobs.h"
 #endif
 
 #ifdef G2_PERFORMANCE_ANALYSIS
@@ -3010,12 +3011,8 @@ void R_FreeGhoulSkinArena( void )
 // Frontend pre-skin of one surface; same math as RB_SurfaceGhoul. xyz+normal interleaved.
 
 
-// --- anim worker (core 0): drains whole characters (bone eval + pre-skin) alongside main.
+// --- anim jobs: the job pool drains whole characters (bone eval) alongside main.
 // Safe per character: each job owns its CBoneCache; G2_TransformBone is statics-free.
-static volatile int  s_g2JobNext = 0;		// shared take-index over s_g2Groups, atomic
-static SceUID        s_g2WorkSema = -1, s_g2DoneSema = -1;
-static SceUID        s_g2WorkerThid = -1;
-
 static void G2_RunCharJob( g2SkinGroup_t *g )
 {
 	if ( !g->snap ) return;	// snapshot arena overflow: surfaces drop this frame
@@ -3053,61 +3050,9 @@ static void G2_RunCharJob( g2SkinGroup_t *g )
 
 }
 
-static void G2_DrainSkinJobs( void )
+static void G2_SkinJob( void *ctx, int index )
 {
-	for ( ;; ) {
-		const int i = __atomic_fetch_add( &s_g2JobNext, 1, __ATOMIC_SEQ_CST );
-		if ( i >= s_g2NumGroups ) break;
-		G2_RunCharJob( &s_g2Groups[i] );
-	}
-}
-
-static volatile int s_g2Quit;
-
-static int G2_SkinWorker( SceSize argc, void *argv )
-{
-	for ( ;; ) {
-		sceKernelWaitSema( s_g2WorkSema, 1, NULL );
-		if ( s_g2Quit ) {
-			break;
-		}
-		G2_DrainSkinJobs();
-		sceKernelSignalSema( s_g2DoneSema, 1 );
-	}
-	// plain exit; G2_SkinWorkerShutdown joins and deletes, and a self-delete races that
-	return sceKernelExitThread( 0 );
-}
-
-// a worker still running when the process exits wedges teardown
-void G2_SkinWorkerShutdown( void )
-{
-	if ( s_g2WorkerThid < 0 ) {
-		return;
-	}
-	s_g2Quit = 1;
-	sceKernelSignalSema( s_g2WorkSema, 1 );
-	SceUInt tmo = 3 * 1000 * 1000;
-	sceKernelWaitThreadEnd( s_g2WorkerThid, NULL, &tmo );
-	sceKernelDeleteThread( s_g2WorkerThid );
-	s_g2WorkerThid = -1;
-}
-
-static qboolean G2_EnsureSkinWorker( void )
-{
-	if ( s_g2WorkerThid >= 0 ) return qtrue;
-	s_g2Quit = 0;		// a worker restarting after a shutdown must not exit immediately
-	s_g2WorkSema = sceKernelCreateSema( "g2skin_in",  0, 0, 1, NULL );
-	s_g2DoneSema = sceKernelCreateSema( "g2skin_out", 0, 0, 1, NULL );
-	s_g2WorkerThid = sceKernelCreateThread( "g2skin", G2_SkinWorker, 0x100000FF, 0x10000, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL );	// above the mixer: anim jobs gate the frame
-	if ( s_g2WorkSema < 0 || s_g2DoneSema < 0 || s_g2WorkerThid < 0 ) {
-		if ( s_g2WorkSema >= 0 )   { sceKernelDeleteSema( s_g2WorkSema );   s_g2WorkSema = -1; }
-		if ( s_g2DoneSema >= 0 )   { sceKernelDeleteSema( s_g2DoneSema );   s_g2DoneSema = -1; }
-		if ( s_g2WorkerThid >= 0 ) { sceKernelDeleteThread( s_g2WorkerThid ); }
-		s_g2WorkerThid = -1;
-		return qfalse;
-	}
-	sceKernelStartThread( s_g2WorkerThid, 0, NULL );
-	return qtrue;
+	G2_RunCharJob( &s_g2Groups[index] );
 }
 
 void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
@@ -3171,15 +3116,8 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		}
 	}
 
-	// drain whole characters on cores 0+1; the join keeps the hand-off ordering intact
-	s_g2JobNext = 0;
-	if ( s_g2NumGroups >= 2 && G2_EnsureSkinWorker() ) {
-		sceKernelSignalSema( s_g2WorkSema, 1 );
-		G2_DrainSkinJobs();
-		sceKernelWaitSema( s_g2DoneSema, 1, NULL );
-	} else {
-		G2_DrainSkinJobs();
-	}
+	// drain whole characters on the job pool and main; the join keeps the hand-off ordering intact
+	Sys_RunJobs( G2_SkinJob, s_g2NumGroups, NULL );
 }
 #endif // VITA
 

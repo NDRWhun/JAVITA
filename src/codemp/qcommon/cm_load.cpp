@@ -43,19 +43,11 @@ void SetPlaneSignbits (cplane_t *out) {
 }
 #endif //BSPC
 
-// to allow boxes to be treated as brush models, we allocate
-// some extra indexes along with those needed by the map
-#define	BOX_BRUSHES		1
-#define	BOX_SIDES		6
-#define	BOX_LEAFS		2
-#define	BOX_PLANES		12
-
 #define	LL(x) x=LittleLong(x)
 
 
 clipMap_t	cmg; //rwwRMG - changed from cm
-int			c_pointcontents;
-int			c_traces, c_brush_traces, c_patch_traces;
+cmStats_t	cm_stats[SYS_THREAD_SLOTS];
 
 
 byte		*cmod_base;
@@ -65,11 +57,13 @@ cvar_t		*cm_noAreas;
 cvar_t		*cm_noCurves;
 cvar_t		*cm_playerCurveClip;
 cvar_t		*cm_extraVerbose;
+cvar_t		*cm_debugSurfaceUpdate;
 #endif
 
-cmodel_t	box_model;
-cplane_t	*box_planes;
-cbrush_t	*box_brush;
+// each thread slot owns one temp box model, so CM_TempBoxModel and the trace that follows stay on one thread's box
+cmodel_t	box_model[SYS_THREAD_SLOTS];
+cplane_t	*box_planes[SYS_THREAD_SLOTS];
+cbrush_t	*box_brush[SYS_THREAD_SLOTS];
 
 
 
@@ -257,7 +251,7 @@ void CMod_LoadBrushes( const lump_t *l, clipMap_t &cm ) {
 	}
 	count = l->filelen / sizeof(*in);
 
-	cm.brushes = (cbrush_t *)Hunk_Alloc( ( BOX_BRUSHES + count ) * sizeof( *cm.brushes ), h_high );
+	cm.brushes = (cbrush_t *)Hunk_Alloc( ( BOX_BRUSHES * SYS_THREAD_SLOTS + count ) * sizeof( *cm.brushes ), h_high );
 	cm.numBrushes = count;
 
 	out = cm.brushes;
@@ -340,7 +334,7 @@ static void CMod_LoadPlanes (const lump_t *l, clipMap_t &cm)
 
 	if (count < 1)
 		Com_Error (ERR_DROP, "Map with no planes");
-	cm.planes = (struct cplane_s *)Hunk_Alloc( ( BOX_PLANES + count ) * sizeof( *cm.planes ), h_high );
+	cm.planes = (struct cplane_s *)Hunk_Alloc( ( BOX_PLANES * SYS_THREAD_SLOTS + count ) * sizeof( *cm.planes ), h_high );
 	cm.numPlanes = count;
 
 	out = cm.planes;
@@ -378,7 +372,7 @@ static void CMod_LoadLeafBrushes (const lump_t *l, clipMap_t &cm)
 		Com_Error (ERR_DROP, "CMod_LoadLeafBrushes: funny lump size");
 	count = l->filelen / sizeof(*in);
 
-	cm.leafbrushes = (int *)Hunk_Alloc( (count + BOX_BRUSHES) * sizeof( *cm.leafbrushes ), h_high );
+	cm.leafbrushes = (int *)Hunk_Alloc( (count + BOX_BRUSHES * SYS_THREAD_SLOTS) * sizeof( *cm.leafbrushes ), h_high );
 	cm.numLeafBrushes = count;
 
 	out = cm.leafbrushes;
@@ -434,7 +428,7 @@ static void CMod_LoadBrushSides (const lump_t *l, clipMap_t &cm)
 	}
 	count = l->filelen / sizeof(*in);
 
-	cm.brushsides = (cbrushside_t *)Hunk_Alloc( ( BOX_SIDES + count ) * sizeof( *cm.brushsides ), h_high );
+	cm.brushsides = (cbrushside_t *)Hunk_Alloc( ( BOX_SIDES * SYS_THREAD_SLOTS + count ) * sizeof( *cm.brushsides ), h_high );
 	cm.numBrushSides = count;
 
 	out = cm.brushsides;
@@ -547,6 +541,7 @@ static void CMod_LoadPatches( const lump_t *surfs, const lump_t *verts, clipMap_
 		// FIXME: check for non-colliding patches
 
 		cm.surfaces[ i ] = patch = (cPatch_t *)Hunk_Alloc( sizeof( *patch ), h_high );
+		patch->stampIndex = cm.numPatches++;
 
 		// load the full drawverts onto the stack
 		width = LittleLong( in->patchWidth );
@@ -569,6 +564,23 @@ static void CMod_LoadPatches( const lump_t *surfs, const lump_t *verts, clipMap_
 
 		// create the internal facet structure
 		patch->pc = CM_GeneratePatchCollide( width, height, points );
+	}
+}
+
+/*
+=================
+CM_AllocStamps
+=================
+*/
+// zeroed stamp arrays for every thread slot, sized for the brushes plus every slot's temp box brush, and the patches
+static void CM_AllocStamps( clipMap_t &cm )
+{
+	const int numBrushStamps = cm.numBrushes + BOX_BRUSHES * SYS_THREAD_SLOTS;
+
+	for ( int s = 0; s < SYS_THREAD_SLOTS; s++ ) {
+		cm.stamps[s].checkcount = 0;
+		cm.stamps[s].brushes = (int *)Hunk_Alloc( numBrushStamps * sizeof( int ), h_high );
+		cm.stamps[s].patches = cm.numPatches ? (int *)Hunk_Alloc( cm.numPatches * sizeof( int ), h_high ) : NULL;
 	}
 }
 
@@ -635,6 +647,7 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	cm_noCurves = Cvar_Get ("cm_noCurves", "0", CVAR_CHEAT);
 	cm_playerCurveClip = Cvar_Get ("cm_playerCurveClip", "1", CVAR_ARCHIVE_ND|CVAR_CHEAT );
 	cm_extraVerbose = Cvar_Get ("cm_extraVerbose", "0", CVAR_TEMP );
+	cm_debugSurfaceUpdate = Cvar_Get ("r_debugSurfaceUpdate", "1", 0 );	// registered here, so patch traces on any thread only read it
 #endif
 	Com_DPrintf( "CM_LoadMap( %s, %i )\n", name, clientload );
 
@@ -742,6 +755,7 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	CMod_LoadEntityString (&header.lumps[LUMP_ENTITIES], cm, name);
 	CMod_LoadVisibility( &header.lumps[LUMP_VISIBILITY], cm );
 	CMod_LoadPatches( &header.lumps[LUMP_SURFACES], &header.lumps[LUMP_DRAWVERTS], cm );
+	CM_AllocStamps( cm );
 
 	TotalSubModels += cm.numSubModels;
 
@@ -853,7 +867,7 @@ cmodel_t	*CM_ClipHandleToModel( clipHandle_t handle, clipMap_t **clipMap ) {
 		{
 			*clipMap = &cmg;
 		}
-		return &box_model;
+		return &box_model[Sys_ThreadSlot()];
 	}
 
 	count = cmg.numSubModels;
@@ -937,42 +951,51 @@ void CM_InitBoxHull (void)
 	cplane_t	*p;
 	cbrushside_t	*s;
 
-	box_planes = &cmg.planes[cmg.numPlanes];
-
-	box_brush = &cmg.brushes[cmg.numBrushes];
-	box_brush->numsides = 6;
-	box_brush->sides = cmg.brushsides + cmg.numBrushSides;
-	box_brush->contents = CONTENTS_BODY;
-
-	box_model.firstNode = -1;
-	box_model.leaf.numLeafBrushes = 1;
-//	box_model.leaf.firstLeafBrush = cmg.numBrushes;
-	box_model.leaf.firstLeafBrush = cmg.numLeafBrushes;
-	cmg.leafbrushes[cmg.numLeafBrushes] = cmg.numBrushes;
-
-	for (i=0 ; i<6 ; i++)
+	for ( int slot = 0; slot < SYS_THREAD_SLOTS; slot++ )
 	{
-		side = i&1;
+		const int brushNum = cmg.numBrushes + slot * BOX_BRUSHES;
+		const int leafBrushNum = cmg.numLeafBrushes + slot * BOX_BRUSHES;
+		const int sideNum = cmg.numBrushSides + slot * BOX_SIDES;
+		const int planeNum = cmg.numPlanes + slot * BOX_PLANES;
+		cplane_t *planes = &cmg.planes[planeNum];
+		cbrush_t *brush = &cmg.brushes[brushNum];
+		cmodel_t *model = &box_model[slot];
 
-		// brush sides
-		s = &cmg.brushsides[cmg.numBrushSides+i];
-		s->plane = 	cmg.planes + (cmg.numPlanes+i*2+side);
-		s->shaderNum = cmg.numShaders;
+		box_planes[slot] = planes;
+		box_brush[slot] = brush;
+		brush->numsides = 6;
+		brush->sides = cmg.brushsides + sideNum;
+		brush->contents = CONTENTS_BODY;
 
-		// planes
-		p = &box_planes[i*2];
-		p->type = i>>1;
-		p->signbits = 0;
-		VectorClear (p->normal);
-		p->normal[i>>1] = 1;
+		model->firstNode = -1;
+		model->leaf.numLeafBrushes = 1;
+		model->leaf.firstLeafBrush = leafBrushNum;
+		cmg.leafbrushes[leafBrushNum] = brushNum;
 
-		p = &box_planes[i*2+1];
-		p->type = 3 + (i>>1);
-		p->signbits = 0;
-		VectorClear (p->normal);
-		p->normal[i>>1] = -1;
+		for (i=0 ; i<6 ; i++)
+		{
+			side = i&1;
 
-		SetPlaneSignbits( p );
+			// brush sides
+			s = &cmg.brushsides[sideNum+i];
+			s->plane = 	cmg.planes + (planeNum+i*2+side);
+			s->shaderNum = cmg.numShaders;
+
+			// planes
+			p = &planes[i*2];
+			p->type = i>>1;
+			p->signbits = 0;
+			VectorClear (p->normal);
+			p->normal[i>>1] = 1;
+
+			p = &planes[i*2+1];
+			p->type = 3 + (i>>1);
+			p->signbits = 0;
+			VectorClear (p->normal);
+			p->normal[i>>1] = -1;
+
+			SetPlaneSignbits( p );
+		}
 	}
 }
 
@@ -986,29 +1009,32 @@ Capsules are handled differently though.
 ===================
 */
 clipHandle_t CM_TempBoxModel( const vec3_t mins, const vec3_t maxs, int capsule ) {
+	const int slot = Sys_ThreadSlot();
+	cplane_t *planes = box_planes[slot];
+	cbrush_t *brush = box_brush[slot];
 
-	VectorCopy( mins, box_model.mins );
-	VectorCopy( maxs, box_model.maxs );
+	VectorCopy( mins, box_model[slot].mins );
+	VectorCopy( maxs, box_model[slot].maxs );
 
 	if ( capsule ) {
 		return CAPSULE_MODEL_HANDLE;
 	}
 
-	box_planes[0].dist = maxs[0];
-	box_planes[1].dist = -maxs[0];
-	box_planes[2].dist = mins[0];
-	box_planes[3].dist = -mins[0];
-	box_planes[4].dist = maxs[1];
-	box_planes[5].dist = -maxs[1];
-	box_planes[6].dist = mins[1];
-	box_planes[7].dist = -mins[1];
-	box_planes[8].dist = maxs[2];
-	box_planes[9].dist = -maxs[2];
-	box_planes[10].dist = mins[2];
-	box_planes[11].dist = -mins[2];
+	planes[0].dist = maxs[0];
+	planes[1].dist = -maxs[0];
+	planes[2].dist = mins[0];
+	planes[3].dist = -mins[0];
+	planes[4].dist = maxs[1];
+	planes[5].dist = -maxs[1];
+	planes[6].dist = mins[1];
+	planes[7].dist = -mins[1];
+	planes[8].dist = maxs[2];
+	planes[9].dist = -maxs[2];
+	planes[10].dist = mins[2];
+	planes[11].dist = -mins[2];
 
-	VectorCopy( mins, box_brush->bounds[0] );
-	VectorCopy( maxs, box_brush->bounds[1] );
+	VectorCopy( mins, brush->bounds[0] );
+	VectorCopy( maxs, brush->bounds[1] );
 
 	return BOX_MODEL_HANDLE;
 }
@@ -1024,6 +1050,21 @@ void CM_ModelBounds( clipHandle_t model, vec3_t mins, vec3_t maxs ) {
 	cmod = CM_ClipHandleToModel( model );
 	VectorCopy( cmod->mins, mins );
 	VectorCopy( cmod->maxs, maxs );
+}
+
+// sums every thread slot's trace statistics, and zeroes them when clear is set
+void CM_TraceStats( int *traces, int *brushTraces, int *patchTraces, int *pointContents, qboolean clear )
+{
+	*traces = *brushTraces = *patchTraces = *pointContents = 0;
+	for ( int s = 0; s < SYS_THREAD_SLOTS; s++ ) {
+		*traces += cm_stats[s].traces;
+		*brushTraces += cm_stats[s].brushTraces;
+		*patchTraces += cm_stats[s].patchTraces;
+		*pointContents += cm_stats[s].pointContents;
+		if ( clear ) {
+			cm_stats[s].traces = cm_stats[s].brushTraces = cm_stats[s].patchTraces = cm_stats[s].pointContents = 0;
+		}
+	}
 }
 
 int CM_LoadSubBSP(const char *name, qboolean clientload)

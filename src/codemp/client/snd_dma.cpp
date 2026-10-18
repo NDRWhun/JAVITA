@@ -443,6 +443,7 @@ void S_SoundInfo_f(void) {
 #ifdef VITA
 // async sound loading (s_asyncLoad): a worker reads file bytes, S_AsyncLoad_Poll decodes on main, failures load synchronously
 #include <psp2/kernel/threadmgr.h>
+#include "sys/sys_jobs.h"
 
 #define ASYNC_SND_QUEUE	64	// ring size
 #define ASYNC_SND_CAP	56	// max outstanding so neither ring can overflow
@@ -539,7 +540,7 @@ static void S_AsyncLoad_Init( void )
 	s_asyncQuit = 0;
 	s_asyncMutex    = sceKernelCreateMutex( "snd_async_mtx", 0, 0, NULL );
 	s_asyncWakeSema = sceKernelCreateSema( "snd_async_sema", 0, 0, ASYNC_SND_QUEUE, NULL );
-	s_asyncThread   = sceKernelCreateThread( "snd_async", S_AsyncLoad_Worker, 0x10000110, 0x10000, 0, 0, NULL );
+	s_asyncThread   = Sys_CreateAuxThread( "snd_async", S_AsyncLoad_Worker, 0x10000110, 0x10000 );
 	if ( s_asyncMutex < 0 || s_asyncWakeSema < 0 || s_asyncThread < 0 ) {
 		S_AsyncLoad_Shutdown();	// partial init -> sync fallback
 		return;

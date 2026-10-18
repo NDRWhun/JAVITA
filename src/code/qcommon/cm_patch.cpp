@@ -110,8 +110,9 @@ int	c_totalPatchBlocks;
 int	c_totalPatchSurfaces;
 int	c_totalPatchEdges;
 
-static const patchCollide_t	*debugPatchCollide;
-static const facet_t		*debugFacet;
+// last patch facet each thread slot's traces hit
+static const patchCollide_t	*debugPatchCollide[SYS_THREAD_SLOTS];
+static const facet_t		*debugFacet[SYS_THREAD_SLOTS];
 static qboolean		debugBlock;
 static vec3_t		debugBlockPoints[4];
 
@@ -121,8 +122,10 @@ CM_ClearLevelPatches
 =================
 */
 void CM_ClearLevelPatches( void ) {
-	debugPatchCollide = NULL;
-	debugFacet = NULL;
+	for ( int s = 0; s < SYS_THREAD_SLOTS; s++ ) {
+		debugPatchCollide[s] = NULL;
+		debugFacet[s] = NULL;
+	}
 }
 
 /*
@@ -1376,8 +1379,8 @@ void CM_TraceThroughPatchCollide( traceWork_t *tw, const struct patchCollide_s *
 		//
 		if (fraction < tw->trace.fraction)
 		{
-			debugPatchCollide = pc;
-			debugFacet = facet;
+			debugPatchCollide[tw->threadSlot] = pc;
+			debugFacet[tw->threadSlot] = facet;
 
 			tw->trace.fraction = fraction;
 			planes = &pc->planes[ facet->surfacePlane ];
@@ -1403,9 +1406,6 @@ void CM_TracePointThroughPatchCollide( traceWork_t *tw, const struct patchCollid
 	int			i, j, k;
 	float		offset;
 	float		d1, d2;
-#ifndef BSPC
-	static cvar_t *cv;
-#endif //BSPC
 
 #ifndef BSPC
 	if ( !cm_playerCurveClip->integer && !tw->isPoint ) {
@@ -1467,12 +1467,9 @@ void CM_TracePointThroughPatchCollide( traceWork_t *tw, const struct patchCollid
 		if ( j == facet->numBorders ) {
 			// we hit this facet
 #ifndef BSPC
-			if (!cv) {
-				cv = Cvar_Get( "r_debugSurfaceUpdate", "1", 0 );
-			}
-			if (cv->integer) {
-				debugPatchCollide = pc;
-				debugFacet = facet;
+			if (cm_debugSurfaceUpdate->integer) {
+				debugPatchCollide[tw->threadSlot] = pc;
+				debugFacet[tw->threadSlot] = facet;
 			}
 #endif //BSPC
 			planes = &pc->planes[facet->surfacePlane];
@@ -1552,9 +1549,6 @@ void CM_TraceThroughPatchCollide( traceWork_t *tw, const struct patchCollide_s *
 	facet_t	*facet;
 	float plane[4] = { 0.0f }, bestplane[4] = { 0.0f };
 	vec3_t startp, endp;
-#ifndef BSPC
-	static cvar_t *cv;
-#endif //BSPC
 
 	if (tw->isPoint) {
 		CM_TracePointThroughPatchCollide( tw, pc );
@@ -1654,12 +1648,9 @@ void CM_TraceThroughPatchCollide( traceWork_t *tw, const struct patchCollide_s *
 					enterFrac = 0;
 				}
 #ifndef BSPC
-				if (!cv) {
-					cv = Cvar_Get( "r_debugSurfaceUpdate", "1", 0 );
-				}
-				if (cv && cv->integer) {
-					debugPatchCollide = pc;
-					debugFacet = facet;
+				if (cm_debugSurfaceUpdate->integer) {
+					debugPatchCollide[tw->threadSlot] = pc;
+					debugFacet[tw->threadSlot] = facet;
 				}
 #endif // BSPC
 

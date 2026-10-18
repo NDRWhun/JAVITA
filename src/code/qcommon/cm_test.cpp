@@ -61,15 +61,23 @@ struct PointAndLeaf
 
 #define MAX_POINTS_TO_LEAVES	16
 
-static PointAndLeaf	pointToLeaf[MAX_POINTS_TO_LEAVES];
-static int	oldestPointToLeaf = 0, sizePointToLeaf = 0;
+// one point-to-leaf cache per thread slot, so a lookup on one thread never sees another's half-written entry
+struct alignas(64) PointToLeafCache
+{
+	PointAndLeaf	pointToLeaf[MAX_POINTS_TO_LEAVES];
+	int				oldestPointToLeaf = 0, sizePointToLeaf = 0;
+};
+
+static PointToLeafCache	pointToLeafCache[SYS_THREAD_SLOTS];
 
 //static hlist<pair<CPoint,int> >				pointToLeaf;
 //static hlist<pair<CPoint,int> >				pointToContents;
 
 void CM_CleanLeafCache(void)
 {
-	oldestPointToLeaf = sizePointToLeaf = 0;
+	for ( int s = 0; s < SYS_THREAD_SLOTS; s++ ) {
+		pointToLeafCache[s].oldestPointToLeaf = pointToLeafCache[s].sizePointToLeaf = 0;
+	}
 //	pointToLeaf.clear();
 #if 0 // VVFIXME
 	hlist<pair<CPoint,int> >::iterator l;
@@ -112,7 +120,7 @@ int CM_PointLeafnum_r( const vec3_t p, int num, clipMap_t *local ) {
 			num = node->children[0];
 	}
 
-	c_pointcontents++;		// optimize counter
+	cm_stats[Sys_ThreadSlot()].pointContents++;		// optimize counter, per thread slot
 
 	return -1 - num;
 }
@@ -162,13 +170,15 @@ void CM_StoreBrushes( leafList_t *ll, int nodenum ) {
 
 	leaf = &cmg.leafs[leafnum];
 
+	// this thread's stamps: CM_BoxLeafnums advanced its checkcount
+	cmStamps_t *stamps = &cmg.stamps[Sys_ThreadSlot()];
 	for ( k = 0 ; k < leaf->numLeafBrushes ; k++ ) {
 		brushnum = cmg.leafbrushes[leaf->firstLeafBrush+k];
 		b = &cmg.brushes[brushnum];
-		if ( b->checkcount == cmg.checkcount ) {
+		if ( stamps->brushes[brushnum] == stamps->checkcount ) {
 			continue;	// already checked this brush in another leaf
 		}
-		b->checkcount = cmg.checkcount;
+		stamps->brushes[brushnum] = stamps->checkcount;
 		for ( i = 0 ; i < 3 ; i++ ) {
 			if ( b->bounds[0][i] >= ll->bounds[1][i] || b->bounds[1][i] <= ll->bounds[0][i] ) {
 				break;
@@ -237,7 +247,7 @@ CM_BoxLeafnums
 int	CM_BoxLeafnums( const vec3_t mins, const vec3_t maxs, int *boxList, int listsize, int *lastLeaf) {
 	leafList_t	ll;
 
-	cmg.checkcount++;
+	cmg.stamps[Sys_ThreadSlot()].checkcount++;	// new query in this thread's stamp space
 
 	VectorCopy( mins, ll.bounds[0] );
 	VectorCopy( maxs, ll.bounds[1] );
@@ -306,8 +316,10 @@ int CM_PointContents( const vec3_t p, clipHandle_t model ) {
 			pointToLeaf[pt]=leafnum;
 		}*/
 
+		PointToLeafCache &cache = pointToLeafCache[Sys_ThreadSlot()];
+		PointAndLeaf *pointToLeaf = cache.pointToLeaf;
 		int l = 0;
-		for ( ; l < sizePointToLeaf; ++l)
+		for ( ; l < cache.sizePointToLeaf; ++l)
 		{
 			if (pointToLeaf[l].point == pt)
 			{
@@ -316,16 +328,16 @@ int CM_PointContents( const vec3_t p, clipHandle_t model ) {
 			}
 		}
 
-		if (l == sizePointToLeaf)
+		if (l == cache.sizePointToLeaf)
 		{ // Didn't find it
-			if (sizePointToLeaf < MAX_POINTS_TO_LEAVES)
+			if (cache.sizePointToLeaf < MAX_POINTS_TO_LEAVES)
 			{ // We're adding a new one, rather than replacing
-				sizePointToLeaf++;
+				cache.sizePointToLeaf++;
 			}
 			else
 			{ // Put it in the "oldest" slot
-				l = oldestPointToLeaf++;
-				oldestPointToLeaf &= (MAX_POINTS_TO_LEAVES-1);
+				l = cache.oldestPointToLeaf++;
+				cache.oldestPointToLeaf &= (MAX_POINTS_TO_LEAVES-1);
 			}
 
 			leafnum = CM_PointLeafnum_r(p, 0, local);

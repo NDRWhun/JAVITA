@@ -26,10 +26,18 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "cm_polylib.h"
 #include "cm_public.h"
 #include "qcommon/qcommon.h"
+#include "sys/sys_jobs.h"
 
 #define	MAX_SUBMODELS			512
 #define	BOX_MODEL_HANDLE		(MAX_SUBMODELS-1)
 #define CAPSULE_MODEL_HANDLE	(MAX_SUBMODELS-2)
+
+// to allow boxes to be treated as brush models, we allocate
+// some extra indexes along with those needed by the map, one box per thread slot
+#define	BOX_BRUSHES		1
+#define	BOX_SIDES		6
+#define	BOX_LEAFS		2
+#define	BOX_PLANES		12
 
 struct Point
 {
@@ -69,7 +77,6 @@ typedef struct cbrush_s {
 	vec3_t				bounds[2];
 	cbrushside_t		*sides;
 	unsigned short		numsides;
-	int					checkcount;		// matches clipMap_t's, which counts past 65535
 } cbrush_t;
 
 class CCMShader
@@ -87,11 +94,26 @@ public:
 };
 
 typedef struct cPatch_s {
-	int			checkcount;				// to avoid repeated testings
+	int			stampIndex;				// slot in each thread's patch stamp array
 	int			surfaceFlags;
 	int			contents;
 	struct patchCollide_s	*pc;
 } cPatch_t;
+
+// one thread slot's visit stamps for a clip map: a brush or patch whose stamp equals checkcount was already tested by this query
+typedef struct alignas(64) cmStamps_s {
+	int			checkcount;				// counts past 65535; advanced per query by the owning thread only
+	int			*brushes;				// [numBrushes + BOX_BRUSHES * SYS_THREAD_SLOTS]
+	int			*patches;				// [numPatches]
+} cmStamps_t;
+
+// per-thread trace statistics, one cache line per thread slot; com_showtrace sums them
+typedef struct alignas(64) cmStats_s {
+	int			traces;
+	int			brushTraces;
+	int			patchTraces;
+	int			pointContents;
+} cmStats_t;
 
 
 typedef struct cArea_s {
@@ -143,9 +165,10 @@ typedef struct clipMap_s {
 
 	int			numSurfaces;
 	cPatch_t	**surfaces;			// non-patches will be NULL
+	int			numPatches;
 
 	int			floodvalid;
-	int			checkcount;					// incremented on each trace
+	cmStamps_t	stamps[SYS_THREAD_SLOTS];	// each thread slot dedups its own queries
 } clipMap_t;
 
 
@@ -154,12 +177,12 @@ typedef struct clipMap_s {
 #define	SURFACE_CLIP_EPSILON	(0.125)
 
 extern	clipMap_t	cmg; //rwwRMG - changed from cm
-extern	int			c_pointcontents;
-extern	int			c_traces, c_brush_traces, c_patch_traces;
+extern	cmStats_t	cm_stats[SYS_THREAD_SLOTS];
 extern	cvar_t		*cm_noAreas;
 extern	cvar_t		*cm_noCurves;
 extern	cvar_t		*cm_playerCurveClip;
 extern	cvar_t		*cm_extraVerbose;
+extern	cvar_t		*cm_debugSurfaceUpdate;
 
 // cm_test.c
 
@@ -196,6 +219,7 @@ typedef struct traceWork_s { //rwwRMG - modified
 	cplane_t		*clipplane;
 	bool			startout;
 	bool			getout;
+	int				threadSlot;		// the tracing thread's slot, picks its stamp set in every clip map
 
 } traceWork_t;
 

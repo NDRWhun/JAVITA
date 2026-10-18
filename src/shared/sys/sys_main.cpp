@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "sys_loadlib.h"
 #include "sys_public.h"
 #include "con_local.h"
+#include "sys_jobs.h"
 
 #ifdef VITA
 #include <psp2/apputil.h>
@@ -219,6 +220,7 @@ static void NORETURN Sys_Exit( int ex ) {
 	// the watchdog writes to the card on a timer; a thread mid-syscall wedges process exit
 	extern void Sys_StopStallWatchdog( void );
 	Sys_StopStallWatchdog();
+	Sys_JobsShutdown();
 #endif
 	IN_Shutdown();
 #ifndef DEDICATED
@@ -859,13 +861,14 @@ int main ( int argc, char* argv[] )
 #ifdef VITA
 	Sys_BootMark( "main" );
 	std::set_terminate( Sys_TerminateHandler );
-	// deterministic core layout: main 1, G2 skin worker + mixer 0, render backend 2
+	// deterministic core layout: main 1, job worker + mixer 0, render backend 2, second job worker on CPU3 when unlocked
 	sceKernelChangeThreadCpuAffinityMask( sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_1 );
 	Sys_Vita_CheckConfigGate();
 #endif
 
 	Sys_PlatformInit( argc, argv );
 	CON_Init();
+	Sys_JobsInit();
 
 	// get the initial time base
 	Sys_Milliseconds();

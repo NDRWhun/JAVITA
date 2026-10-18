@@ -32,6 +32,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "qcommon/disablewarnings.h"
 
+#ifdef VITA
+#include "sys/sys_jobs.h"
+#endif
+
 #define	LL(x) x=LittleLong(x)
 #define	LS(x) x=LittleShort(x)
 #define	LF(x) x=LittleFloat(x)
@@ -3626,14 +3630,12 @@ static void G2_PreSkinSurface( const mdxmSurface_t *surface, const mdxaBone_t *s
 #undef PS_BONE
 }
 
-// anim worker (core 1) drains whole characters (bone eval + pre-skin) alongside core 0; each job owns its CBoneCache
-static volatile int  s_g2JobNext = 0;		// shared take-index over s_g2Groups, atomic
+// the job pool drains whole characters (bone eval + pre-skin) alongside main; each job owns its CBoneCache
 
-// entity light setup shares the drain: per-entity lightgrid sample + dlight adds
+// entity light setup shares the fork-join: per-entity lightgrid sample + dlight adds
 #define G2MT_MAX_LIGHT_ENTS 512
 static trRefEntity_t *s_lightEnts[G2MT_MAX_LIGHT_ENTS];
 static int            s_lightEntCount = 0;
-static volatile int   s_lightEntNext = 0;
 
 void R_QueueEntityLightJob( trRefEntity_t *ent )
 {
@@ -3649,8 +3651,6 @@ void R_QueueEntityLightJob( trRefEntity_t *ent )
 	}
 	R_SetupEntityLighting( &tr.refdef, ent );
 }
-static SceUID        s_g2WorkSema = -1, s_g2DoneSema = -1;
-static SceUID        s_g2WorkerThid = -1;
 
 static void G2_RunCharJob( g2SkinGroup_t *g )
 {
@@ -3683,45 +3683,14 @@ static void G2_RunCharJob( g2SkinGroup_t *g )
 	}
 }
 
-static void G2_DrainSkinJobs( void )
+// job index space: characters first, then queued entity light setups
+static void G2_SkinJob( void *ctx, int index )
 {
-	for ( ;; ) {
-		const int i = __atomic_fetch_add( &s_g2JobNext, 1, __ATOMIC_SEQ_CST );
-		if ( i >= s_g2NumGroups ) break;
-		G2_RunCharJob( &s_g2Groups[i] );
+	if ( index < s_g2NumGroups ) {
+		G2_RunCharJob( &s_g2Groups[index] );
+	} else {
+		R_SetupEntityLighting( &tr.refdef, s_lightEnts[index - s_g2NumGroups] );
 	}
-	for ( ;; ) {
-		const int i = __atomic_fetch_add( &s_lightEntNext, 1, __ATOMIC_SEQ_CST );
-		if ( i >= s_lightEntCount ) break;
-		R_SetupEntityLighting( &tr.refdef, s_lightEnts[i] );
-	}
-}
-
-static int G2_SkinWorker( SceSize argc, void *argv )
-{
-	for ( ;; ) {
-		sceKernelWaitSema( s_g2WorkSema, 1, NULL );
-		G2_DrainSkinJobs();
-		sceKernelSignalSema( s_g2DoneSema, 1 );
-	}
-	return sceKernelExitDeleteThread( 0 );
-}
-
-static qboolean G2_EnsureSkinWorker( void )
-{
-	if ( s_g2WorkerThid >= 0 ) return qtrue;
-	s_g2WorkSema = sceKernelCreateSema( "g2skin_in",  0, 0, 1, NULL );
-	s_g2DoneSema = sceKernelCreateSema( "g2skin_out", 0, 0, 1, NULL );
-	s_g2WorkerThid = sceKernelCreateThread( "g2skin", G2_SkinWorker, 0x100000FF, 0x10000, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL );	// above the mixer: anim jobs gate the frame
-	if ( s_g2WorkSema < 0 || s_g2DoneSema < 0 || s_g2WorkerThid < 0 ) {
-		if ( s_g2WorkSema >= 0 )   { sceKernelDeleteSema( s_g2WorkSema );   s_g2WorkSema = -1; }
-		if ( s_g2DoneSema >= 0 )   { sceKernelDeleteSema( s_g2DoneSema );   s_g2DoneSema = -1; }
-		if ( s_g2WorkerThid >= 0 ) { sceKernelDeleteThread( s_g2WorkerThid ); }
-		s_g2WorkerThid = -1;
-		return qfalse;
-	}
-	sceKernelStartThread( s_g2WorkerThid, 0, NULL );
-	return qtrue;
 }
 
 // render-thread mode: runs every bone Eval on the frontend, once per view from R_AddDrawSurfCmd, before hand-off
@@ -3814,16 +3783,8 @@ void RB_PrepGhoulSkinMT( drawSurf_t *drawSurfs, int numDrawSurfs )
 		}
 	}
 
-	// drain characters + light setups on cores 0+1; joined before hand-off
-	s_g2JobNext = 0;
-	s_lightEntNext = 0;
-	if ( ( s_g2NumGroups + s_lightEntCount ) >= 2 && G2_EnsureSkinWorker() ) {
-		sceKernelSignalSema( s_g2WorkSema, 1 );
-		G2_DrainSkinJobs();
-		sceKernelWaitSema( s_g2DoneSema, 1, NULL );
-	} else {
-		G2_DrainSkinJobs();
-	}
+	// drain characters + light setups on the job pool and main; joined before hand-off
+	Sys_RunJobs( G2_SkinJob, s_g2NumGroups + s_lightEntCount, NULL );
 	s_lightEntCount = 0;
 }
 #endif // VITA

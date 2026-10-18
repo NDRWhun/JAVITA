@@ -43,6 +43,12 @@ cvar_t *s_sdlMixSamps;
 static int dmapos = 0;
 static int dmasize = 0;
 
+#ifdef VITA
+#include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/cpu.h>
+static qboolean s_audioThreadPinned;	// the current device's audio thread already runs on core 0
+#endif
+
 /*
 ===============
 SNDDMA_AudioCallback
@@ -50,6 +56,13 @@ SNDDMA_AudioCallback
 */
 static void SNDDMA_AudioCallback(void *userdata, Uint8 *stream, int len)
 {
+#ifdef VITA
+	// SDL creates its audio thread on any core; the first callback moves it to core 0 with the mixer
+	if ( !s_audioThreadPinned ) {
+		sceKernelChangeThreadCpuAffinityMask( sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_0 );
+		s_audioThreadPinned = qtrue;
+	}
+#endif
 	int pos = (dmapos * (dma.samplebits/8));
 	if (pos >= dmasize)
 		dmapos = pos = 0;
@@ -219,6 +232,9 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 	desired.channels = (int) s_sdlChannels->value;
 	desired.callback = SNDDMA_AudioCallback;
 
+#ifdef VITA
+	s_audioThreadPinned = qfalse;
+#endif
 	dev = SDL_OpenAudioDevice( NULL, 0, &desired, &obtained, 0 );
 	if ( !dev )
 	{

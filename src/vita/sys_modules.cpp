@@ -24,6 +24,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <string.h>
 #include <stdio.h>
 #include "sys/sys_public.h"
+#include "sys/sys_jobs.h"
 
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
@@ -111,7 +112,7 @@ static int Sys_StallWatchdog( SceSize argc, void *argv )
 void Sys_StartStallWatchdog( void )
 {
 	s_wdQuit = 0;
-	s_wdThid = sceKernelCreateThread( "stall_wd", Sys_StallWatchdog, 0x10000100, 0x4000, 0, 0, NULL );
+	s_wdThid = Sys_CreateAuxThread( "stall_wd", Sys_StallWatchdog, 0x10000100, 0x4000 );
 	if ( s_wdThid >= 0 ) sceKernelStartThread( s_wdThid, 0, NULL );
 }
 

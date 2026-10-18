@@ -49,7 +49,7 @@ int CM_PointLeafnum_r( const vec3_t p, int num, clipMap_t *local ) {
 			num = node->children[0];
 	}
 
-	c_pointcontents++;		// optimize counter
+	cm_stats[Sys_ThreadSlot()].pointContents++;		// optimize counter, per thread slot
 
 	return -1 - num;
 }
@@ -99,13 +99,15 @@ void CM_StoreBrushes( leafList_t *ll, int nodenum ) {
 
 	leaf = &cmg.leafs[leafnum];
 
+	// this thread's stamps: CM_BoxLeafnums advanced its checkcount
+	cmStamps_t *stamps = &cmg.stamps[Sys_ThreadSlot()];
 	for ( k = 0 ; k < leaf->numLeafBrushes ; k++ ) {
 		brushnum = cmg.leafbrushes[leaf->firstLeafBrush+k];
 		b = &cmg.brushes[brushnum];
-		if ( b->checkcount == cmg.checkcount ) {
+		if ( stamps->brushes[brushnum] == stamps->checkcount ) {
 			continue;	// already checked this brush in another leaf
 		}
-		b->checkcount = cmg.checkcount;
+		stamps->brushes[brushnum] = stamps->checkcount;
 		for ( i = 0 ; i < 3 ; i++ ) {
 			if ( b->bounds[0][i] >= ll->bounds[1][i] || b->bounds[1][i] <= ll->bounds[0][i] ) {
 				break;
@@ -175,7 +177,7 @@ int	CM_BoxLeafnums( const vec3_t mins, const vec3_t maxs, int *boxList, int list
 	//rwwRMG - changed to boxList to not conflict with list type
 	leafList_t	ll;
 
-	cmg.checkcount++;
+	cmg.stamps[Sys_ThreadSlot()].checkcount++;	// new query in this thread's stamp space
 
 	VectorCopy( mins, ll.bounds[0] );
 	VectorCopy( maxs, ll.bounds[1] );
