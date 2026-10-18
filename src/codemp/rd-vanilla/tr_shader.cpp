@@ -2854,6 +2854,44 @@ static int VertexLightingCollapse( void ) {
 }
 #endif
 
+// true when nothing the stage iterator evaluates reads backEnd.currentEntity, given render flags that do not either
+static bool ShaderEntityInvariant( int numStages ) {
+	if ( shader.numDeforms ) {
+		return false;
+	}
+	for ( int i = 0 ; i < numStages ; i++ ) {
+		const shaderStage_t *pStage = &stages[i];
+		if ( pStage->ss ) {
+			return false;
+		}
+		switch ( pStage->rgbGen ) {
+		case CGEN_ENTITY:
+		case CGEN_ONE_MINUS_ENTITY:
+		case CGEN_LIGHTING_DIFFUSE:
+		case CGEN_LIGHTING_DIFFUSE_ENTITY:
+			return false;
+		default:
+			break;
+		}
+		switch ( pStage->alphaGen ) {
+		case AGEN_ENTITY:
+		case AGEN_ONE_MINUS_ENTITY:
+		case AGEN_LIGHTING_SPECULAR:
+			return false;
+		default:
+			break;
+		}
+		for ( int b = 0 ; b < NUM_TEXTURE_BUNDLES ; b++ ) {
+			for ( int tm = 0 ; tm < pStage->bundle[b].numTexMods ; tm++ ) {
+				if ( pStage->bundle[b].texMods[tm].type == TMOD_ENTITY_TRANSLATE ) {
+					return false;
+				}
+			}
+		}
+	}
+	return true;
+}
+
 /*
 =========================
 FinishShader
@@ -3212,6 +3250,8 @@ static shader_t *FinishShader( void ) {
 			continue;
 		}
 	}
+
+	shader.entityInvariant = ShaderEntityInvariant( shader.numUnfoggedPasses );
 
 	return GeneratePermanentShader();
 }

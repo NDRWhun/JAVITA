@@ -490,6 +490,7 @@ typedef struct shader_s {
 										// the same name, we don't try looking for it again
 	bool		explicitlyDefined;		// found in a .shader file
 	bool		entityMergable;			// merge across entites optimizable (smoke, blood)
+	bool		entityInvariant;		// no deform, colour, alpha or tcMod reads the current entity
 
 	skyParms_t	*sky;
 	fogParms_t	*fogParms;

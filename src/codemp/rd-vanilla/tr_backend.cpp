@@ -784,6 +784,22 @@ static inline bool R_AverageTessXYZ(vec3_t dest)
 }
 #endif
 
+// render flags whose stage handling reads entity values rather than the vertices
+#define RF_READS_ENTITY ( RF_FIRST_PERSON | RF_VOLUMETRIC | RF_RGB_TINT | RF_SETANIMINDEX | RF_DISINTEGRATE1 | RF_DISINTEGRATE2 | RF_DISTORTION | RF_FORCE_ENT_ALPHA )
+
+// sprites and oriented quads bake origin, size, rotation and colour into their vertices, so such entities can share one draw
+static qboolean RB_QuadEntitiesMergable( int oldEntityNum, int entityNum, const shader_t *shader ) {
+	if ( !shader->entityInvariant || oldEntityNum < 0 || oldEntityNum == REFENTITYNUM_WORLD || entityNum == REFENTITYNUM_WORLD ) {
+		return qfalse;
+	}
+	const refEntity_t *a = &backEnd.refdef.entities[oldEntityNum].e;
+	const refEntity_t *b = &backEnd.refdef.entities[entityNum].e;
+	if ( ( a->reType != RT_SPRITE && a->reType != RT_ORIENTED_QUAD ) || ( b->reType != RT_SPRITE && b->reType != RT_ORIENTED_QUAD ) ) {
+		return qfalse;
+	}
+	return (qboolean)( a->renderfx == b->renderfx && !( a->renderfx & RF_READS_ENTITY ) && a->shaderTime == b->shaderTime );
+}
+
 void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	shader_t		*shader, *oldShader;
 	int				fogNum, oldFogNum;
@@ -950,7 +966,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		*/
 
 		if (shader != oldShader || fogNum != oldFogNum || dlighted != oldDlighted
-			|| ( entityNum != oldEntityNum && !shader->entityMergable ) )
+			|| ( entityNum != oldEntityNum && !shader->entityMergable && !RB_QuadEntitiesMergable( oldEntityNum, entityNum, shader ) ) )
 		{
 			if (oldShader != NULL) {
 #ifdef VITA
