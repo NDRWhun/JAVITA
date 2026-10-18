@@ -1272,6 +1272,21 @@ void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	R_AddDrawSurfCmd( drawSurfs, numDrawSurfs );
 }
 
+// a sprite or oriented quad has its corners radius * sqrt(2) from the origin; true when that sphere is outside a side plane of the view
+static qboolean R_CullQuadEntity( const trRefEntity_t *ent ) {
+	if ( r_nocull->integer == 1 ) {
+		return qfalse;
+	}
+	const float radius = fabsf( ent->e.radius ) * 1.4143f;
+	for ( int i = 0 ; i < 4 ; i++ ) {
+		const cplane_t *frust = &tr.viewParms.frustum[i];
+		if ( DotProduct( ent->e.origin, frust->normal ) - frust->dist < -radius ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
 /*
 =============
 R_AddEntitySurfaces
@@ -1333,6 +1348,9 @@ void R_AddEntitySurfaces (void) {
 				continue;
 			}
 			shader = R_GetShaderByHandle( ent->e.customShader );
+			if ( ( ent->e.reType == RT_SPRITE || ent->e.reType == RT_ORIENTED_QUAD ) && !shader->numDeforms && R_CullQuadEntity( ent ) ) {
+				break;
+			}
 			R_AddDrawSurf( &entitySurface, shader, R_SpriteFogNum( ent ), 0 );
 			break;
 
