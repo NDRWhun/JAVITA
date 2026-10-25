@@ -4,7 +4,7 @@
 
 <img src="docs/logo-circle.png" alt="JAVITA" width="128" height="128">
 
-<h3 align="center">JAVITA 1.1</h3>
+<h3 align="center">JAVITA 1.1.0</h3>
 
 <p align="center">
   <b>Star Wars Jedi Knight: Jedi Academy — single-player and multiplayer, on the PS Vita</b>
@@ -65,6 +65,8 @@ You need your own legally-owned copy of Jedi Academy (eg.: from Steam)
 - Launch from the LiveArea. Single-player settings are in `ux0:data/JAVITA/base/openjk_sp.cfg`.
   Multiplayer writes `openjk.cfg` into whichever mod folder it is running — `base/` unless a server
   put you in one.
+- [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker) (v1.4) is optional: with it, the game's
+  worker pool also uses the Vita's fourth CPU core.
 
 The first time you visit a level it loads slower, because each texture is compressed once and cached
 to `ux0:data/JAVITA/texcache_dxt`. Later loads of that level read the cache instead and are quicker.
@@ -166,6 +168,9 @@ Tune by editing `ux0:data/JAVITA/base/openjk_sp.cfg` on the card, or from the in
 Presentation is vsync-locked to the Vita's 60 Hz panel. `com_maxfps` still applies, but its
 default of `125` sits above that ceiling.
 
+The game runs on core 1 and the renderer backend on core 2. Character skinning jobs go to a worker
+pool on core 0, which also takes core 3 when CapUnlocker is installed; the log says which cores it got.
+
 This is the single-player table. Multiplayer has `r_renderThread`, `r_gpuSkin`, `r_nativeWorld`, `r_nativeModels`, `r_mergeLightmaps`, `r_worldVBO` (applies at the next map load), `r_texCacheCompressed`, `r_dropTexturesOnLoad`, `r_distanceCull`, `r_forceFog`, the `s_*` rows and `vita_rearTouch`.
 
 | Cvar | Default | What it does |
@@ -204,6 +209,8 @@ The stencil and projected modes are not finished, and the renderer resets `cg_sh
 
 - Dynamic glow (`r_DynamicGlow`) is not implemented.
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 ## Build (for developers)
 
 Needs [VitaSDK](https://vitasdk.org) and [vdpm](https://github.com/vitasdk/vdpm) on `PATH`, plus git,
@@ -233,6 +240,8 @@ backend in [`src/rd-gxm/`](src/rd-gxm). Its shaders are Cg sources under
 - Raven Software / LucasArts — the original *Jedi Knight: Jedi Academy*.
 - [Rinnegatamante](https://github.com/Rinnegatamante) — vitaQuakeIII (the reference id Tech 3 Vita port) and [vitaRTCW](https://github.com/Rinnegatamante/vitaRTCW), the reference for the multi-threaded rendering.
 - [Northfear](https://github.com/Northfear/SDL) — the Vita SDL2 port this fork is based on.
+- [Grarak](https://github.com/Grarak) — [psp2-tooling](https://github.com/Grarak/psp2-tooling), for CPU and GPU profiling on hardware.
+- [GrapheneCt](https://github.com/GrapheneCt) — [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker), which opens the fourth CPU core.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -250,21 +259,21 @@ their owners; you must own a legal copy to play.
 
 <!-- BADGES -->
 
-[build-shield]: https://img.shields.io/github/actions/workflow/status/NDRWhun/JAVITA/build.yml?branch=main&label=build&style=flat-square
+[build-shield]: https://img.shields.io/github/actions/workflow/status/NDRWhun/JAVITA/build.yml?branch=main&label=build&style=for-the-badge&labelColor=1a1f3d&color=2f7bff&logo=githubactions&logoColor=white
 [build-url]: ../../actions/workflows/build.yml
-[release-shield]: https://img.shields.io/github/v/release/NDRWhun/JAVITA?include_prereleases&sort=semver&label=release&style=flat-square
+[release-shield]: https://img.shields.io/github/v/release/NDRWhun/JAVITA?include_prereleases&sort=semver&label=release&style=for-the-badge&labelColor=1a1f3d&color=b44dff
 [release-url]: ../../releases
-[downloads-shield]: https://img.shields.io/github/downloads/NDRWhun/JAVITA/total?label=downloads&style=flat-square
+[downloads-shield]: https://img.shields.io/github/downloads/NDRWhun/JAVITA/total?label=downloads&style=for-the-badge&labelColor=1a1f3d&color=2f7bff
 [downloads-url]: ../../releases
-[issues-shield]: https://img.shields.io/github/issues/NDRWhun/JAVITA?label=issues&style=flat-square
+[issues-shield]: https://img.shields.io/github/issues/NDRWhun/JAVITA?label=issues&style=for-the-badge&labelColor=1a1f3d&color=2f7bff&logo=github&logoColor=white
 [issues-url]: ../../issues
-[commit-shield]: https://img.shields.io/github/last-commit/NDRWhun/JAVITA?label=updated&style=flat-square
+[commit-shield]: https://img.shields.io/github/last-commit/NDRWhun/JAVITA?label=updated&style=for-the-badge&labelColor=1a1f3d&color=ff3b5c
 [commit-url]: ../../commits/main
-[platform-shield]: https://img.shields.io/badge/platform-PS%20Vita-4b6cb7?style=flat-square
+[platform-shield]: https://img.shields.io/badge/PS%20Vita-native-2f7bff?style=for-the-badge&labelColor=1a1f3d&logo=playstation&logoColor=white
 [platform-url]: https://vitasdk.org
-[renderer-shield]: https://img.shields.io/badge/renderer-native%20sceGxm-8a4fff?style=flat-square
+[renderer-shield]: https://img.shields.io/badge/renderer-sceGxm-ff3b5c?style=for-the-badge&labelColor=1a1f3d
 [renderer-url]: src/rd-gxm
-[engine-shield]: https://img.shields.io/badge/engine-OpenJK-555?style=flat-square
+[engine-shield]: https://img.shields.io/badge/engine-OpenJK-b44dff?style=for-the-badge&labelColor=1a1f3d
 [engine-url]: https://github.com/JACoders/OpenJK
-[license-shield]: https://img.shields.io/badge/license-GPLv2-blue?style=flat-square
+[license-shield]: https://img.shields.io/badge/license-GPLv2-ff3b5c?style=for-the-badge&labelColor=1a1f3d
 [license-url]: LICENSE
